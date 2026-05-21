@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment variables (NUNCA commitar)
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Runtime data (dados reais de engagements e usuários — não versionar)
+backend/data/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Build artifacts
+dist/
+
+# Reports gerados localmente
+relatorio-full.html
+
+# PM2
+.pm2/
