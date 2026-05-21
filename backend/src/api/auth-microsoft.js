@@ -2,12 +2,10 @@ const { Router } = require('express')
 const msal = require('@azure/msal-node')
 const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
+const https = require('https')
 
-const ALLOWED_DOMAINS = ['porttus.com', 'trustsis.com']
-const states = new Map() // state → expiry (CSRF protection)
+const states = new Map()
 
-// Group object IDs from Azure AD that map to Rift admin role.
-// Set AZURE_ADMIN_GROUP_IDS=<guid1>,<guid2> in .env to enable group-based admin.
 const ADMIN_GROUP_IDS = (process.env.AZURE_ADMIN_GROUP_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean)
 
@@ -17,7 +15,11 @@ function getMsalClient() {
     _msalClient = new msal.ConfidentialClientApplication({
       auth: {
         clientId: process.env.AZURE_CLIENT_ID,
-        authority: 'https://login.microsoftonline.com/common',
+        // Tenant-specific: garante que "Assignment Required" se aplica a todos,
+        // incluindo guests de outros tenants (trustsis.com via B2B).
+        // Com 'common', usuários da trustsis autenticavam no próprio tenant deles
+        // e bypassavam a restrição do Enterprise App.
+        authority: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}`,
         clientSecret: process.env.AZURE_CLIENT_SECRET,
       },
     })
@@ -25,16 +27,40 @@ function getMsalClient() {
   return _msalClient
 }
 
+// Busca grupos via Graph API — mais confiável que claims do token
+// (token claims podem omitir grupos se o usuário tiver muitos)
+async function getUserGroups(accessToken) {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: '/v1.0/me/memberOf?$select=id&$top=100',
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+    const req = https.request(options, (res) => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          resolve((json.value || []).map(g => g.id))
+        } catch { resolve([]) }
+      })
+    })
+    req.on('error', () => resolve([]))
+    req.end()
+  })
+}
+
 const router = Router()
 
-// Step 1 — redirect to Microsoft login
 router.get('/microsoft', async (req, res) => {
   const state = crypto.randomBytes(16).toString('hex')
-  states.set(state, Date.now() + 10 * 60 * 1000) // 10 min TTL
+  states.set(state, Date.now() + 10 * 60 * 1000)
 
   try {
     const url = await getMsalClient().getAuthCodeUrl({
-      scopes: ['openid', 'profile', 'email'],
+      scopes: ['openid', 'profile', 'email', 'User.Read', 'GroupMember.Read.All'],
       redirectUri: process.env.AZURE_REDIRECT_URI,
       state,
     })
@@ -45,18 +71,16 @@ router.get('/microsoft', async (req, res) => {
   }
 })
 
-// Step 2 — Microsoft redirects back here
 router.get('/callback', async (req, res) => {
   const { code, state, error, error_description } = req.query
 
   if (error) {
     const msg = error === 'access_denied'
-      ? 'Acesso negado pelo administrador. Solicite acesso ao Rift.'
+      ? 'Acesso negado. Solicite ao administrador que atribua seu acesso ao Rift.'
       : (error_description || error)
     return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(msg)}`)
   }
 
-  // Validate CSRF state
   const expiry = states.get(state)
   if (!expiry || Date.now() > expiry) {
     return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_state`)
@@ -67,7 +91,7 @@ router.get('/callback', async (req, res) => {
   try {
     tokenResponse = await getMsalClient().acquireTokenByCode({
       code,
-      scopes: ['openid', 'profile', 'email'],
+      scopes: ['openid', 'profile', 'email', 'User.Read', 'GroupMember.Read.All'],
       redirectUri: process.env.AZURE_REDIRECT_URI,
     })
   } catch (err) {
@@ -76,34 +100,26 @@ router.get('/callback', async (req, res) => {
   }
 
   const email = (tokenResponse.account?.username || '').toLowerCase()
-  const domain = email.split('@')[1]
-
-  if (!ALLOWED_DOMAINS.includes(domain)) {
-    return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Domínio não autorizado. Use @porttus.com ou @trustsis.com.')}`)
-  }
-
-  // Profile info from ID token claims
   const claims = tokenResponse.idTokenClaims || {}
   const name = claims.name || tokenResponse.account?.name || email.split('@')[0]
-  const jobTitle = claims.jobTitle || claims.job_title || ''
-  const department = claims.department || ''
 
-  // Role: admin if user's groups contain an admin group ID (requires group claims configured)
-  const userGroups = Array.isArray(claims.groups) ? claims.groups : []
-  const role = ADMIN_GROUP_IDS.length > 0 && userGroups.some(g => ADMIN_GROUP_IDS.includes(g))
-    ? 'admin'
-    : 'user'
+  // Determina role via Graph API
+  let role = 'user'
+  if (ADMIN_GROUP_IDS.length > 0 && tokenResponse.accessToken) {
+    const userGroups = await getUserGroups(tokenResponse.accessToken)
+    if (userGroups.some(g => ADMIN_GROUP_IDS.includes(g))) {
+      role = 'admin'
+    }
+  }
 
   const user = {
     id: tokenResponse.account.homeAccountId,
     email,
     name,
     role,
-    ...(jobTitle && { jobTitle }),
-    ...(department && { department }),
   }
 
-  console.log(`[SSO] login: ${email} (${role})${jobTitle ? ` — ${jobTitle}` : ''}`)
+  console.log(`[SSO] login: ${email} (${role})`)
 
   const token = jwt.sign({ user }, process.env.JWT_SECRET, { expiresIn: '8h' })
   res.redirect(`${process.env.FRONTEND_URL}/login?token=${token}`)
