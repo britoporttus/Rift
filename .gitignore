@@ -34,3 +34,6 @@ relatorio-full.html
 
 # PM2
 .pm2/
+
+# GitHub Actions self-hosted runner
+actions-runner/
