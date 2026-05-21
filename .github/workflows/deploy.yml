@@ -10,32 +10,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            set -e
+      - name: Install cloudflared
+        run: |
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
 
-            cd /home/digitalbath/rift
+      - name: Configure SSH via Cloudflare Tunnel
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          cat >> ~/.ssh/config << 'EOF'
+          Host ${{ secrets.SSH_HOSTNAME }}
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            IdentityFile ~/.ssh/deploy_key
+            User ${{ secrets.VPS_USER }}
+          EOF
+        env:
+          CF_Access_Client_Id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_Access_Client_Secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+
+      - name: Deploy
+        run: |
+          ssh ${{ secrets.SSH_HOSTNAME }} << 'ENDSSH'
+            set -e
+            source ~/.nvm/nvm.sh
 
             echo "==> Pulling latest code..."
+            cd /home/digitalbath/rift
             git pull origin main
 
-            echo "==> Installing backend dependencies..."
+            echo "==> Installing dependencies..."
             cd backend && npm ci --omit=dev && cd ..
-
-            echo "==> Installing frontend dependencies..."
             cd frontend && npm ci && cd ..
 
             echo "==> Building frontend..."
             cd frontend && npm run build && cd ..
 
             echo "==> Restarting services..."
-            source ~/.nvm/nvm.sh
             pm2 reload ecosystem.config.js --update-env
 
             echo "==> Deploy complete!"
             pm2 status
+          ENDSSH
+        env:
+          CF_Access_Client_Id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_Access_Client_Secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
