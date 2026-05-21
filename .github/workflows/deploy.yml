@@ -15,15 +15,14 @@ jobs:
           cd /home/digitalbath/rift
           git pull origin main
 
-      - name: Install backend dependencies
+      - name: Install dependencies
         run: |
-          cd /home/digitalbath/rift/backend
-          npm ci --omit=dev
+          cd /home/digitalbath/rift
+          npm install
 
-      - name: Install & build frontend
+      - name: Build frontend
         run: |
           cd /home/digitalbath/rift/frontend
-          npm ci
           npm run build
 
       - name: Restart services
