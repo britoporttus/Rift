@@ -6,15 +6,17 @@ const { URL } = require('url')
 const cors = require('cors')
 const jwt = require('jsonwebtoken')
 
+const { connect } = require('./db')
 const { router: authRouter } = require('./auth')
 const authMicrosoftRouter = require('./api/auth-microsoft')
 const engagementsRouter = require('./api/engagements')
 const findingsRouter = require('./api/findings')
 const reportsRouter = require('./api/reports')
 const adminRouter = require('./api/admin')
+const usersRouter = require('./api/users')
 const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
-const { readEngagements, appendUsage } = require('./store')
+const { getEngagement, updateEngagement, appendUsage } = require('./store')
 
 const app = express()
 const httpServer = createServer(app)
@@ -35,9 +37,7 @@ function broadcast(engagementId, event) {
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(s => s.trim())
 app.use(cors({
   origin: (origin, cb) => {
-    // allow server-to-server (no origin) or any configured origin
     if (!origin || allowedOrigins.includes(origin)) return cb(null, true)
-    // allow any cloudflare tunnel subdomain automatically
     if (/\.trycloudflare\.com$/.test(origin) || /\.cloudflareaccess\.com$/.test(origin)) return cb(null, true)
     cb(new Error('Not allowed by CORS'))
   },
@@ -52,6 +52,7 @@ app.use('/api/engagements', engagementsRouter)
 app.use('/api/findings', findingsRouter)
 app.use('/api/reports', reportsRouter)
 app.use('/api/admin', adminRouter)
+app.use('/api/users', usersRouter)
 
 // WebSocket upgrade — authenticate via token query param
 httpServer.on('upgrade', (req, socket, head) => {
@@ -78,7 +79,7 @@ httpServer.on('upgrade', (req, socket, head) => {
   }
 })
 
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws) => {
   const engId = ws._engagementId
   const user = ws._user
 
@@ -87,19 +88,14 @@ wss.on('connection', (ws) => {
 
   console.log(`[ws] ${user.email} → engagement ${engId}`)
 
-  // Start findings watcher for this engagement
-  const engagement = readEngagements().find((e) => e.id === engId)
+  const engagement = await getEngagement(engId)
   if (engagement) {
-    findingsWatcher.watch(engId, engagement.slug, engagement.date, (event) => {
+    findingsWatcher.watch(engId, engagement.slug, engagement.date, async (event) => {
       broadcast(engId, event)
-      // Increment findingsCount in store
       try {
-        const all = readEngagements()
-        const idx = all.findIndex((e) => e.id === engId)
-        if (idx !== -1) {
-          all[idx].findingsCount = (all[idx].findingsCount || 0) + 1
-          all[idx].updatedAt = new Date().toISOString()
-          require('./store').writeEngagements(all)
+        const current = await getEngagement(engId)
+        if (current) {
+          await updateEngagement(engId, { findingsCount: (current.findingsCount || 0) + 1 })
         }
       } catch {}
     })
@@ -142,13 +138,20 @@ function handleMessage(msg, engId, user) {
     broadcast(engId, { type: 'agent_message', text: '⏹ Agente parado pelo operador.' })
   }
 
-  // Track cost when reported
   if (msg.type === 'cost_update' && msg.usd) {
     appendUsage({ usd: msg.usd, tokens: msg.tokens || 0, engagementId: engId })
   }
 }
 
 const PORT = process.env.PORT || 3001
-httpServer.listen(PORT, () => {
-  console.log(`[rift] backend em http://localhost:${PORT}`)
-})
+
+connect()
+  .then(() => {
+    httpServer.listen(PORT, () => {
+      console.log(`[rift] backend em http://localhost:${PORT}`)
+    })
+  })
+  .catch((err) => {
+    console.error('[db] falha ao conectar MongoDB:', err.message)
+    process.exit(1)
+  })

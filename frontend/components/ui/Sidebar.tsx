@@ -1,18 +1,20 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Bug, FileText, Settings, LogOut, Crosshair } from 'lucide-react'
+import { LayoutDashboard, Bug, FileText, Settings, LogOut, Crosshair, Users } from 'lucide-react'
 import { User } from '@/lib/api'
 
-const NAV = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/findings', icon: Bug, label: 'Findings' },
-  { href: '/reports', icon: FileText, label: 'Relatórios' },
-  { href: '/admin', icon: Settings, label: 'Admin' },
+const NAV_ALL = [
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', adminOnly: false },
+  { href: '/findings', icon: Bug, label: 'Findings', adminOnly: false },
+  { href: '/reports', icon: FileText, label: 'Relatórios', adminOnly: false },
+  { href: '/admin/users', icon: Users, label: 'Usuários', adminOnly: true },
+  { href: '/admin', icon: Settings, label: 'Admin', adminOnly: true },
 ]
 
 export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }) {
   const path = usePathname()
+  const NAV = NAV_ALL.filter(n => !n.adminOnly || user.role === 'admin')
 
   return (
     <aside style={{
