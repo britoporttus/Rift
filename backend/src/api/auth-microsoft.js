@@ -1,8 +1,9 @@
 const { Router } = require('express')
 const msal = require('@azure/msal-node')
-const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
 const https = require('https')
+const User = require('../models/User')
+const { signToken } = require('../auth')
 
 const states = new Map()
 
@@ -102,6 +103,7 @@ router.get('/callback', async (req, res) => {
   const email = (tokenResponse.account?.username || '').toLowerCase()
   const claims = tokenResponse.idTokenClaims || {}
   const name = claims.name || tokenResponse.account?.name || email.split('@')[0]
+  const azureId = tokenResponse.account.homeAccountId
 
   // Determina role via Graph API
   let role = 'user'
@@ -112,16 +114,16 @@ router.get('/callback', async (req, res) => {
     }
   }
 
-  const user = {
-    id: tokenResponse.account.homeAccountId,
-    email,
-    name,
-    role,
-  }
+  // Upsert usuário no MongoDB
+  const dbUser = await User.findOneAndUpdate(
+    { email },
+    { name, role, provider: 'microsoft', azureId, lastLogin: new Date() },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  )
 
   console.log(`[SSO] login: ${email} (${role})`)
 
-  const token = jwt.sign({ user }, process.env.JWT_SECRET, { expiresIn: '8h' })
+  const token = signToken(dbUser)
   res.redirect(`${process.env.FRONTEND_URL}/login?token=${token}`)
 })
 

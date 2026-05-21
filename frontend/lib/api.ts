@@ -59,6 +59,14 @@ export const api = {
     metrics: () => req<SystemMetrics>('/admin/metrics'),
     usage: () => req<UsageEntry[]>('/admin/usage'),
   },
+  users: {
+    list: () => req<UserFull[]>('/users'),
+    create: (data: { email: string; name: string; password: string; role?: 'admin' | 'user' }) =>
+      req<UserFull>('/users', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: { role?: 'admin' | 'user'; name?: string }) =>
+      req<UserFull>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) => req<void>(`/users/${id}`, { method: 'DELETE' }),
+  },
 }
 
 export interface User {
@@ -66,6 +74,12 @@ export interface User {
   email: string
   role: 'admin' | 'user'
   name: string
+}
+
+export interface UserFull extends User {
+  provider: 'local' | 'microsoft'
+  lastLogin: string | null
+  createdAt: string
 }
 
 export interface Engagement {

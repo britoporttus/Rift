@@ -1,35 +1,49 @@
-const fs = require('fs')
-const path = require('path')
+const Engagement = require('./models/Engagement')
+const Usage = require('./models/Usage')
 
-const DATA_DIR = path.join(__dirname, '..', 'data')
-const ENGAGEMENTS_FILE = path.join(DATA_DIR, 'engagements.json')
-const USAGE_FILE = path.join(DATA_DIR, 'usage.json')
-
-function ensure() {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
-  if (!fs.existsSync(ENGAGEMENTS_FILE)) fs.writeFileSync(ENGAGEMENTS_FILE, '[]')
-  if (!fs.existsSync(USAGE_FILE)) fs.writeFileSync(USAGE_FILE, '[]')
+async function readEngagements() {
+  return Engagement.find().sort({ createdAt: -1 }).lean()
 }
 
-function readEngagements() {
-  ensure()
-  return JSON.parse(fs.readFileSync(ENGAGEMENTS_FILE, 'utf-8'))
+async function writeEngagements(data) {
+  // Used only during migration — bulk replace
+  await Engagement.deleteMany({})
+  if (data.length) await Engagement.insertMany(data)
 }
 
-function writeEngagements(data) {
-  ensure()
-  fs.writeFileSync(ENGAGEMENTS_FILE, JSON.stringify(data, null, 2))
+async function getEngagement(id) {
+  return Engagement.findById(id).lean()
 }
 
-function readUsage() {
-  ensure()
-  return JSON.parse(fs.readFileSync(USAGE_FILE, 'utf-8'))
+async function createEngagement(data) {
+  const e = new Engagement(data)
+  await e.save()
+  return e.toObject()
 }
 
-function appendUsage(entry) {
-  const data = readUsage()
-  data.push({ ...entry, ts: new Date().toISOString() })
-  fs.writeFileSync(USAGE_FILE, JSON.stringify(data, null, 2))
+async function updateEngagement(id, patch) {
+  return Engagement.findByIdAndUpdate(id, { ...patch, updatedAt: new Date() }, { new: true }).lean()
 }
 
-module.exports = { readEngagements, writeEngagements, readUsage, appendUsage }
+async function deleteEngagement(id) {
+  return Engagement.findByIdAndDelete(id)
+}
+
+async function readUsage() {
+  return Usage.find().sort({ ts: -1 }).lean()
+}
+
+async function appendUsage(entry) {
+  await Usage.create(entry)
+}
+
+module.exports = {
+  readEngagements,
+  writeEngagements,
+  getEngagement,
+  createEngagement,
+  updateEngagement,
+  deleteEngagement,
+  readUsage,
+  appendUsage,
+}
