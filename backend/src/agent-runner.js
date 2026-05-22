@@ -88,7 +88,7 @@ function run(engagementId, prompt, subscribers) {
 
   const proc = spawn(
     CLAUDE_BIN,
-    ['--output-format', 'stream-json', '--print', prompt, '--no-color'],
+    ['--output-format', 'stream-json', '--verbose', '--print', prompt],
     { cwd: FRAMEWORK_PATH, env: { ...process.env, ENGAGEMENT_ID: engagementId } }
   )
 
