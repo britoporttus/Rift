@@ -36,9 +36,8 @@ router.get('/metrics', (_req, res) => {
   })
 })
 
-router.get('/usage', (_req, res) => {
-  const all = readUsage()
-  // Aggregate by day
+router.get('/usage', async (_req, res) => {
+  const all = await readUsage()
   const byDay = {}
   for (const entry of all) {
     const day = (entry.ts || entry.date || '').slice(0, 10)

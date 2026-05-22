@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { api, Engagement } from '@/lib/api'
-import { Plus, Target, AlertTriangle, Clock, Circle } from 'lucide-react'
+import { Plus, Target, AlertTriangle, Clock, Circle, Trash2 } from 'lucide-react'
 
 const STATUS_COLOR: Record<string, string> = {
   active: 'var(--low)',
@@ -22,6 +22,8 @@ export default function DashboardPage() {
   const [name, setName] = useState('')
   const [target, setTarget] = useState('')
   const [creating, setCreating] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   useEffect(() => {
     api.engagements.list()
@@ -41,6 +43,19 @@ export default function DashboardPage() {
       alert(err instanceof Error ? err.message : 'Erro')
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setDeleting(id)
+    try {
+      await api.engagements.delete(id)
+      setEngagements((prev) => prev.filter((e) => e.id !== id))
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Erro ao excluir')
+    } finally {
+      setDeleting(null)
+      setConfirmDelete(null)
     }
   }
 
@@ -109,42 +124,87 @@ export default function DashboardPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {engagements.map((e) => (
-            <Link key={e.id} href={`/engagement/${e.id}`} style={{ textDecoration: 'none' }}>
-              <div
-                style={{
-                  background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-                  padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1.25rem',
-                  cursor: 'pointer', transition: 'border-color 0.15s',
-                }}
-                onMouseEnter={(ev) => (ev.currentTarget.style.borderColor = 'var(--purple)')}
-                onMouseLeave={(ev) => (ev.currentTarget.style.borderColor = 'var(--border)')}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 14 }}>{e.name}</div>
-                  <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 1 }}>{e.target}</div>
-                </div>
+            <div key={e.id} style={{ position: 'relative' }}>
+              <Link href={`/engagement/${e.id}`} style={{ textDecoration: 'none', display: 'block' }}>
+                <div
+                  style={{
+                    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
+                    padding: '1rem 3.5rem 1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1.25rem',
+                    cursor: 'pointer', transition: 'border-color 0.15s',
+                  }}
+                  onMouseEnter={(ev) => (ev.currentTarget.style.borderColor = 'var(--purple)')}
+                  onMouseLeave={(ev) => (ev.currentTarget.style.borderColor = confirmDelete === e.id ? 'var(--critical)' : 'var(--border)')}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 14 }}>{e.name}</div>
+                    <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 1 }}>{e.target}</div>
+                  </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', fontSize: 12, flexShrink: 0 }}>
-                  {e.phase && (
-                    <div style={{ color: 'var(--purple-light)' }}>
-                      {e.phase}{e.progress > 0 ? ` ${e.progress}%` : ''}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', fontSize: 12, flexShrink: 0 }}>
+                    {e.phase && (
+                      <div style={{ color: 'var(--purple-light)' }}>
+                        {e.phase}{e.progress > 0 ? ` ${e.progress}%` : ''}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--high)' }}>
+                      <AlertTriangle size={12} />
+                      {e.findingsCount}
                     </div>
-                  )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--high)' }}>
-                    <AlertTriangle size={12} />
-                    {e.findingsCount}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <Circle size={7} fill={STATUS_COLOR[e.status]} stroke="none" />
-                    <span style={{ color: STATUS_COLOR[e.status] }}>{STATUS_LABEL[e.status] ?? e.status}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--muted)', fontSize: 11 }}>
-                    <Clock size={11} />
-                    {new Date(e.createdAt).toLocaleDateString('pt-BR')}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Circle size={7} fill={STATUS_COLOR[e.status]} stroke="none" />
+                      <span style={{ color: STATUS_COLOR[e.status] }}>{STATUS_LABEL[e.status] ?? e.status}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--muted)', fontSize: 11 }}>
+                      <Clock size={11} />
+                      {new Date(e.createdAt).toLocaleDateString('pt-BR')}
+                    </div>
                   </div>
                 </div>
+              </Link>
+
+              {/* Delete button — outside the Link to avoid navigation */}
+              <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {confirmDelete === e.id ? (
+                  <>
+                    <button
+                      onClick={() => handleDelete(e.id)}
+                      disabled={deleting === e.id}
+                      style={{
+                        fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4,
+                        background: 'var(--critical)', color: 'white', border: 'none',
+                        cursor: 'pointer', fontFamily: 'inherit',
+                      }}
+                    >
+                      {deleting === e.id ? '...' : 'confirmar'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(null)}
+                      style={{
+                        fontSize: 11, padding: '3px 8px', borderRadius: 4,
+                        background: 'none', color: 'var(--muted)', border: '1px solid var(--border)',
+                        cursor: 'pointer', fontFamily: 'inherit',
+                      }}
+                    >
+                      cancelar
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={(ev) => { ev.preventDefault(); setConfirmDelete(e.id) }}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--muted)', padding: 6, display: 'flex', alignItems: 'center',
+                      borderRadius: 4, transition: 'color 0.15s',
+                    }}
+                    onMouseEnter={(ev) => (ev.currentTarget.style.color = 'var(--critical)')}
+                    onMouseLeave={(ev) => (ev.currentTarget.style.color = 'var(--muted)')}
+                    title="Excluir engagement"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}

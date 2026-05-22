@@ -6,6 +6,7 @@ module.exports = {
       cwd: '/home/digitalbath/rift',
       env: {
         NODE_ENV: 'production',
+        PATH: `/home/digitalbath/.local/bin:/home/digitalbath/.nvm/versions/node/v20.20.2/bin:/usr/local/bin:/usr/bin:/bin`,
       },
       out_file: '/home/digitalbath/rift/logs/backend.log',
       error_file: '/home/digitalbath/rift/logs/backend-error.log',

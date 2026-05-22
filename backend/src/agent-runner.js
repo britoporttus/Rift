@@ -1,6 +1,24 @@
 const { spawn } = require('child_process')
+const { execSync } = require('child_process')
 
 const FRAMEWORK_PATH = process.env.FRAMEWORK_PATH || '/home/digitalbath/pentest-framework-v2'
+
+// Resolve claude binary — prefer PATH, fall back to known locations
+function findClaude() {
+  try { return execSync('which claude', { encoding: 'utf8' }).trim() } catch {}
+  const candidates = [
+    '/home/digitalbath/.local/bin/claude',
+    '/usr/local/bin/claude',
+    ...require('fs').readdirSync('/home/digitalbath/.vscode-server/extensions', { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name.startsWith('anthropic.claude-code'))
+      .map(d => `/home/digitalbath/.vscode-server/extensions/${d.name}/resources/native-binary/claude`),
+  ]
+  for (const p of candidates) {
+    try { require('fs').accessSync(p, require('fs').constants.X_OK); return p } catch {}
+  }
+  return 'claude'
+}
+const CLAUDE_BIN = process.env.CLAUDE_PATH || findClaude()
 
 // engagementId -> { proc, subscribers: Set<WebSocket> }
 const sessions = new Map()
@@ -69,7 +87,7 @@ function run(engagementId, prompt, subscribers) {
   }
 
   const proc = spawn(
-    'claude',
+    CLAUDE_BIN,
     ['--output-format', 'stream-json', '--print', prompt, '--no-color'],
     { cwd: FRAMEWORK_PATH, env: { ...process.env, ENGAGEMENT_ID: engagementId } }
   )
