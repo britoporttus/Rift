@@ -52,15 +52,15 @@ function EyeOffIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-// ── Network map ───────────────────────────────────────────────────────────────
+// ── Network map — atmospheric only, no fake labels ───────────────────────────
 const NODES = [
-  { dx: -230, dy: -175, name: 'WEB-01',  ip: '192.168.1.22', s: 'active'   },
-  { dx:  252, dy: -158, name: 'DB-02',   ip: '192.168.1.45', s: 'critical' },
-  { dx:  280, dy:  108, name: 'API-03',  ip: '192.168.2.8',  s: 'active'   },
-  { dx: -198, dy:  185, name: 'FW-01',   ip: '192.168.2.31', s: 'scanning' },
-  { dx:  -38, dy: -288, name: 'VPN-GW',  ip: '192.168.3.7',  s: 'offline'  },
-  { dx:   92, dy:  265, name: 'SMTP-01', ip: '192.168.3.19', s: 'active'   },
-  { dx: -305, dy:   18, name: 'PROXY',   ip: '192.168.4.2',  s: 'scanning' },
+  { dx: -230, dy: -175, s: 'active'   },
+  { dx:  252, dy: -158, s: 'critical' },
+  { dx:  280, dy:  108, s: 'active'   },
+  { dx: -198, dy:  185, s: 'scanning' },
+  { dx:  -38, dy: -288, s: 'offline'  },
+  { dx:   92, dy:  265, s: 'active'   },
+  { dx: -305, dy:   18, s: 'scanning' },
 ]
 const NC: Record<string, string> = { active: '#22C55E', critical: '#EF4444', offline: '#3A3A58', scanning: '#F59E0B' }
 
@@ -69,7 +69,7 @@ function NetworkMap() {
   return (
     <svg width="900" height="800" style={{ position: 'absolute', left: -450, top: -400, overflow: 'visible', pointerEvents: 'none', zIndex: 2 }}>
       {NODES.map((n, i) => {
-        const nx = cx + n.dx, ny = cy + n.dy, c = NC[n.s], right = n.dx >= 0
+        const nx = cx + n.dx, ny = cy + n.dy, c = NC[n.s]
         return (
           <g key={i} style={{ animation: `tvFadeIn 0.4s ease ${0.7 + i * 0.13}s both` }}>
             <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="rgba(124,58,237,0.17)" strokeWidth="0.7" strokeDasharray="4 8" />
@@ -78,10 +78,6 @@ function NetworkMap() {
               <circle cx={nx} cy={ny} r="9" fill="none" stroke={c} strokeWidth="0.8" opacity="0.3"
                 style={{ animation: 'tvRipple 3.5s ease-out infinite' }} />
             )}
-            <text x={right ? nx + 11 : nx - 11} y={ny - 7} fill="rgba(148,163,184,0.6)" fontSize="9"
-              textAnchor={right ? 'start' : 'end'} fontFamily="'JetBrains Mono',monospace">{n.name}</text>
-            <text x={right ? nx + 11 : nx - 11} y={ny + 3} fill="rgba(100,116,139,0.4)" fontSize="8"
-              textAnchor={right ? 'start' : 'end'} fontFamily="'JetBrains Mono',monospace">{n.ip}</text>
           </g>
         )
       })}
@@ -128,95 +124,22 @@ function RiftBrand() {
     <div style={{ position: 'relative', padding: '14px 32px', textAlign: 'center', zIndex: 3 }}>
       {corners.map((s, i) => <div key={i} style={{ position: 'absolute', width: 20, height: 20, ...s }} />)}
       <div style={{ fontSize: 92, fontWeight: 700, letterSpacing: '0.22em', lineHeight: 1, fontFamily: "'JetBrains Mono',monospace", color: 'rgba(167,139,250,0.52)', textShadow: '0 0 80px rgba(124,58,237,0.22)' }}>RIFT</div>
-      <div style={{ fontSize: 9, color: '#3A3A5A', letterSpacing: '0.3em', marginTop: 8 }}>AI PENTEST PLATFORM</div>
+      <div style={{ fontSize: 9, color: '#3A3A5A', letterSpacing: '0.3em', marginTop: 6 }}>AI PENTEST PLATFORM</div>
+      <div style={{ fontSize: 9, color: 'rgba(124,58,237,0.45)', letterSpacing: '0.2em', marginTop: 4 }}>v1.0.2</div>
     </div>
   )
 }
 
-// ── System status panel ───────────────────────────────────────────────────────
-function useUptime() {
-  const [sec, setSec] = useState(0)
-  useEffect(() => { const t = setInterval(() => setSec(s => s + 1), 1000); return () => clearInterval(t) }, [])
-  const total = 2 * 86400 + 14 * 3600 + 37 * 60 + 22 + sec
-  const d = Math.floor(total / 86400)
-  const h = String(Math.floor((total % 86400) / 3600)).padStart(2, '0')
-  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
-  return `${d}d ${h}h ${m}m`
-}
-
-function SystemStatusPanel() {
-  const uptime = useUptime()
-  const rows = [
-    { k: 'ENGINE', v: 'v2.4.1' }, { k: 'MODULES', v: 'CARREGADOS' },
-    { k: 'DATABASE', v: 'CONECTADO' }, { k: 'UPTIME', v: uptime },
-  ]
-  return (
-    <div style={{ position: 'absolute', top: '2rem', right: '2.5rem', width: 196, zIndex: 8, animation: 'tvSlideLeft 0.5s ease 0.4s both' }}>
-      <div style={{ background: 'rgba(4,4,12,0.93)', border: '1px solid rgba(124,58,237,0.15)', borderRadius: 5, overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.65)' }}>
-        <div style={{ padding: '0.5rem 0.9rem', borderBottom: '1px solid rgba(20,20,40,0.9)', fontSize: 9, color: '#A78BFA', letterSpacing: '0.13em', fontWeight: 600 }}>SISTEMA OPERACIONAL</div>
-        <div style={{ padding: '0.4rem 0.9rem', borderBottom: '1px solid rgba(14,14,28,0.8)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22C55E', boxShadow: '0 0 6px #22C55E', animation: 'tvStatusPulse 1.5s ease-in-out infinite' }} />
-          <span style={{ fontSize: 10, color: '#22C55E', fontWeight: 600, letterSpacing: '0.08em' }}>ONLINE</span>
-        </div>
-        <div style={{ padding: '0.5rem 0.9rem', display: 'flex', flexDirection: 'column', gap: 9 }}>
-          {rows.map(({ k, v }) => (
-            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontSize: 9, color: '#353558', letterSpacing: '0.09em' }}>{k}</span>
-              <span style={{ fontSize: 9, color: '#94A3B8', letterSpacing: '0.04em' }}>{v}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Threat level panel ────────────────────────────────────────────────────────
-const SPARK = [5, 4, 3, 4, 5, 4, 3, 2, 2, 3, 2, 1, 1, 2, 1, 1, 2, 1, 0, 1]
-function SparkLine() {
-  const W = 168, H = 28
-  const pts = SPARK.map((v, i) => `${(i / (SPARK.length - 1)) * W},${H - (v / 5) * H}`).join(' ')
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-      <polyline points={pts} fill="none" stroke="#22C55E" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" opacity="0.6" />
-    </svg>
-  )
-}
-function ThreatLevelPanel() {
-  return (
-    <div style={{ position: 'absolute', bottom: '2.5rem', right: '2.5rem', width: 196, zIndex: 8, animation: 'tvSlideLeft 0.5s ease 0.6s both' }}>
-      <div style={{ background: 'rgba(4,4,12,0.93)', border: '1px solid rgba(124,58,237,0.15)', borderRadius: 5, overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.65)' }}>
-        <div style={{ padding: '0.5rem 0.9rem', borderBottom: '1px solid rgba(20,20,40,0.9)', fontSize: 9, color: '#A78BFA', letterSpacing: '0.13em', fontWeight: 600 }}>THREAT LEVEL</div>
-        <div style={{ padding: '0.65rem 0.9rem' }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#22C55E', letterSpacing: '0.06em', marginBottom: 10 }}>BAIXO</div>
-          <SparkLine />
-          <div style={{ fontSize: 8, color: '#2A2A48', letterSpacing: '0.06em', marginTop: 7 }}>Última verificação: agora</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Threat ticker ─────────────────────────────────────────────────────────────
-const TICKER_ITEMS = [
-  'CVE-2026-0412 │ CRITICAL │ RCE in OpenSSL 3.2.1',
-  'THREAT ACTOR: APT-37 │ T1059.001 │ ACTIVE',
-  'IOC: 185.220.101.47 │ MALICIOUS │ BLOCKED',
-  'CVE-2026-0389 │ CVSS 9.8 │ ENGINE UPDATED',
-  'DARKNET CHATTER ↑23% │ SECTOR: FINANCIAL',
-  'HONEYPOT HIT: 10.0.4.22 │ PORT 443 │ RECON',
-]
-function ThreatTicker() {
-  const text = TICKER_ITEMS.join('   ◆   ')
-  const doubled = text + '   ◆   ' + text
-  return (
-    <div style={{ overflow: 'hidden', borderTop: '1px solid #0C0C1E', height: 26, display: 'flex', alignItems: 'center', background: 'rgba(3,3,8,0.94)', flexShrink: 0 }}>
-      <div style={{ display: 'inline-block', whiteSpace: 'nowrap', fontSize: 9, color: '#252545', letterSpacing: '0.04em', animation: 'tickerScroll 60s linear infinite' }}>
-        <span style={{ color: '#7C3AED', marginRight: 14, fontSize: 8, letterSpacing: '0.14em' }}>◆ THREAT FEED</span>
-        {doubled}
-      </div>
-    </div>
-  )
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [time, setTime] = useState('')
+  useEffect(() => {
+    const fmt = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    setTime(fmt())
+    const t = setInterval(() => setTime(fmt()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  return <span>{time}</span>
 }
 
 // ── HUD corner ────────────────────────────────────────────────────────────────
@@ -431,6 +354,7 @@ function LoginCard({ onLogin, ssoError }: { onLogin: (e: string, p: string) => P
 function FullCanvas({ onLogin, ssoError }: { onLogin: (e: string, p: string) => Promise<void>; ssoError: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', fontFamily: "'JetBrains Mono','Fira Code',monospace" }}>
+      {/* HUD bar — only real/relevant info */}
       <div style={{ flexShrink: 0, zIndex: 20, display: 'flex', alignItems: 'center', height: 34, padding: '0 1.5rem',
         borderBottom: '1px solid rgba(10,10,26,0.98)', background: 'rgba(2,2,8,0.98)',
         fontSize: 9, color: '#252545', letterSpacing: '0.1em', gap: 14 }}>
@@ -440,14 +364,16 @@ function FullCanvas({ onLogin, ssoError }: { onLogin: (e: string, p: string) => 
           ))}
         </div>
         <span style={{ color: '#7C3AED', fontWeight: 600, letterSpacing: '0.12em', fontSize: 10 }}>RIFT</span>
-        <span>│</span><span>PENTEST SYSTEM v2.4.1</span>
-        <span>│</span><span>NODE: 10.0.0.1</span>
-        <span>│</span><span>SCAN ENGINE: ACTIVE</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center' }}>
-          <span>TARGETS: 1,247</span><span>│</span><span>VULNS: 89</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#22C55E', marginLeft: 4 }}>
+        <span>│</span>
+        <span>AI Pentest Platform</span>
+        <span>│</span>
+        <span style={{ color: 'rgba(124,58,237,0.6)' }}>v1.0.2</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
+          <LiveClock />
+          <span>│</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#22C55E' }}>
             <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#22C55E', animation: 'tvStatusPulse 2s ease-in-out infinite' }} />
-            LIVE
+            SECURE
           </div>
         </div>
       </div>
@@ -466,11 +392,16 @@ function FullCanvas({ onLogin, ssoError }: { onLogin: (e: string, p: string) => 
         <div style={{ position: 'absolute', top: 'calc(40% + 230px)', left: 'calc(61% - 254px)', width: 508, zIndex: 4 }}>
           <RiftBrand />
         </div>
-        <SystemStatusPanel />
-        <ThreatLevelPanel />
         <LoginCard onLogin={onLogin} ssoError={ssoError} />
       </div>
-      <ThreatTicker />
+
+      {/* Footer bar — version + copyright */}
+      <div style={{ flexShrink: 0, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 1.5rem', borderTop: '1px solid #0C0C1E', background: 'rgba(3,3,8,0.94)',
+        fontSize: 9, color: '#252545', letterSpacing: '0.06em' }}>
+        <span>Rift AI Pentest Platform <span style={{ color: 'rgba(124,58,237,0.45)' }}>v1.0.2</span></span>
+        <span>© 2026 Porttus — Acesso restrito e monitorado</span>
+      </div>
     </div>
   )
 }
