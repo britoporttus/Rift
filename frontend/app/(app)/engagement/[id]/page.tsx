@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { api, Engagement } from '@/lib/api'
-import { useEngagementWS } from '@/hooks/useEngagementWS'
+import { useEngagementWS, WsMsg } from '@/hooks/useEngagementWS'
 import { MessageFeed } from '@/components/chat/MessageFeed'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { FindingsSidebar } from '@/components/chat/FindingsSidebar'
@@ -19,14 +19,28 @@ export default function EngagementPage() {
   const [engagement, setEngagement] = useState<Engagement | null>(null)
   const [started, setStarted] = useState(false)
   const [tab, setTab] = useState<Tab>('chat')
+  const [history, setHistory] = useState<WsMsg[]>([])
 
-  const { messages, connected, send, addLocal } = useEngagementWS(id)
+  const { messages: liveMessages, connected, send, addLocal } = useEngagementWS(id)
+
+  // merge history + live, deduplicate by _dbId so refreshes don't double up
+  const messages = useMemo(() => {
+    const liveDbIds = new Set(liveMessages.map((m) => m._dbId).filter(Boolean))
+    const filtered = history.filter((m) => !liveDbIds.has(m._dbId))
+    return [...filtered, ...liveMessages]
+  }, [history, liveMessages])
 
   useEffect(() => {
     api.engagements.get(id)
       .then(setEngagement)
       .catch(() => router.replace('/dashboard'))
   }, [id, router])
+
+  useEffect(() => {
+    api.engagements.messages(id)
+      .then((msgs) => setHistory(msgs.map((m, i) => ({ ...m, _id: -(i + 1) } as WsMsg))))
+      .catch(() => {})
+  }, [id])
 
   const agentRunning = useMemo(() => {
     const feed = [...messages].reverse()

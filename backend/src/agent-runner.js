@@ -80,7 +80,7 @@ function toWsEvent(parsed, rawLine) {
   }
 }
 
-function run(engagementId, prompt, subscribers, onCostUpdate) {
+function run(engagementId, prompt, subscribers, onCostUpdate, onEvent) {
   if (sessions.has(engagementId)) {
     broadcast(subscribers, { type: 'agent_message', text: '⚠️ Sessão já ativa para este engagement.' })
     return
@@ -106,9 +106,8 @@ function run(engagementId, prompt, subscribers, onCostUpdate) {
       const event = toWsEvent(parseStreamLine(line), line)
       if (event) {
         broadcast(subscribers, event)
-        if (event.type === 'cost_update' && onCostUpdate) {
-          onCostUpdate(event.usd, event.tokens)
-        }
+        if (event.type === 'cost_update' && onCostUpdate) onCostUpdate(event.usd, event.tokens)
+        if (onEvent) onEvent(event)
       }
     }
   })

@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { v4: uuid } = require('uuid')
 const { requireAuth } = require('../auth')
 const { readEngagements, getEngagement, createEngagement, updateEngagement, deleteEngagement } = require('../store')
+const ChatMessage = require('../models/ChatMessage')
 
 const router = Router()
 router.use(requireAuth())
@@ -55,7 +56,17 @@ router.patch('/:id', async (req, res) => {
 
 router.delete('/:id', requireAuth(['admin']), async (req, res) => {
   await deleteEngagement(req.params.id)
+  await ChatMessage.deleteMany({ engagementId: req.params.id }).catch(() => {})
   res.status(204).end()
+})
+
+router.get('/:id/messages', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit ?? '500'), 1000)
+  const msgs = await ChatMessage.find({ engagementId: req.params.id })
+    .sort({ createdAt: 1 })
+    .limit(limit)
+    .lean()
+  res.json(msgs.map((m) => ({ ...m.payload, type: m.type, _dbId: String(m._id) })))
 })
 
 module.exports = router

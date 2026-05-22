@@ -45,6 +45,7 @@ export const api = {
     update: (id: string, data: Partial<Engagement>) =>
       req<Engagement>(`/engagements/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) => req<void>(`/engagements/${id}`, { method: 'DELETE' }),
+    messages: (id: string) => req<Record<string, unknown>[]>(`/engagements/${id}/messages`),
   },
   findings: {
     list: (params?: { engagementId?: string; severity?: string }) => {

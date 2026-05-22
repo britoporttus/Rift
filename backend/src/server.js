@@ -7,6 +7,7 @@ const cors = require('cors')
 const jwt = require('jsonwebtoken')
 
 const { connect } = require('./db')
+const ChatMessage = require('./models/ChatMessage')
 const { router: authRouter } = require('./auth')
 const authMicrosoftRouter = require('./api/auth-microsoft')
 const engagementsRouter = require('./api/engagements')
@@ -118,6 +119,17 @@ wss.on('connection', async (ws) => {
   })
 })
 
+// Types worth persisting in chat history
+const SAVE_TYPES = new Set(['operator_message', 'agent_message', 'agent_action', 'agent_question', 'finding', 'phase_update'])
+// System-generated transient messages that should not be persisted
+const SKIP_TEXTS = new Set(['🔗 Rift conectado.', '⏹ Agente parado pelo operador.'])
+
+function saveMsg(engId, event) {
+  if (!SAVE_TYPES.has(event.type)) return
+  if (event.type === 'agent_message' && SKIP_TEXTS.has(event.text)) return
+  ChatMessage.create({ engagementId: engId, type: event.type, payload: event }).catch(() => {})
+}
+
 async function handleMessage(msg, engId, user) {
   const clients = engagementClients.get(engId)
   if (!clients) return
@@ -126,8 +138,9 @@ async function handleMessage(msg, engId, user) {
     const text = msg.text || msg.option || ''
     if (!text) return
 
-    // echo operator message back so it appears in the feed for all connected clients
-    broadcast(engId, { type: 'operator_message', text })
+    const operatorEvent = { type: 'operator_message', text }
+    broadcast(engId, operatorEvent)
+    saveMsg(engId, operatorEvent)
 
     if (agentRunner.isRunning(engId)) {
       agentRunner.sendInput(engId, text)
@@ -136,9 +149,11 @@ async function handleMessage(msg, engId, user) {
       const ctx = eng
         ? `[CONTEXTO DO SISTEMA]\nEngagement ativo: "${eng.name}" | Alvo: ${eng.target} | Status: ${eng.status}\nResponda SEMPRE em português. Mantenha contexto somente deste engagement.\n\n[OPERADOR]\n`
         : ''
-      agentRunner.run(engId, ctx + text, clients, (usd, tokens) => {
-        appendUsage({ usd, tokens, engagementId: engId, date: new Date().toISOString() }).catch(() => {})
-      })
+      agentRunner.run(
+        engId, ctx + text, clients,
+        (usd, tokens) => appendUsage({ usd, tokens, engagementId: engId, date: new Date().toISOString() }).catch(() => {}),
+        (event) => saveMsg(engId, event),
+      )
     }
   }
 
