@@ -54,3 +54,24 @@ a {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--purple);
 }
+
+/* ── Login page animations ── */
+@keyframes tvSpin      { to { transform: rotate(360deg); } }
+@keyframes tvSpinRev   { to { transform: rotate(-360deg); } }
+@keyframes tvPulse     { 0%,100%{opacity:.55;transform:scale(1)} 50%{opacity:1;transform:scale(1.28)} }
+@keyframes tvScan      { 0%,100%{top:0;opacity:0} 6%{opacity:1} 94%{opacity:1} 98%{top:100%;opacity:0} }
+@keyframes tvRipple    { 0%{transform:scale(1);opacity:.5} 100%{transform:scale(1.65);opacity:0} }
+@keyframes tvBlink     { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes tvFadeIn    { from{opacity:0} to{opacity:1} }
+@keyframes tvSlideUp   { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+@keyframes tvSlideLeft { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
+@keyframes tvStatusPulse { 0%,100%{opacity:.55} 50%{opacity:1} }
+@keyframes tickerScroll  { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+@keyframes ghostGlitch {
+  0%,87%,100% { transform:translate(-50%,-50%) skewX(0deg); color:rgba(124,58,237,0.034); }
+  88%  { transform:translate(calc(-50% + 4px),-50%) skewX(-0.6deg); color:rgba(167,139,250,0.052); }
+  89%  { transform:translate(calc(-50% - 3px),-50%) skewX(0.4deg);  color:rgba(239,68,68,0.03); }
+  90%  { transform:translate(-50%,-50%); color:rgba(124,58,237,0.034); }
+  91%  { transform:translate(calc(-50% + 2px),-50%); color:rgba(124,58,237,0.048); }
+  92%  { transform:translate(-50%,-50%); color:rgba(124,58,237,0.034); }
+}
