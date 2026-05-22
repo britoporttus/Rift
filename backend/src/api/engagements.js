@@ -6,14 +6,18 @@ const { readEngagements, getEngagement, createEngagement, updateEngagement, dele
 const router = Router()
 router.use(requireAuth())
 
+function toDto(e) {
+  return { ...e, id: e._id }
+}
+
 router.get('/', async (_req, res) => {
-  res.json(await readEngagements())
+  res.json((await readEngagements()).map(toDto))
 })
 
 router.get('/:id', async (req, res) => {
   const e = await getEngagement(req.params.id)
   if (!e) return res.status(404).json({ error: 'not found' })
-  res.json(e)
+  res.json(toDto(e))
 })
 
 router.post('/', async (req, res) => {
@@ -35,7 +39,7 @@ router.post('/', async (req, res) => {
     createdAt: now,
     updatedAt: now,
   })
-  res.status(201).json(engagement)
+  res.status(201).json(toDto(engagement))
 })
 
 router.patch('/:id', async (req, res) => {
@@ -46,7 +50,7 @@ router.patch('/:id', async (req, res) => {
   }
   const updated = await updateEngagement(req.params.id, patch)
   if (!updated) return res.status(404).json({ error: 'not found' })
-  res.json(updated)
+  res.json(toDto(updated))
 })
 
 router.delete('/:id', requireAuth(['admin']), async (req, res) => {

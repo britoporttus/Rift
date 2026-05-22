@@ -7,7 +7,7 @@ import { MessageFeed } from '@/components/chat/MessageFeed'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { FindingsSidebar } from '@/components/chat/FindingsSidebar'
 import { FindingsReport } from '@/components/findings/FindingsReport'
-import { ArrowLeft, Wifi, WifiOff, Play, MessageSquare, Shield, FileText } from 'lucide-react'
+import { ArrowLeft, Wifi, WifiOff, Play, MessageSquare, Shield, FileText, Eye, Download, X } from 'lucide-react'
 import Link from 'next/link'
 import type { ReportFile } from '@/lib/api'
 
@@ -151,9 +151,15 @@ export default function EngagementPage() {
   )
 }
 
+function canPreview(ext: string) {
+  return ['.html', '.md', '.txt'].includes(ext)
+}
+
 function ReportTab({ engagementId, engagementName }: { engagementId: string; engagementName: string }) {
   const [files, setFiles] = useState<ReportFile[]>([])
   const [loading, setLoading] = useState(true)
+  const [preview, setPreview] = useState<{ name: string; blobUrl: string; ext: string } | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   useEffect(() => {
     api.reports.list(engagementId)
@@ -161,6 +167,26 @@ function ReportTab({ engagementId, engagementName }: { engagementId: string; eng
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [engagementId])
+
+  async function openPreview(f: ReportFile) {
+    setPreviewLoading(true)
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('rift_token') : null
+      const res = await fetch(f.viewUrl, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      if (!res.ok) throw new Error('Erro ao carregar')
+      const blob = await res.blob()
+      setPreview({ name: f.name, blobUrl: URL.createObjectURL(blob), ext: f.ext })
+    } catch {
+      alert('Erro ao carregar relatório')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  function closePreview() {
+    if (preview) URL.revokeObjectURL(preview.blobUrl)
+    setPreview(null)
+  }
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--muted)', fontSize: 13 }}>
@@ -175,39 +201,103 @@ function ReportTab({ engagementId, engagementName }: { engagementId: string; eng
   )
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: 800, margin: '0 auto' }}>
-      <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--muted)' }}>
-        Relatórios gerados para <span style={{ color: 'var(--text)', fontWeight: 600 }}>{engagementName}</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {files.map(f => (
-          <div key={f.name} style={{
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-            padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12,
-          }}>
-            <FileText size={16} color="var(--purple-light)" style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: 'var(--text)', fontWeight: 500, fontSize: 13 }}>{f.name}</div>
-              <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
-                {(f.size / 1024).toFixed(1)} KB · {f.ext.toUpperCase().replace('.', '')}
+    <>
+      <div style={{ padding: '1.5rem', maxWidth: 800, margin: '0 auto' }}>
+        <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--muted)' }}>
+          Relatórios de <span style={{ color: 'var(--text)', fontWeight: 600 }}>{engagementName}</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {files.map(f => (
+            <div key={f.name} style={{
+              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+              padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <FileText size={16} color="var(--purple-light)" style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: 'var(--text)', fontWeight: 500, fontSize: 13 }}>{f.name}</div>
+                <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
+                  {(f.size / 1024).toFixed(1)} KB · {f.ext.toUpperCase().replace('.', '')}
+                </div>
               </div>
+              {canPreview(f.ext) && (
+                <button
+                  onClick={() => openPreview(f)}
+                  disabled={previewLoading}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+                    background: 'var(--surface)', color: 'var(--text)',
+                    border: '1px solid var(--border)', cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  <Eye size={12} /> Visualizar
+                </button>
+              )}
+              <a
+                href={f.url} download
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                  background: 'rgba(124,58,237,.12)', color: 'var(--purple-light)',
+                  border: '1px solid rgba(124,58,237,.3)', textDecoration: 'none',
+                }}
+              >
+                <Download size={12} /> Baixar
+              </a>
             </div>
-            <a
-              href={f.url}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-                background: 'rgba(124,58,237,.12)', color: 'var(--purple-light)',
-                border: '1px solid rgba(124,58,237,.3)', textDecoration: 'none',
-                transition: 'background .15s',
-              }}
-            >
-              Download
-            </a>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
+
+      {preview && (
+        <div
+          onClick={closePreview}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+            zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem',
+          }}
+        >
+          <div
+            onClick={(ev) => ev.stopPropagation()}
+            style={{
+              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+              width: '100%', maxWidth: 1000, height: '85vh',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            }}
+          >
+            <div style={{
+              padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+            }}>
+              <FileText size={15} color="var(--purple-light)" />
+              <span style={{ flex: 1, color: 'var(--text)', fontSize: 13, fontWeight: 500 }}>{preview.name}</span>
+              <a
+                href={preview.blobUrl} download={preview.name}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  color: 'var(--purple-light)', fontSize: 12, textDecoration: 'none',
+                  padding: '0.25rem 0.6rem', borderRadius: 4,
+                  border: '1px solid var(--purple)', background: 'var(--purple-glow)',
+                }}
+              >
+                <Download size={12} /> baixar
+              </a>
+              <button
+                onClick={closePreview}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, display: 'flex' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <iframe
+              src={preview.blobUrl}
+              style={{ flex: 1, border: 'none', background: preview.ext === '.html' ? '#fff' : 'var(--bg)' }}
+              title={preview.name}
+              sandbox="allow-same-origin allow-scripts"
+            />
+          </div>
+        </div>
+      )}
+    </>
   )
 }

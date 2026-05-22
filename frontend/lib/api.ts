@@ -111,6 +111,7 @@ export interface Finding {
 export interface ReportFile {
   name: string
   url: string
+  viewUrl: string
   size: number
   ext: string
 }
