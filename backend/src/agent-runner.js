@@ -80,7 +80,7 @@ function toWsEvent(parsed, rawLine) {
   }
 }
 
-function run(engagementId, prompt, subscribers) {
+function run(engagementId, prompt, subscribers, onCostUpdate) {
   if (sessions.has(engagementId)) {
     broadcast(subscribers, { type: 'agent_message', text: '⚠️ Sessão já ativa para este engagement.' })
     return
@@ -100,17 +100,25 @@ function run(engagementId, prompt, subscribers) {
   proc.stdout.on('data', (chunk) => {
     buf += chunk.toString()
     const lines = buf.split('\n')
-    buf = lines.pop() // keep incomplete last line
+    buf = lines.pop()
     for (const line of lines) {
       if (!line.trim()) continue
       const event = toWsEvent(parseStreamLine(line), line)
-      if (event) broadcast(subscribers, event)
+      if (event) {
+        broadcast(subscribers, event)
+        if (event.type === 'cost_update' && onCostUpdate) {
+          onCostUpdate(event.usd, event.tokens)
+        }
+      }
     }
   })
 
   proc.stderr.on('data', (chunk) => {
     const text = chunk.toString().trim()
-    if (text) broadcast(subscribers, { type: 'agent_message', text: `[log] ${text}` })
+    // suppress stdin warning — not an error
+    if (text && !text.includes('no stdin data received')) {
+      broadcast(subscribers, { type: 'agent_message', text: `[log] ${text}` })
+    }
   })
 
   proc.on('close', (code) => {
@@ -119,7 +127,10 @@ function run(engagementId, prompt, subscribers) {
       if (event) broadcast(subscribers, event)
     }
     sessions.delete(engagementId)
-    broadcast(subscribers, { type: 'agent_message', text: `[agente encerrado — código ${code}]` })
+    // only surface error exits to the user
+    if (code !== 0) {
+      broadcast(subscribers, { type: 'agent_message', text: `⚠️ Agente encerrado com erro (código ${code}).` })
+    }
   })
 }
 

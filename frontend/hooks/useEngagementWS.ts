@@ -40,5 +40,9 @@ export function useEngagementWS(engagementId: string | null) {
     }
   }, [])
 
-  return { messages, connected, send }
+  const addLocal = useCallback((msg: WsMsg) => {
+    setMessages((prev) => [...prev, { ...msg, _id: ++counter.current }])
+  }, [])
+
+  return { messages, connected, send, addLocal }
 }

@@ -11,6 +11,21 @@ const SEV_COLOR: Record<string, string> = {
   info: 'var(--info)',
 }
 
+function OperatorBubble({ msg }: { msg: WsMsg }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{
+        background: 'var(--purple)', borderRadius: 8,
+        padding: '0.6rem 0.9rem', color: 'white', fontSize: 14,
+        lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        maxWidth: 540,
+      }}>
+        {String(msg.text ?? '')}
+      </div>
+    </div>
+  )
+}
+
 function ThinkingBubble({ msg }: { msg: WsMsg }) {
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', opacity: 0.7 }}>
@@ -117,12 +132,13 @@ export function MessageFeed({ messages, onAnswer }: Props) {
       <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       {feed.map((msg) => {
         switch (msg.type) {
-          case 'agent_thinking': return <ThinkingBubble key={msg._id} msg={msg} />
-          case 'agent_action':   return <ActionBubble key={msg._id} msg={msg} />
-          case 'agent_message':  return <MessageBubble key={msg._id} msg={msg} />
-          case 'agent_question': return <QuestionBubble key={msg._id} msg={msg} onAnswer={onAnswer} />
-          case 'finding':        return <FindingBubble key={msg._id} msg={msg} />
-          default:               return null
+          case 'operator_message': return <OperatorBubble key={msg._id} msg={msg} />
+          case 'agent_thinking':   return <ThinkingBubble key={msg._id} msg={msg} />
+          case 'agent_action':     return <ActionBubble key={msg._id} msg={msg} />
+          case 'agent_message':    return <MessageBubble key={msg._id} msg={msg} />
+          case 'agent_question':   return <QuestionBubble key={msg._id} msg={msg} onAnswer={onAnswer} />
+          case 'finding':          return <FindingBubble key={msg._id} msg={msg} />
+          default:                 return null
         }
       })}
       <div ref={bottomRef} />

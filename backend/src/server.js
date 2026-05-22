@@ -118,7 +118,7 @@ wss.on('connection', async (ws) => {
   })
 })
 
-function handleMessage(msg, engId, user) {
+async function handleMessage(msg, engId, user) {
   const clients = engagementClients.get(engId)
   if (!clients) return
 
@@ -126,20 +126,25 @@ function handleMessage(msg, engId, user) {
     const text = msg.text || msg.option || ''
     if (!text) return
 
+    // echo operator message back so it appears in the feed for all connected clients
+    broadcast(engId, { type: 'operator_message', text })
+
     if (agentRunner.isRunning(engId)) {
       agentRunner.sendInput(engId, text)
     } else {
-      agentRunner.run(engId, text, clients)
+      const eng = await getEngagement(engId)
+      const ctx = eng
+        ? `[CONTEXTO DO SISTEMA]\nEngagement ativo: "${eng.name}" | Alvo: ${eng.target} | Status: ${eng.status}\nResponda SEMPRE em português. Mantenha contexto somente deste engagement.\n\n[OPERADOR]\n`
+        : ''
+      agentRunner.run(engId, ctx + text, clients, (usd, tokens) => {
+        appendUsage({ usd, tokens, engagementId: engId, date: new Date().toISOString() }).catch(() => {})
+      })
     }
   }
 
   if (msg.type === 'agent_stop') {
     agentRunner.stop(engId)
     broadcast(engId, { type: 'agent_message', text: '⏹ Agente parado pelo operador.' })
-  }
-
-  if (msg.type === 'cost_update' && msg.usd) {
-    appendUsage({ usd: msg.usd, tokens: msg.tokens || 0, engagementId: engId })
   }
 }
 

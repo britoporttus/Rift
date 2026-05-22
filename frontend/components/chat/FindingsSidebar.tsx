@@ -19,12 +19,14 @@ interface Props {
 export function FindingsSidebar({ messages }: Props) {
   const findings = messages.filter((m) => m.type === 'finding')
   const phaseMsg = [...messages].reverse().find((m) => m.type === 'phase_update')
-  const costMsg  = [...messages].reverse().find((m) => m.type === 'cost_update')
+  const costMsgs = messages.filter((m) => m.type === 'cost_update')
 
   const phase    = phaseMsg ? String(phaseMsg.phase ?? '') : null
   const progress = phaseMsg ? Number(phaseMsg.progress ?? 0) : 0
-  const usd      = costMsg  ? Number(costMsg.usd ?? 0).toFixed(2) : '0.00'
-  const tokens   = costMsg  ? Number(costMsg.tokens ?? 0).toLocaleString() : '0'
+  const totalUsd    = costMsgs.reduce((s, m) => s + Number(m.usd ?? 0), 0)
+  const totalTokens = costMsgs.reduce((s, m) => s + Number(m.tokens ?? 0), 0)
+  const usd    = totalUsd > 0 ? totalUsd.toFixed(4) : '0.00'
+  const tokens = totalTokens > 0 ? totalTokens.toLocaleString() : '0'
 
   // deduplicate by id, keep latest
   const deduped = Object.values(

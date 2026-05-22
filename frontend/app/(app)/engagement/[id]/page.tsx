@@ -20,7 +20,7 @@ export default function EngagementPage() {
   const [started, setStarted] = useState(false)
   const [tab, setTab] = useState<Tab>('chat')
 
-  const { messages, connected, send } = useEngagementWS(id)
+  const { messages, connected, send, addLocal } = useEngagementWS(id)
 
   useEffect(() => {
     api.engagements.get(id)
