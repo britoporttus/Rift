@@ -3,93 +3,85 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { api, Engagement, Finding } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
+import { SEV_COLOR, SEV_ORDER } from '@/lib/severity'
+import {
+  Plus, Trash2, Target, ShieldAlert, AlertTriangle, Bug, Radar, X,
+} from 'lucide-react'
 
-const SEV_COLOR: Record<string, string> = {
-  critical: '#EF4444',
-  high:     '#F59E0B',
-  medium:   '#EAB308',
-  low:      '#22C55E',
-  info:     '#3B82F6',
+const SEVERITIES = SEV_ORDER
+
+function alertColor(count: number) {
+  if (count >= 20) return 'var(--critical)'
+  if (count >= 8)  return 'var(--high)'
+  if (count >= 4)  return 'var(--medium)'
+  return 'var(--low)'
 }
-const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info']
-
-function SI({ s = 15, c = 'currentColor', sw = 1.75, children }: { s?: number; c?: string; sw?: number; children: React.ReactNode }) {
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
-      strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, display: 'block' }}>
-      {children}
-    </svg>
-  )
-}
-
-const PlusIco  = (s?: number, c?: string) => <SI s={s || 13} c={c || 'white'} sw={2}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></SI>
-const TrashIco = (s?: number, c?: string) => <SI s={s || 13} c={c}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></SI>
-const TargetIco = (s?: number, c?: string) => <SI s={s || 32} c={c || '#3A3A58'}><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></SI>
 
 const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '0.5rem 0.75rem',
-  background: 'rgba(2,2,8,0.9)', border: '1px solid rgba(124,58,237,0.2)',
-  borderRadius: 3, color: '#E2E8F0', fontSize: 12,
+  width: '100%', padding: '0.55rem 0.8rem',
+  background: 'rgba(2,2,8,0.6)', border: '1px solid var(--border-mid)',
+  borderRadius: 7, color: 'var(--text)', fontSize: 13,
   outline: 'none', fontFamily: 'inherit',
 }
 
-function alertColor(count: number) {
-  if (count >= 20) return '#EF4444'
-  if (count >= 8)  return '#F59E0B'
-  if (count >= 4)  return '#EAB308'
-  return '#22C55E'
-}
-
-function KpiCard({ label, value, color, sub }: { label: string; value: number; color: string; sub: string }) {
+// ── KPI card ──────────────────────────────────────────────────────
+function KpiCard({ label, value, color, sub, icon }: {
+  label: string; value: number; color: string; sub: string; icon: React.ReactNode
+}) {
   return (
     <div style={{
-      background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.13)',
-      borderRadius: 8, padding: '0.9rem 1rem',
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, padding: '1rem 1.15rem', position: 'relative', overflow: 'hidden',
+      display: 'flex', alignItems: 'center', gap: 14,
     }}>
-      <div style={{ fontSize: 9, fontWeight: 600, color: '#3A3A58', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 8 }}>
-        {label}
+      <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 3, background: color }} />
+      <div style={{
+        width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+        background: `color-mix(in srgb, ${color} 14%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', color,
+      }}>
+        {icon}
       </div>
-      <div style={{ fontSize: 32, fontWeight: 700, color, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>
-        {value}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 28, fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>
+          {value}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 10, color: 'var(--text-mute)', marginTop: 1 }}>{sub}</div>
       </div>
-      <div style={{ fontSize: 10.5, color: '#3A3A58', marginTop: 6 }}>{sub}</div>
     </div>
   )
 }
 
+// ── Severity distribution ─────────────────────────────────────────
 function SeverityBar({ findings }: { findings: Finding[] }) {
   const total = findings.length
   const counts = Object.fromEntries(SEVERITIES.map((s) => [s, findings.filter((f) => f.severity === s).length]))
 
   return (
     <div style={{
-      background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.13)',
-      borderRadius: 8, padding: '0.9rem 1rem',
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, padding: '1rem 1.15rem',
     }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#94A3B8', marginBottom: 8, letterSpacing: '0.04em' }}>
-        Distribuição de Findings
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        Distribuição de findings
       </div>
-      {/* Bar */}
-      <div style={{ height: 8, borderRadius: 99, overflow: 'hidden', display: 'flex', marginBottom: 10, background: 'rgba(12,12,26,0.8)' }}>
+      <div style={{ height: 8, borderRadius: 99, overflow: 'hidden', display: 'flex', marginBottom: 12, background: 'rgba(2,2,8,0.6)' }}>
         {total === 0 ? (
-          <div style={{ flex: 1, background: '#3A3A58', opacity: 0.3 }} />
+          <div style={{ flex: 1, background: 'var(--text-dim)' }} />
         ) : SEVERITIES.map((sev) => {
-          const pct = total > 0 ? (counts[sev] / total) * 100 : 0
+          const pct = (counts[sev] / total) * 100
           if (pct === 0) return null
-          return (
-            <div key={sev} style={{ width: `${pct}%`, background: SEV_COLOR[sev], transition: 'width 0.3s ease' }} />
-          )
+          return <div key={sev} style={{ width: `${pct}%`, background: SEV_COLOR[sev], transition: 'width 0.3s ease' }} />
         })}
       </div>
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
         {SEVERITIES.map((sev) => (
-          <div key={sev} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div key={sev} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 8, height: 8, borderRadius: 2, background: SEV_COLOR[sev], flexShrink: 0 }} />
-            <span style={{ fontSize: 10.5, color: '#3A3A58', textTransform: 'capitalize' }}>{sev}</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#E2E8F0', fontFamily: "'JetBrains Mono', monospace" }}>{counts[sev]}</span>
-            {total > 0 && <span style={{ fontSize: 9.5, color: '#3A3A58' }}>{Math.round((counts[sev] / total) * 100)}%</span>}
+            <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'capitalize' }}>{sev}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--mono)' }}>{counts[sev]}</span>
           </div>
         ))}
       </div>
@@ -174,108 +166,89 @@ export default function DashboardPage() {
     : engagements.filter((e) => e.id === activeFilter)
 
   return (
-    <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1280, margin: '0 auto', width: '100%' }}>
+
+      {/* Page title */}
+      <div>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, letterSpacing: '-0.01em' }}>Dashboard</h1>
+        <p style={{ fontSize: 13, color: 'var(--muted)', margin: '3px 0 0' }}>Visão geral dos engagements e findings da plataforma.</p>
+      </div>
 
       {/* KPI Cards */}
       {!loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-          <KpiCard label="Engagements" value={engagements.length} color="#A78BFA" sub="total criados" />
-          <KpiCard label="Critical" value={criticalCount} color="#EF4444" sub="findings críticos" />
-          <KpiCard label="High" value={highCount} color="#F59E0B" sub="findings altos" />
-          <KpiCard label="Total Findings" value={totalFindings} color="#3B82F6" sub="em todos os escopos" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+          <KpiCard label="Engagements" value={engagements.length} color="var(--purple-light)" sub="total criados" icon={<Target size={20} />} />
+          <KpiCard label="Críticos" value={criticalCount} color="var(--critical)" sub="findings críticos" icon={<ShieldAlert size={20} />} />
+          <KpiCard label="Altos" value={highCount} color="var(--high)" sub="findings altos" icon={<AlertTriangle size={20} />} />
+          <KpiCard label="Total de findings" value={totalFindings} color="var(--info)" sub="em todos os escopos" icon={<Bug size={20} />} />
         </div>
       )}
 
       {/* Severity Bar */}
-      {!loading && findings.length > 0 && (
-        <SeverityBar findings={findings} />
-      )}
+      {!loading && findings.length > 0 && <SeverityBar findings={findings} />}
 
       {/* Engagements section */}
       <div>
-        {/* Section header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span style={{ fontSize: 10.5, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-            Engagements <span style={{ color: '#3A3A58', fontWeight: 400 }}>({engagements.length})</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Engagements <span style={{ color: 'var(--text-mute)', fontWeight: 400 }}>({engagements.length})</span>
           </span>
           <button
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => setShowForm((s) => !s)}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '0.45rem 1rem',
-              background: '#7C3AED', border: 'none', borderRadius: 5,
-              color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-              fontFamily: 'inherit',
-              boxShadow: '0 0 18px rgba(124,58,237,0.35)',
+              padding: '0.5rem 1rem', background: 'var(--purple)', border: 'none', borderRadius: 7,
+              color: 'white', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+              boxShadow: '0 0 18px var(--purple-glow)',
             }}
           >
-            {PlusIco()} Novo Escopo
+            {showForm ? <X size={14} /> : <Plus size={14} />} {showForm ? 'Fechar' : 'Novo Escopo'}
           </button>
         </div>
 
         {/* Create form */}
         {showForm && (
           <form onSubmit={handleCreate} style={{
-            background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.28)',
-            borderRadius: 8, padding: '1.25rem', marginBottom: 12,
-            display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap',
+            background: 'var(--surface)', border: '1px solid var(--border-mid)',
+            borderRadius: 12, padding: '1.25rem', marginBottom: 14,
+            display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
+            animation: 'fadeIn 0.2s ease',
           }}>
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <label style={{ color: '#94A3B8', fontSize: 10, display: 'block', marginBottom: 5, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Nome</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Cliente XYZ" required style={inputStyle} />
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <label htmlFor="eng-name" style={{ color: 'var(--muted)', fontSize: 10, display: 'block', marginBottom: 6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Nome</label>
+              <input id="eng-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Cliente XYZ" required style={inputStyle} />
             </div>
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <label style={{ color: '#94A3B8', fontSize: 10, display: 'block', marginBottom: 5, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Alvo</label>
-              <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="target.com" required style={inputStyle} />
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <label htmlFor="eng-target" style={{ color: 'var(--muted)', fontSize: 10, display: 'block', marginBottom: 6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Alvo</label>
+              <input id="eng-target" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="target.com" required style={inputStyle} />
             </div>
             <button type="submit" disabled={creating} style={{
-              background: '#7C3AED', border: 'none', borderRadius: 5,
-              color: 'white', fontWeight: 600, fontSize: 12, padding: '0.55rem 1rem',
-              cursor: creating ? 'not-allowed' : 'pointer', fontFamily: 'inherit', height: 34,
+              background: 'var(--purple)', border: 'none', borderRadius: 7,
+              color: 'white', fontWeight: 700, fontSize: 12.5, padding: '0.6rem 1.15rem',
+              cursor: creating ? 'not-allowed' : 'pointer', fontFamily: 'inherit', height: 37, opacity: creating ? 0.7 : 1,
             }}>
-              {creating ? '...' : 'Criar'}
-            </button>
-            <button type="button" onClick={() => setShowForm(false)} style={{
-              background: 'none', border: '1px solid rgba(124,58,237,0.2)', borderRadius: 5,
-              color: '#94A3B8', fontSize: 12, padding: '0.55rem 0.75rem',
-              cursor: 'pointer', fontFamily: 'inherit', height: 34,
-            }}>
-              Cancelar
+              {creating ? 'Criando…' : 'Criar'}
             </button>
           </form>
         )}
 
         {/* Filter chips */}
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 2 }}>
-          <button
-            onClick={() => setActiveFilter('all')}
-            style={{
-              padding: '0.28rem 0.75rem', borderRadius: 99,
-              background: activeFilter === 'all' ? 'rgba(124,58,237,0.10)' : 'transparent',
-              border: `1px solid ${activeFilter === 'all' ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.13)'}`,
-              color: activeFilter === 'all' ? '#A78BFA' : '#3A3A58',
-              fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              whiteSpace: 'nowrap', transition: 'all 0.12s',
-            }}
-          >
-            Todos
-          </button>
-          {engagements.map((e) => {
-            const eFinds = findings.filter((f) => f.engagement_id === e.id)
-            const topSev = SEVERITIES.find((s) => eFinds.some((f) => f.severity === s))
-            const chipColor = topSev ? SEV_COLOR[topSev] : '#3A3A58'
+        <div style={{ display: 'flex', gap: 7, overflowX: 'auto', marginBottom: 14, paddingBottom: 2 }}>
+          {[{ id: 'all', name: 'Todos' }, ...engagements].map((e) => {
             const isActive = activeFilter === e.id
+            const eFinds = e.id === 'all' ? [] : findings.filter((f) => f.engagement_id === e.id)
+            const topSev = SEVERITIES.find((s) => eFinds.some((f) => f.severity === s))
+            const chipColor = topSev ? SEV_COLOR[topSev] : 'var(--purple-light)'
             return (
               <button
                 key={e.id}
-                onClick={() => setActiveFilter(isActive ? 'all' : e.id)}
+                onClick={() => setActiveFilter(isActive && e.id !== 'all' ? 'all' : e.id)}
                 style={{
-                  padding: '0.28rem 0.75rem', borderRadius: 99,
-                  background: isActive ? `${chipColor}18` : 'transparent',
-                  border: `1px solid ${isActive ? chipColor : 'rgba(124,58,237,0.13)'}`,
-                  color: isActive ? chipColor : '#3A3A58',
-                  fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                  whiteSpace: 'nowrap', transition: 'all 0.12s',
+                  padding: '0.3rem 0.8rem', borderRadius: 99, whiteSpace: 'nowrap',
+                  background: isActive ? `color-mix(in srgb, ${chipColor} 14%, transparent)` : 'transparent',
+                  border: `1px solid ${isActive ? chipColor : 'var(--border)'}`,
+                  color: isActive ? chipColor : 'var(--muted)',
+                  fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s',
                 }}
               >
                 {e.name}
@@ -286,17 +259,22 @@ export default function DashboardPage() {
 
         {/* Cards grid */}
         {loading ? (
-          <div style={{ color: '#3A3A58', textAlign: 'center', padding: '3rem', fontSize: 12, letterSpacing: '0.1em' }}>CARREGANDO...</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {[0, 1, 2].map((i) => (
+              <div key={i} style={{ height: 128, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, animation: 'pulse 1.4s ease-in-out infinite' }} />
+            ))}
+          </div>
         ) : filteredEngagements.length === 0 ? (
           <div style={{
-            background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 8,
-            padding: '3rem', textAlign: 'center', color: '#3A3A58',
+            background: 'var(--surface)', border: '1px dashed var(--border-mid)', borderRadius: 12,
+            padding: '3.5rem', textAlign: 'center', color: 'var(--muted)',
           }}>
-            <div style={{ margin: '0 auto 1rem', display: 'flex', justifyContent: 'center' }}>{TargetIco()}</div>
-            <p style={{ fontSize: 13 }}>Nenhum engagement ainda.</p>
+            <div style={{ margin: '0 auto 1rem', display: 'flex', justifyContent: 'center', color: 'var(--text-mute)' }}><Radar size={34} /></div>
+            <p style={{ fontSize: 14, margin: 0 }}>Nenhum engagement ainda.</p>
+            <p style={{ fontSize: 12, margin: '6px 0 0', color: 'var(--text-mute)' }}>Crie um escopo para começar o mapeamento.</p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
             {filteredEngagements.map((e) => {
               const isH = hovered === e.id && confirmDelete !== e.id
               const eFinds = findings.filter((f) => f.engagement_id === e.id)
@@ -305,145 +283,110 @@ export default function DashboardPage() {
               const isDone = e.status === 'completed'
               const isPaused = e.status === 'idle'
               const phase = e.phase ?? 'idle'
+              const badge = isDone
+                ? { t: 'DONE', c: 'var(--low)' }
+                : isPaused
+                ? { t: 'PAUSED', c: 'var(--critical)' }
+                : { t: 'ACTIVE', c: 'var(--purple-light)' }
 
               return (
-                <div
-                  key={e.id}
-                  style={{ position: 'relative' }}
-                  onMouseEnter={() => setHovered(e.id)}
-                  onMouseLeave={() => setHovered(null)}
-                >
+                <div key={e.id} style={{ position: 'relative' }}
+                  onMouseEnter={() => setHovered(e.id)} onMouseLeave={() => setHovered(null)}>
                   <div
                     onClick={() => { if (confirmDelete !== e.id) router.push(`/engagement/${e.id}`) }}
                     style={{
-                      background: '#0C0C1A',
-                      border: `1px solid ${isH ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.13)'}`,
-                      borderRadius: 8, padding: '0.85rem',
+                      background: 'var(--surface)',
+                      border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`,
+                      borderRadius: 12, padding: '1rem',
                       cursor: 'pointer', transition: 'all 0.13s',
-                      boxShadow: isH ? '0 4px 20px rgba(124,58,237,0.12)' : 'none',
+                      boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none',
                     }}
                   >
                     {/* Header row */}
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12, gap: 8 }}>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#E2E8F0', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {e.name}
                         </div>
-                        <div style={{ fontSize: 9.5, color: '#3A3A58', fontFamily: "'JetBrains Mono', monospace", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-mute)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {e.target}
                         </div>
                       </div>
-                      {isDone ? (
-                        <span style={{
-                          fontSize: 8, fontWeight: 700, borderRadius: 99,
-                          padding: '2px 7px', whiteSpace: 'nowrap',
-                          background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.22)', color: '#22C55E',
-                        }}>DONE</span>
-                      ) : isPaused ? (
-                        <span style={{
-                          fontSize: 8, fontWeight: 700, borderRadius: 99,
-                          padding: '2px 7px', whiteSpace: 'nowrap',
-                          background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.20)', color: '#EF4444',
-                        }}>PAUSED</span>
-                      ) : (
-                        <span style={{
-                          fontSize: 8, fontWeight: 700, borderRadius: 99,
-                          padding: '2px 7px', whiteSpace: 'nowrap',
-                          background: 'rgba(124,58,237,0.10)', border: '1px solid rgba(124,58,237,0.28)', color: '#A78BFA',
-                        }}>ACTIVE</span>
-                      )}
+                      <span style={{
+                        fontSize: 8.5, fontWeight: 700, borderRadius: 99, letterSpacing: '0.05em',
+                        padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0,
+                        background: `color-mix(in srgb, ${badge.c} 12%, transparent)`,
+                        border: `1px solid color-mix(in srgb, ${badge.c} 30%, transparent)`, color: badge.c,
+                      }}>{badge.t}</span>
                     </div>
 
-                    {/* Findings bar */}
+                    {/* Findings */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ fontSize: 9.5, color: '#3A3A58', textTransform: 'uppercase', letterSpacing: '0.08em' }}>findings</span>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: ac, fontFamily: "'JetBrains Mono', monospace" }}>{findCount}</span>
+                      <span style={{ fontSize: 9.5, color: 'var(--text-mute)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>findings</span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: ac, fontFamily: 'var(--mono)' }}>{findCount}</span>
                     </div>
-                    <div style={{
-                      height: 4, borderRadius: 99, background: 'rgba(12,12,26,0.8)',
-                      marginBottom: 10, overflow: 'hidden',
-                    }}>
+                    <div style={{ height: 4, borderRadius: 99, background: 'rgba(2,2,8,0.6)', marginBottom: 12, overflow: 'hidden' }}>
                       <div style={{
-                        height: '100%', borderRadius: 99,
-                        background: ac,
+                        height: '100%', borderRadius: 99, background: ac,
                         width: `${Math.min(100, (findCount / 20) * 100)}%`,
-                        boxShadow: findCount > 0 ? `0 0 6px ${ac}88` : 'none',
-                        transition: 'width 0.3s ease',
+                        boxShadow: findCount > 0 ? `0 0 6px ${ac}` : 'none', transition: 'width 0.3s ease',
                       }} />
                     </div>
 
                     {/* Tags */}
-                    <div style={{ display: 'flex', gap: 5 }}>
-                      <span style={{
-                        fontSize: 9, fontFamily: "'JetBrains Mono', monospace",
-                        background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.18)',
-                        color: '#3A3A58', borderRadius: 99, padding: '1px 6px',
-                      }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--mono)', background: 'var(--purple-glow)', border: '1px solid var(--border-mid)', color: 'var(--purple-light)', borderRadius: 99, padding: '2px 7px' }}>
                         {phase}
                       </span>
-                      <span style={{
-                        fontSize: 9, fontFamily: "'JetBrains Mono', monospace",
-                        background: 'rgba(12,12,26,0.8)', border: '1px solid rgba(50,50,80,0.3)',
-                        color: '#3A3A58', borderRadius: 99, padding: '1px 6px',
-                      }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--mono)', background: 'rgba(2,2,8,0.5)', border: '1px solid var(--border)', color: 'var(--text-mute)', borderRadius: 99, padding: '2px 7px' }}>
                         {new Date(e.createdAt).toLocaleDateString('pt-BR')}
                       </span>
                     </div>
                   </div>
 
-                  {/* Delete button */}
+                  {/* Delete */}
                   {confirmDelete === e.id ? (
                     <div style={{
                       position: 'absolute', right: 0, top: 0, bottom: 0,
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '0 10px 0 18px',
-                      background: 'linear-gradient(to right, transparent, rgba(12,12,26,0.98) 18px)',
-                      borderRadius: '0 8px 8px 0',
-                      zIndex: 2,
+                      display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px 0 20px',
+                      background: 'linear-gradient(to right, transparent, var(--bg) 20px)',
+                      borderRadius: '0 12px 12px 0', zIndex: 2,
                     }}>
-                      <span style={{ color: '#94A3B8', fontSize: 10, whiteSpace: 'nowrap' }}>Excluir?</span>
-                      <button
-                        onClick={(ev) => { ev.stopPropagation(); handleDelete(e.id) }}
-                        disabled={deleting === e.id}
+                      <span style={{ color: 'var(--muted)', fontSize: 10.5, whiteSpace: 'nowrap' }}>Excluir?</span>
+                      <button onClick={(ev) => { ev.stopPropagation(); handleDelete(e.id) }} disabled={deleting === e.id}
                         style={{
-                          fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 5,
-                          background: 'rgba(239,68,68,0.15)', color: '#EF4444',
-                          border: '1px solid rgba(239,68,68,0.5)',
+                          fontSize: 10.5, fontWeight: 700, padding: '4px 9px', borderRadius: 6,
+                          background: 'color-mix(in srgb, var(--critical) 15%, transparent)', color: 'var(--critical)',
+                          border: '1px solid color-mix(in srgb, var(--critical) 50%, transparent)',
                           cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {deleting === e.id ? '...' : 'Sim'}
+                        }}>
+                        {deleting === e.id ? '…' : 'Sim'}
                       </button>
-                      <button
-                        onClick={(ev) => { ev.stopPropagation(); setConfirmDelete(null) }}
+                      <button onClick={(ev) => { ev.stopPropagation(); setConfirmDelete(null) }}
                         style={{
-                          fontSize: 10, padding: '3px 8px', borderRadius: 5,
-                          background: 'rgba(45,45,78,0.5)', color: '#94A3B8',
-                          border: '1px solid rgba(124,58,237,0.2)',
-                          cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-                        }}
-                      >
+                          fontSize: 10.5, padding: '4px 9px', borderRadius: 6,
+                          background: 'rgba(45,45,78,0.5)', color: 'var(--muted)',
+                          border: '1px solid var(--border-mid)', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+                        }}>
                         Não
                       </button>
                     </div>
                   ) : (
                     isH && isAdmin && (
-                      <div style={{ position: 'absolute', right: 8, top: 8 }}>
-                        <button
-                          onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); setConfirmDelete(e.id) }}
-                          style={{
-                            background: 'rgba(12,12,26,0.9)', border: '1px solid rgba(50,50,80,0.4)',
-                            cursor: 'pointer', color: '#3A3A58',
-                            padding: 5, display: 'flex', alignItems: 'center',
-                            borderRadius: 5, transition: 'all 0.15s',
-                          }}
-                          onMouseEnter={(ev) => { ev.currentTarget.style.color = '#EF4444'; ev.currentTarget.style.borderColor = 'rgba(239,68,68,0.4)' }}
-                          onMouseLeave={(ev) => { ev.currentTarget.style.color = '#3A3A58'; ev.currentTarget.style.borderColor = 'rgba(50,50,80,0.4)' }}
-                          title="Excluir engagement"
-                        >
-                          {TrashIco(12)}
-                        </button>
-                      </div>
+                      <button
+                        onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); setConfirmDelete(e.id) }}
+                        title="Excluir engagement" aria-label="Excluir engagement"
+                        style={{
+                          position: 'absolute', right: 8, top: 8,
+                          background: 'var(--bg)', border: '1px solid var(--border-mid)',
+                          cursor: 'pointer', color: 'var(--text-mute)', padding: 6,
+                          display: 'flex', alignItems: 'center', borderRadius: 6, transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={(ev) => { ev.currentTarget.style.color = 'var(--critical)'; ev.currentTarget.style.borderColor = 'color-mix(in srgb, var(--critical) 40%, transparent)' }}
+                        onMouseLeave={(ev) => { ev.currentTarget.style.color = 'var(--text-mute)'; ev.currentTarget.style.borderColor = 'var(--border-mid)' }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     )
                   )}
                 </div>
