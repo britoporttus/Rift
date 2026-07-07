@@ -1,17 +1,107 @@
 const { spawn } = require('child_process')
 const { execSync } = require('child_process')
+const fs = require('fs')
+const path = require('path')
+const yaml = require('js-yaml')
 
 const FRAMEWORK_PATH = process.env.FRAMEWORK_PATH || '/home/digitalbath/pentest-framework-v2'
+// Janela de contexto do modelo (tokens) — base do medidor de "memória".
+// Ajustável por env; 200k cobre Sonnet/Opus/Fable atuais.
+const CONTEXT_LIMIT = Number(process.env.CONTEXT_LIMIT) || 200000
+
+function writeScopeYaml(engagement) {
+  const target = engagement.target || 'unknown'
+  const slug   = engagement.slug   || engagement.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'engagement'
+  const date   = engagement.date   || new Date().toISOString().slice(0, 10)
+  const id     = `${slug}-${date.replace(/-/g, '')}`
+  const now    = new Date().toISOString()
+
+  const configDir = path.join(FRAMEWORK_PATH, 'config')
+  if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true })
+
+  // Create context dir + subdirs for this engagement
+  const ctxDir = path.join(FRAMEWORK_PATH, 'context', id)
+  if (!fs.existsSync(ctxDir)) fs.mkdirSync(ctxDir, { recursive: true })
+  const parsedDir = path.join(ctxDir, 'parsed')
+  if (!fs.existsSync(parsedDir)) fs.mkdirSync(parsedDir, { recursive: true })
+  const rawDir = path.join(ctxDir, 'raw')
+  if (!fs.existsSync(rawDir)) fs.mkdirSync(rawDir, { recursive: true })
+
+  // Check for existing detailed scope created by /pentest-intake
+  const ctxScopeFile = path.join(ctxDir, 'scope.yaml')
+  const configScopeFile = path.join(configDir, 'scope.yaml')
+
+  if (fs.existsSync(ctxScopeFile)) {
+    // Intake already created a detailed scope — use it as the authoritative config
+    // This preserves IP ranges, out_of_scope, intensity, WAF info, etc.
+    const existingScope = fs.readFileSync(ctxScopeFile, 'utf8')
+    fs.writeFileSync(configScopeFile, existingScope, 'utf8')
+  } else {
+    // No intake scope yet — write a baseline scope for framework authorization.
+    // Serializado via yaml.dump: `target` é input do usuário e NÃO pode ser
+    // interpolado cru numa string YAML (injeção quebraria o escopo de autorização).
+    const scopeYaml = yaml.dump({
+      engagement: {
+        id,
+        target,
+        created: engagement.createdAt || now,
+      },
+      scope: {
+        domains: [target, `*.${target}`],
+        ip_ranges: [],
+        out_of_scope: [],
+        environment: 'production',
+        app_type: 'web',
+        fragile: false,
+      },
+      intensity: 'medium',
+      targeted_vectors: [],
+      operator_context: {
+        known_stack: [],
+        waf: { present: 'unknown', type: '', known_rules: [] },
+        skip_findings: [],
+        focus_areas: [],
+        notes: '',
+      },
+      limits: { time_window: '', spending_usd: 5.0, notifications: 'checkpoint' },
+    }, { lineWidth: -1 })
+    fs.writeFileSync(configScopeFile, scopeYaml, 'utf8')
+    // Also write to context dir so intake can update it later
+    fs.writeFileSync(ctxScopeFile, scopeYaml, 'utf8')
+  }
+
+  // Write context/{id}/engagement-state.yaml — only if it doesn't exist yet
+  const stateFile = path.join(ctxDir, 'engagement-state.yaml')
+  if (!fs.existsSync(stateFile)) {
+    fs.writeFileSync(stateFile, yaml.dump({
+      engagement_id: id,
+      credential_state: 'none',
+      current_phase: 'idle',
+      checkpoint_reached: false,
+      started_at: now,
+      last_updated: now,
+      phases_completed: [],
+      shadow_graph: { hosts: [], credentials: [], vulnerabilities: [], attack_chains: [] },
+    }, { lineWidth: -1 }), 'utf8')
+  }
+}
 
 // Resolve claude binary — prefer PATH, fall back to known locations
 function findClaude() {
   try { return execSync('which claude', { encoding: 'utf8' }).trim() } catch {}
+  // readdir do dir de extensões do VS Code envolvido em try: se não existir
+  // (ex.: CI, outra máquina) não pode derrubar o boot do backend (achado #15).
+  let vscodeCandidates = []
+  try {
+    vscodeCandidates = require('fs')
+      .readdirSync('/home/digitalbath/.vscode-server/extensions', { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name.startsWith('anthropic.claude-code'))
+      .map(d => `/home/digitalbath/.vscode-server/extensions/${d.name}/resources/native-binary/claude`)
+  } catch {}
   const candidates = [
     '/home/digitalbath/.local/bin/claude',
     '/usr/local/bin/claude',
-    ...require('fs').readdirSync('/home/digitalbath/.vscode-server/extensions', { withFileTypes: true })
-      .filter(d => d.isDirectory() && d.name.startsWith('anthropic.claude-code'))
-      .map(d => `/home/digitalbath/.vscode-server/extensions/${d.name}/resources/native-binary/claude`),
+    ...vscodeCandidates,
   ]
   for (const p of candidates) {
     try { require('fs').accessSync(p, require('fs').constants.X_OK); return p } catch {}
@@ -20,8 +110,52 @@ function findClaude() {
 }
 const CLAUDE_BIN = process.env.CLAUDE_PATH || findClaude()
 
-// engagementId -> { proc, subscribers: Set<WebSocket> }
-const sessions = new Map()
+// sessionId -> { proc, subscribers: Set<WebSocket> }
+const runningSessions = new Map()
+
+// Rift sessionId -> claude CLI session_id (para --resume entre turnos).
+// Dá ao agente memória real da conversa: ele não re-roda recon nem
+// reimprime status a cada mensagem. Em memória do processo do backend
+// (sobrevive ao reset de limite de uso do Claude; perde-se só se o
+// backend reiniciar, caso em que o histórico em texto cobre o gap).
+const claudeSessions = new Map()
+
+// Timeout de run (mata o claude se ele travar) + graça antes do SIGKILL.
+const RUN_TIMEOUT_MS = Number(process.env.RUN_TIMEOUT_MS) || 45 * 60 * 1000
+const KILL_GRACE_MS  = Number(process.env.KILL_GRACE_MS) || 5000
+
+// SEC-1: NUNCA repassar todo o process.env ao agente. Ele roda bash arbitrário
+// com --dangerously-skip-permissions e o prompt é 100% controlado pelo operador,
+// então qualquer segredo no ambiente (JWT_SECRET, MONGO_URI, AZURE_*,
+// ADMIN_PASSWORD…) seria exfiltrável por prompt injection. Passamos só o mínimo
+// que o CLI do Claude precisa para rodar.
+const ENV_ALLOWLIST = [
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR',
+  'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR',
+  // Credenciais do próprio Claude CLI (assinatura/API) — necessárias para o agente.
+  'ANTHROPIC_API_KEY', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN',
+  'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+]
+function buildAgentEnv(extra) {
+  const env = {}
+  for (const key of ENV_ALLOWLIST) {
+    if (process.env[key] !== undefined) env[key] = process.env[key]
+  }
+  return { ...env, ...extra }
+}
+
+// Mata o processo E seu grupo (as ferramentas que o claude spawnou: nmap,
+// subfinder…). Com detached:true o filho vira líder de grupo → -pid mata o grupo.
+function killTree(proc, signal) {
+  if (!proc || proc.killed) return
+  try { process.kill(-proc.pid, signal) } catch { try { proc.kill(signal) } catch {} }
+}
+// SIGTERM e, se não morrer no período de graça, SIGKILL.
+function killTreeEscalated(proc) {
+  killTree(proc, 'SIGTERM')
+  const t = setTimeout(() => killTree(proc, 'SIGKILL'), KILL_GRACE_MS)
+  if (t.unref) t.unref()
+}
 
 function broadcast(subscribers, event) {
   const json = JSON.stringify(event)
@@ -34,7 +168,29 @@ function parseStreamLine(line) {
   try { return JSON.parse(line) } catch { return null }
 }
 
-// Map claude --output-format stream-json events to our WS contract
+// Detecta um bloco de pergunta interativa no texto do agente:
+//   ```rift-question
+//   {"text": "Pergunta?", "options": ["Sim", "Não"]}
+//   ```
+// Retorna o(s) evento(s) WS: a prosa que sobra (se houver) como agent_message
+// e a pergunta como agent_question (renderizada com botões clicáveis no front).
+function splitQuestion(text) {
+  const m = text.match(/```rift-question\s*\n([\s\S]*?)```/)
+  if (!m) return { type: 'agent_message', text }
+  let q = null
+  try {
+    const obj = JSON.parse(m[1].trim())
+    if (obj && obj.text && Array.isArray(obj.options) && obj.options.length) {
+      q = { type: 'agent_question', text: String(obj.text), options: obj.options.map(String).slice(0, 6) }
+    }
+  } catch {}
+  if (!q) return { type: 'agent_message', text }   // malformado → mostra cru
+  const prose = text.replace(m[0], '').trim()
+  return prose ? [{ type: 'agent_message', text: prose }, q] : q
+}
+
+// Map claude --output-format stream-json events to our WS contract.
+// Pode retornar um evento, um array de eventos, ou null.
 function toWsEvent(parsed, rawLine) {
   if (!parsed) {
     const text = rawLine.trim()
@@ -46,7 +202,7 @@ function toWsEvent(parsed, rawLine) {
       const content = parsed.message?.content
       if (!Array.isArray(content)) return null
       const block = content.find((b) => b.type === 'text')
-      return block ? { type: 'agent_message', text: block.text } : null
+      return block ? splitQuestion(block.text) : null
     }
     case 'tool_use':
       return {
@@ -66,34 +222,141 @@ function toWsEvent(parsed, rawLine) {
         result: out.slice(0, 500),
       }
     }
-    case 'result':
+    case 'result': {
+      // result.result text já saiu via eventos assistant — aqui usamos custo + contexto.
+      const events = []
       if (parsed.cost_usd != null) {
-        return {
+        events.push({
           type: 'cost_update',
           usd: parsed.cost_usd,
-          tokens: parsed.usage?.output_tokens ?? 0,
-        }
+          tokens: (parsed.usage?.input_tokens ?? 0) + (parsed.usage?.output_tokens ?? 0),
+        })
       }
-      return parsed.result ? { type: 'agent_message', text: parsed.result } : null
+      // Tamanho do contexto ≈ tudo que entrou neste turno (com --resume o
+      // transcript inteiro é recarregado, então input+cache refletem a "memória").
+      const u = parsed.usage || {}
+      const ctxTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+      if (ctxTokens > 0) {
+        events.push({
+          type: 'context_usage',
+          tokens: ctxTokens,
+          limit: CONTEXT_LIMIT,
+          percent: Math.min(100, Math.round((ctxTokens / CONTEXT_LIMIT) * 100)),
+        })
+      }
+      return events.length ? events : null
+    }
     default:
       return null
   }
 }
 
-function run(engagementId, prompt, subscribers, onCostUpdate, onEvent) {
-  if (sessions.has(engagementId)) {
-    broadcast(subscribers, { type: 'agent_message', text: '⚠️ Sessão já ativa para este engagement.' })
+// sessionId  = Rift chat session ID (key for runner isolation)
+// engagementId = MongoDB engagement UUID (used for ENGAGEMENT_ID env var and scope writing)
+function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent, engagement, user, opts = {}) {
+  if (runningSessions.has(sessionId)) {
+    broadcast(subscribers, { type: 'agent_message', text: '⚠️ Agente já ativo nesta sessão.' })
     return
   }
 
+  const costCeiling = typeof opts.costCeiling === 'number' && opts.costCeiling > 0 ? opts.costCeiling : null
+  let budgetExceeded = false
+
+  if (engagement) {
+    try { writeScopeYaml(engagement) } catch (err) {
+      console.warn('[agent-runner] falha ao escrever scope.yaml:', err.message)
+    }
+  }
+
+  // Resolve user role — passed from server.js so intake can check admin status
+  const isAdmin  = user?.role === 'admin' || user?.isAdmin === true
+  const userName = user?.username || user?.email || ''
+
+  // Continuidade de sessão: se já temos um claude session_id para esta
+  // sessão do Rift (em memória OU vindo do banco via opts.resumeSessionId),
+  // retomamos a conversa em vez de começar do zero.
+  let claudeSessionId = claudeSessions.get(sessionId) || opts.resumeSessionId || null
+  if (claudeSessionId) claudeSessions.set(sessionId, claudeSessionId)
+  const resuming = !!claudeSessionId
+
+  // No primeiro turno injetamos o contexto de sistema (escopo, role, regras).
+  // Ao retomar (--resume), a sessão já tem esse contexto + o histórico real,
+  // então mandamos só a mensagem do operador — sem reinjetar nada.
+  const finalPrompt = resuming ? prompt : (opts.systemContext || '') + prompt
+
+  // --dangerously-skip-permissions: modo headless não tem TTY, então não há
+  // diálogo de permissão para responder. Sem isto, toda Write/Edit fora do
+  // allowlist é negada e o agente fica preso pedindo aprovação de um popup
+  // que não existe. Apropriado: ferramenta de pentest autorizada, infra
+  // própria, escopo limitado por config/scope.yaml e teto de custo do Rift.
+  const args = ['--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions']
+  if (resuming) args.push('--resume', claudeSessionId)
+  args.push('--print', finalPrompt)
+
   const proc = spawn(
     CLAUDE_BIN,
-    ['--output-format', 'stream-json', '--verbose', '--print', prompt],
-    { cwd: FRAMEWORK_PATH, env: { ...process.env, ENGAGEMENT_ID: engagementId } }
+    args,
+    {
+      cwd: FRAMEWORK_PATH,
+      // detached: novo grupo de processos → conseguimos matar a árvore inteira
+      // (as ferramentas que o agente dispara) no stop/timeout/shutdown.
+      detached: true,
+      // SEC-1: env mínima, sem segredos do backend (ver ENV_ALLOWLIST/buildAgentEnv).
+      env: buildAgentEnv({
+        ENGAGEMENT_ID:       engagementId,
+        RIFT_USER_IS_ADMIN:  isAdmin ? 'true' : 'false',
+        RIFT_USER_NAME:      userName,
+        RIFT_USER_ROLE:      user?.role || (isAdmin ? 'admin' : 'user'),
+        // SEC-3: fases agressivas (exploit/post) só quando o backend libera (admin
+        // ou scan agendado com autoExploit). O framework deve tratar como restrição
+        // dura, não sugestão.
+        RIFT_ALLOW_AGGRESSIVE: (isAdmin || opts.allowAggressive) ? 'true' : 'false',
+        // Papel do agente (Fase 2): 'blackbox' = Agente 1 (sem credenciais),
+        // 'authenticated' = Agente 2 (em construção). Default blackbox.
+        AGENT_ROLE:          opts.agentRole || 'blackbox',
+      }),
+    }
   )
 
-  sessions.set(engagementId, { proc, subscribers })
+  // Timeout: se o claude travar, mata a árvore e libera a sessão.
+  const timeoutTimer = setTimeout(() => {
+    broadcast(subscribers, {
+      type: 'agent_message',
+      text: `⏱️ Tempo limite de execução (${Math.round(RUN_TIMEOUT_MS / 60000)} min) atingido — encerrando o agente.`,
+    })
+    killTreeEscalated(proc)
+  }, RUN_TIMEOUT_MS)
+  if (timeoutTimer.unref) timeoutTimer.unref()
+
+  runningSessions.set(sessionId, { proc, subscribers, timeoutTimer })
+  // Sinais de ciclo de vida explícitos: o front trava o input enquanto
+  // 'running' e libera em 'idle' (não depende mais de heurística de streaming).
+  broadcast(subscribers, { type: 'agent_status', state: 'running' })
   broadcast(subscribers, { type: 'agent_thinking', text: 'Agente iniciando...' })
+
+  // Processa um único evento WS (broadcast + custo + enforcement de teto).
+  function emit(event) {
+    if (!event) return
+    broadcast(subscribers, event)
+    if (event.type === 'cost_update' && onCostUpdate) onCostUpdate(event.usd, event.tokens)
+    if (onEvent) onEvent(event)
+    if (event.type === 'cost_update' && costCeiling && event.usd >= costCeiling && !budgetExceeded) {
+      budgetExceeded = true
+      broadcast(subscribers, {
+        type: 'agent_message',
+        text: `🛑 Teto de custo (US$ ${costCeiling.toFixed(2)}) atingido — sessão encerrada automaticamente.`,
+      })
+      if (opts.onBudgetExceeded) opts.onBudgetExceeded(event.usd)
+      killTreeEscalated(proc)
+    }
+  }
+
+  // toWsEvent pode devolver um evento, um array, ou null → normaliza e emite.
+  function emitFrom(parsed, line) {
+    const out = toWsEvent(parsed, line)
+    const events = Array.isArray(out) ? out : out ? [out] : []
+    for (const ev of events) emit(ev)
+  }
 
   let buf = ''
 
@@ -103,12 +366,15 @@ function run(engagementId, prompt, subscribers, onCostUpdate, onEvent) {
     buf = lines.pop()
     for (const line of lines) {
       if (!line.trim()) continue
-      const event = toWsEvent(parseStreamLine(line), line)
-      if (event) {
-        broadcast(subscribers, event)
-        if (event.type === 'cost_update' && onCostUpdate) onCostUpdate(event.usd, event.tokens)
-        if (onEvent) onEvent(event)
+      const parsed = parseStreamLine(line)
+      // Todo evento do stream-json carrega o session_id da conversa.
+      // Guardamos (memória + banco via callback) para retomar no próximo turno.
+      if (parsed && parsed.session_id && parsed.session_id !== claudeSessionId) {
+        claudeSessionId = parsed.session_id
+        claudeSessions.set(sessionId, claudeSessionId)
+        if (opts.onClaudeSession) opts.onClaudeSession(claudeSessionId)
       }
+      emitFrom(parsed, line)
     }
   })
 
@@ -121,32 +387,62 @@ function run(engagementId, prompt, subscribers, onCostUpdate, onEvent) {
   })
 
   proc.on('close', (code) => {
+    clearTimeout(timeoutTimer)
     if (buf.trim()) {
-      const event = toWsEvent(parseStreamLine(buf), buf)
-      if (event) broadcast(subscribers, event)
+      const parsed = parseStreamLine(buf)
+      if (parsed && parsed.session_id && parsed.session_id !== claudeSessionId) {
+        claudeSessionId = parsed.session_id
+        claudeSessions.set(sessionId, claudeSessionId)
+        if (opts.onClaudeSession) opts.onClaudeSession(claudeSessionId)
+      }
+      emitFrom(parsed, buf)
     }
-    sessions.delete(engagementId)
+    runningSessions.delete(sessionId)
     // only surface error exits to the user
-    if (code !== 0) {
+    if (code !== 0 && !budgetExceeded) {
       broadcast(subscribers, { type: 'agent_message', text: `⚠️ Agente encerrado com erro (código ${code}).` })
     }
+    // Libera o input do operador — o turno do agente terminou.
+    broadcast(subscribers, { type: 'agent_status', state: 'idle' })
+    if (opts.onClose) opts.onClose(code, { budgetExceeded })
   })
 }
 
-function stop(engagementId) {
-  const s = sessions.get(engagementId)
-  if (s) { s.proc.kill('SIGTERM'); sessions.delete(engagementId) }
+function stop(sessionId) {
+  const s = runningSessions.get(sessionId)
+  if (s) {
+    if (s.timeoutTimer) clearTimeout(s.timeoutTimer)
+    killTreeEscalated(s.proc)
+    runningSessions.delete(sessionId)
+  }
 }
 
-function sendInput(engagementId, text) {
-  const s = sessions.get(engagementId)
+// Encerra todas as sessões ativas — usado no shutdown gracioso do backend
+// para não deixar processos claude (e as ferramentas que eles spawnaram) órfãos.
+function stopAll() {
+  for (const [, s] of runningSessions) {
+    if (s.timeoutTimer) clearTimeout(s.timeoutTimer)
+    killTreeEscalated(s.proc)
+  }
+  runningSessions.clear()
+}
+
+function sendInput(sessionId, text) {
+  const s = runningSessions.get(sessionId)
   if (!s) return false
   s.proc.stdin.write(text + '\n')
   return true
 }
 
-function isRunning(engagementId) {
-  return sessions.has(engagementId)
+function isRunning(sessionId) {
+  return runningSessions.has(sessionId)
 }
 
-module.exports = { run, stop, sendInput, isRunning }
+// Esquece o claude session_id desta sessão → o próximo turno começa uma
+// conversa nova (CLI enxuto). Usado pela compactação: o estado do engagement
+// continua em disco, então a sessão nova o recarrega.
+function clearSession(sessionId) {
+  claudeSessions.delete(sessionId)
+}
+
+module.exports = { run, stop, stopAll, sendInput, isRunning, clearSession, buildAgentEnv, ENV_ALLOWLIST }

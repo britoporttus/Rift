@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
+import { api } from '@/lib/api'
 
 const ERROR_MESSAGES: Record<string, string> = {
   domain_not_allowed: 'Acesso não permitido. Use um email @porttus.com ou @trustsis.com.',
@@ -227,7 +228,7 @@ const STAGES = ['ESTABLISHING TLS HANDSHAKE', 'VERIFYING IDENTITY TOKEN', 'CHECK
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 function LoginForm({ onLogin, ssoError }: { onLogin: (e: string, p: string) => Promise<void>; ssoError: string }) {
-  const [email, setEmail] = useState('admin@rift.local')
+  const [email, setEmail] = useState('')
   const [pass,  setPass]  = useState('')
   const [show,  setShow]  = useState(false)
   const [err,   setErr]   = useState(ssoError)
@@ -487,10 +488,17 @@ function LoginPageInner() {
   const [ssoError, setSsoError] = useState('')
 
   useEffect(() => {
-    const token = searchParams.get('token')
+    const code = searchParams.get('code')
     const err = searchParams.get('error')
-    if (token) { setToken(token); router.replace('/dashboard') }
-    else if (err) setSsoError(ERROR_MESSAGES[err] || `Erro SSO: ${err}`)
+    if (code) {
+      // Troca o código de uso único pelo JWT (token não trafega na URL).
+      api.auth.exchange(code)
+        .then(({ token }) => setToken(token))
+        .then(() => router.replace('/dashboard'))
+        .catch(() => setSsoError(ERROR_MESSAGES['token_exchange_failed']))
+    } else if (err) {
+      setSsoError(ERROR_MESSAGES[err] || `Erro SSO: ${err}`)
+    }
   }, [searchParams, router, setToken])
 
   const handleLogin = async (email: string, password: string) => {

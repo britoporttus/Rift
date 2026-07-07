@@ -17,6 +17,29 @@ const findingSchema = new mongoose.Schema({
   phase:          { type: Number, default: null },
   confirmed:      { type: Boolean, default: false },
   sourceFile:     { type: String, default: null },
+
+  // --- Taxonomia (config/finding-taxonomy.yaml) ---
+  // state separa o que É vulnerabilidade do que é só observação/indício.
+  state:          { type: String, enum: ['confirmed', 'probable', 'informational', 'false_positive'], default: 'informational', index: true },
+  confidence:     { type: String, enum: ['high', 'medium', 'low'], default: 'medium' },
+  reproducible:   { type: Boolean, default: null },
+  poc:            { type: String, default: null },
+  needsToConfirm: { type: String, default: null },   // preenchido quando state=probable
+  ruledOutReason: { type: String, default: null },   // preenchido quando state=false_positive
+
+  // --- Classificação padronizada ---
+  cvssVector:     { type: String, default: null },
+  owasp:          { type: String, default: null },
+  owaspApi:       { type: String, default: null },
+  cwe:            { type: String, default: null },
+  mitre:          { type: String, default: null },
+  discoveredBy:   { type: String, default: null },
+
+  // --- Rastreamento de regressão (re-scans) ---
+  fingerprint:        { type: String, default: null, index: true },
+  remediationStatus:  { type: String, enum: ['open', 'fixed', 'regressed', 'accepted_risk'], default: 'open' },
+  firstSeen:          { type: String, default: null },
+  lastSeen:           { type: String, default: null },
 }, { timestamps: true })
 
 module.exports = mongoose.model('Finding', findingSchema)

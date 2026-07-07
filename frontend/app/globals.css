@@ -1,21 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
+  --mono: 'JetBrains Mono', monospace;
   --bg: #080810;
-  --surface: #0F0F1A;
-  --border: #2D2D4E;
+  --surface: rgba(4,4,12,0.97);
+  --panel: rgba(5,5,14,0.95);
+  --border: rgba(124,58,237,0.13);
+  --border-mid: rgba(124,58,237,0.28);
+  --border-hi: rgba(124,58,237,0.45);
   --purple: #7C3AED;
   --purple-light: #A78BFA;
   --purple-glow: rgba(124, 58, 237, 0.15);
   --critical: #EF4444;
-  --high: #F97316;
+  --high: #F59E0B;
   --medium: #EAB308;
   --low: #22C55E;
   --info: #3B82F6;
   --text: #E2E8F0;
   --muted: #94A3B8;
+  --text-mute: #3A3A58;
+  --text-dim: #252545;
 }
 
 * {
@@ -30,7 +38,7 @@ body {
   overflow-x: hidden;
   background-color: var(--bg);
   color: var(--text);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: 'Space Grotesk', sans-serif;
 }
 
 a {
@@ -39,21 +47,29 @@ a {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--surface);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
+  background: rgba(124,58,237,0.22);
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--purple);
+  background: rgba(124,58,237,0.45);
 }
+
+/* ── App animations ── */
+@keyframes rowIn    { from{opacity:0;transform:translateX(-5px)} to{opacity:1;transform:translateX(0)} }
+@keyframes fadeIn   { from{opacity:0} to{opacity:1} }
+@keyframes pulse    { 0%,100%{opacity:.5} 50%{opacity:1} }
+@keyframes spin     { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+@keyframes ticker   { from{transform:translateX(0)} to{transform:translateX(-50%)} }
 
 /* ── Login page animations ── */
 @keyframes tvSpin      { to { transform: rotate(360deg); } }

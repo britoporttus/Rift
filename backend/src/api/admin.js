@@ -3,6 +3,7 @@ const os = require('os')
 const { execSync } = require('child_process')
 const { requireAuth } = require('../auth')
 const { readUsage } = require('../store')
+const Usage = require('../models/Usage')
 
 const router = Router()
 router.use(requireAuth(['admin']))
@@ -47,6 +48,42 @@ router.get('/usage', async (_req, res) => {
     byDay[day].tokens += entry.tokens || 0
   }
   res.json(Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date)))
+})
+
+router.get('/usage/by-user', async (_req, res) => {
+  const all = await Usage.find({ userId: { $exists: true } }).sort({ ts: -1 }).lean()
+
+  // group by user → day → engagement
+  const byUser = {}
+  for (const e of all) {
+    const uid = e.userId
+    if (!byUser[uid]) {
+      byUser[uid] = { userId: uid, userName: e.userName, userEmail: e.userEmail, totalUsd: 0, totalTokens: 0, days: {} }
+    }
+    const u = byUser[uid]
+    u.totalUsd    += e.usd    || 0
+    u.totalTokens += e.tokens || 0
+
+    const day = (e.ts || '').toString().slice(0, 10)
+    if (!u.days[day]) u.days[day] = { date: day, usd: 0, tokens: 0, engagements: {} }
+    const d = u.days[day]
+    d.usd    += e.usd    || 0
+    d.tokens += e.tokens || 0
+
+    const eid = e.engagementId || 'unknown'
+    if (!d.engagements[eid]) d.engagements[eid] = { engagementId: eid, engagementName: e.engagementName || eid, usd: 0, tokens: 0 }
+    d.engagements[eid].usd    += e.usd    || 0
+    d.engagements[eid].tokens += e.tokens || 0
+  }
+
+  const result = Object.values(byUser).map((u) => ({
+    ...u,
+    days: Object.values(u.days)
+      .map((d) => ({ ...d, engagements: Object.values(d.engagements) }))
+      .sort((a, b) => b.date.localeCompare(a.date)),
+  })).sort((a, b) => b.totalTokens - a.totalTokens)
+
+  res.json(result)
 })
 
 module.exports = router

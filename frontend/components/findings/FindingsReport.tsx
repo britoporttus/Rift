@@ -1,9 +1,21 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { api, Finding } from '@/lib/api'
+import { api, Finding, RemediationStatus } from '@/lib/api'
+import { SEV_COLOR, SEV_ORDER, safeHref } from '@/lib/severity'
 
-const SEV_COLOR: Record<string, string> = {
-  critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e', info: '#3b82f6',
+// Status de remediação — fecha o ciclo "achei → corrigi → confirmei"
+const REMEDIATION: Record<RemediationStatus, { label: string; color: string; icon: string }> = {
+  open:          { label: 'Aberto',       color: '#f97316', icon: '○' },
+  fixed:         { label: 'Corrigido',    color: '#22c55e', icon: '✓' },
+  regressed:     { label: 'Regrediu',     color: '#ef4444', icon: '⚠' },
+  accepted_risk: { label: 'Risco aceito', color: '#94A3B8', icon: '◆' },
+}
+
+function fmtDate(d?: string | null) {
+  if (!d) return null
+  const t = new Date(d)
+  if (isNaN(t.getTime())) return null
+  return t.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 const TYPE_LABEL: Record<string, string> = {
   vulnerability: 'Vulnerabilidade', weakness: 'Fraqueza', observation: 'Observação',
@@ -11,7 +23,6 @@ const TYPE_LABEL: Record<string, string> = {
 const TYPE_COLOR: Record<string, string> = {
   vulnerability: '#ef4444', weakness: '#f97316', observation: '#3b82f6',
 }
-const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
 // ── SVG donut chart ──────────────────────────────────────────────
 function Donut({ segments, total }: { segments: { value: number; color: string }[]; total: number }) {
@@ -50,11 +61,23 @@ interface ExtFinding extends Finding {
   instances?: { method: string; uri: string; evidence?: string }[]
 }
 
-function FindingCard({ f }: { f: ExtFinding }) {
+function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id: string, s: RemediationStatus) => void }) {
   const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
   const sev = f.severity
   const type = f.finding_type || 'weakness'
   const instances = f.instances || []
+  const rem = REMEDIATION[f.remediationStatus ?? 'open']
+  const firstSeen = fmtDate(f.firstSeen)
+  const lastSeen  = fmtDate(f.lastSeen)
+
+  async function changeStatus(s: RemediationStatus, e: React.MouseEvent) {
+    e.stopPropagation()
+    if (s === (f.remediationStatus ?? 'open') || saving) return
+    setSaving(true)
+    try { await api.findings.setStatus(f.id, s); onStatusChange(f.id, s) }
+    finally { setSaving(false) }
+  }
 
   return (
     <div style={{
@@ -86,6 +109,15 @@ function FindingCard({ f }: { f: ExtFinding }) {
 
         {/* meta */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {/* remediation status badge */}
+          <span style={{
+            background: `${rem.color}22`, color: rem.color,
+            border: `1px solid ${rem.color}55`,
+            borderRadius: 999, padding: '1px 8px', fontSize: 10, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}>
+            <span>{rem.icon}</span>{rem.label}
+          </span>
           {/* type badge */}
           <span style={{
             background: `${TYPE_COLOR[type]}22`, color: TYPE_COLOR[type],
@@ -122,6 +154,36 @@ function FindingCard({ f }: { f: ExtFinding }) {
       {/* body */}
       {open && (
         <div style={{ padding: '0 16px 16px 32px' }}>
+          {/* remediation control + temporal tracking */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            padding: '10px 0 12px', borderBottom: '1px solid rgba(46,49,73,.5)', marginBottom: 12,
+          }}>
+            <span style={{ fontSize: 11, color: '#94A3B8' }}>Remediação:</span>
+            {(['open', 'fixed', 'accepted_risk'] as RemediationStatus[]).map(s => {
+              const active = (f.remediationStatus ?? 'open') === s
+              const cfg = REMEDIATION[s]
+              return (
+                <button key={s} onClick={(e) => changeStatus(s, e)} disabled={saving}
+                  style={{
+                    padding: '3px 10px', borderRadius: 6, fontSize: 11, fontFamily: 'inherit',
+                    cursor: saving ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                    border: `1px solid ${active ? cfg.color : 'var(--border)'}`,
+                    background: active ? `${cfg.color}22` : 'transparent',
+                    color: active ? cfg.color : '#94A3B8',
+                  }}>
+                  <span>{cfg.icon}</span>{cfg.label}
+                </button>
+              )
+            })}
+            {(firstSeen || lastSeen) && (
+              <span style={{ fontSize: 11, color: '#64748b', marginLeft: 'auto' }}>
+                {firstSeen && `1ª detecção: ${firstSeen}`}
+                {firstSeen && lastSeen && '  ·  '}
+                {lastSeen && `última: ${lastSeen}`}
+              </span>
+            )}
+          </div>
           {f.description && (
             <p style={{ color: '#94A3B8', fontSize: 13, lineHeight: 1.7, marginBottom: 12 }}>{f.description}</p>
           )}
@@ -163,9 +225,9 @@ function FindingCard({ f }: { f: ExtFinding }) {
                           </span>
                         </td>
                         <td style={{ padding: '6px 8px', wordBreak: 'break-all' }}>
-                          <a href={inst.uri} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', textDecoration: 'none' }}>
-                            {inst.uri}
-                          </a>
+                          {safeHref(inst.uri)
+                            ? <a href={safeHref(inst.uri)!} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', textDecoration: 'none' }}>{inst.uri}</a>
+                            : <span style={{ color: '#94A3B8' }} title="URL não-http bloqueada por segurança">{inst.uri}</span>}
                         </td>
                         <td style={{ padding: '6px 8px', color: '#94A3B8', wordBreak: 'break-all' }}>
                           {inst.evidence || '—'}
@@ -190,6 +252,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
   const [findings, setFindings] = useState<ExtFinding[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<FilterType>('all')
+  const [statusFilter, setStatusFilter] = useState<RemediationStatus | 'all'>('all')
 
   useEffect(() => {
     api.findings.list({ engagementId })
@@ -197,6 +260,10 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [engagementId])
+
+  function handleStatusChange(id: string, s: RemediationStatus) {
+    setFindings(prev => prev.map(f => f.id === id ? { ...f, remediationStatus: s } : f))
+  }
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#94A3B8', fontSize: 13 }}>
@@ -217,7 +284,11 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
   const observations = byType('observation')
 
   const bySev = (s: string) => sorted.filter(f => f.severity === s)
-  const displayed = filter === 'all' ? sorted : sorted.filter(f => (f.finding_type || 'weakness') === filter)
+  const remCount = (s: RemediationStatus) => sorted.filter(f => (f.remediationStatus ?? 'open') === s).length
+  const byTypeFiltered = filter === 'all' ? sorted : sorted.filter(f => (f.finding_type || 'weakness') === filter)
+  const displayed = statusFilter === 'all'
+    ? byTypeFiltered
+    : byTypeFiltered.filter(f => (f.remediationStatus ?? 'open') === statusFilter)
 
   const donutSegs = SEV_ORDER.map(s => ({ value: bySev(s).length, color: SEV_COLOR[s] }))
   const total = sorted.length
@@ -298,7 +369,38 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
         </div>
       </div>
 
-      {/* ── filter bar ── */}
+      {/* ── remediation status bar ── */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.06em', marginRight: 2 }}>
+          Remediação
+        </span>
+        <button onClick={() => setStatusFilter('all')} style={{
+          padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12,
+          border: '1px solid', borderColor: statusFilter === 'all' ? '#7C3AED' : 'var(--border)',
+          background: statusFilter === 'all' ? 'rgba(124,58,237,.12)' : '#222535',
+          color: statusFilter === 'all' ? '#E2E8F0' : '#94A3B8',
+        }}>
+          Todos ({total})
+        </button>
+        {(['open', 'fixed', 'accepted_risk', 'regressed'] as RemediationStatus[]).map(s => {
+          const cfg = REMEDIATION[s]
+          const count = remCount(s)
+          const active = statusFilter === s
+          return (
+            <button key={s} onClick={() => setStatusFilter(active ? 'all' : s)} style={{
+              padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12,
+              border: '1px solid', display: 'inline-flex', alignItems: 'center', gap: 5,
+              borderColor: active ? cfg.color : 'var(--border)',
+              background: active ? `${cfg.color}1f` : '#222535',
+              color: active ? cfg.color : '#94A3B8',
+            }}>
+              <span>{cfg.icon}</span>{cfg.label} ({count})
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ── filter bar (by type) ── */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
         {filterBtn('all', 'Todos', total)}
         {filterBtn('vulnerability', '● Vulnerabilidade', vulns.length)}
@@ -308,7 +410,9 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
 
       {/* ── finding list ── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {displayed.map(f => <FindingCard key={f.id} f={f} />)}
+        {displayed.length === 0
+          ? <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', fontSize: 13 }}>Nenhum finding com esse filtro.</div>
+          : displayed.map(f => <FindingCard key={f.id} f={f} onStatusChange={handleStatusChange} />)}
       </div>
     </div>
   )

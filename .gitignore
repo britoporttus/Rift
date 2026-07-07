@@ -37,3 +37,6 @@ relatorio-full.html
 
 # GitHub Actions self-hosted runner
 actions-runner/
+
+# Backups de env (contêm segredos)
+*.bak

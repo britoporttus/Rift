@@ -6,9 +6,30 @@ const User = require('../models/User')
 const { signToken } = require('../auth')
 
 const states = new Map()
+// Códigos de uso único para troca segura do JWT após o callback do SSO.
+// Evita expor o token na URL (?token=) — que vaza em histórico, Referer e logs.
+const authCodes = new Map()
 
 const ADMIN_GROUP_IDS = (process.env.AZURE_ADMIN_GROUP_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean)
+
+// Allowlist de domínios validada no SERVIDOR (não confiar só no Enterprise App).
+const ALLOWED_EMAIL_DOMAINS = (process.env.ALLOWED_EMAIL_DOMAINS || 'porttus.com,trustsis.com')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+
+function isAllowedDomain(email) {
+  if (!ALLOWED_EMAIL_DOMAINS.length) return true
+  const domain = String(email).split('@')[1]?.toLowerCase()
+  return !!domain && ALLOWED_EMAIL_DOMAINS.includes(domain)
+}
+
+// Remove códigos/estados expirados periodicamente (evita vazamento de memória).
+function pruneExpired() {
+  const now = Date.now()
+  for (const [k, exp] of states) if (now > exp) states.delete(k)
+  for (const [k, v] of authCodes) if (now > v.expiry) authCodes.delete(k)
+}
+setInterval(pruneExpired, 5 * 60 * 1000).unref()
 
 let _msalClient = null
 function getMsalClient() {
@@ -105,6 +126,13 @@ router.get('/callback', async (req, res) => {
   const name = claims.name || tokenResponse.account?.name || email.split('@')[0]
   const azureId = tokenResponse.account.homeAccountId
 
+  // Authorization: rejeitar domínios fora da allowlist no servidor.
+  // (Sem isso, qualquer conta Microsoft que autentique seria provisionada.)
+  if (!isAllowedDomain(email)) {
+    console.warn(`[SSO] login bloqueado — domínio não permitido: ${email}`)
+    return res.redirect(`${process.env.FRONTEND_URL}/login?error=domain_not_allowed`)
+  }
+
   // Determina role via Graph API
   let role = 'user'
   if (ADMIN_GROUP_IDS.length > 0 && tokenResponse.accessToken) {
@@ -123,8 +151,23 @@ router.get('/callback', async (req, res) => {
 
   console.log(`[SSO] login: ${email} (${role})`)
 
+  // Emite um código de uso único em vez do JWT na URL.
   const token = signToken(dbUser)
-  res.redirect(`${process.env.FRONTEND_URL}/login?token=${token}`)
+  const oneTimeCode = crypto.randomBytes(32).toString('hex')
+  authCodes.set(oneTimeCode, { token, expiry: Date.now() + 60 * 1000 }) // válido por 60s
+  res.redirect(`${process.env.FRONTEND_URL}/login?code=${oneTimeCode}`)
+})
+
+// POST /api/auth/exchange — troca o código de uso único pelo JWT (consome o código).
+router.post('/exchange', (req, res) => {
+  const { code } = req.body ?? {}
+  const entry = code && authCodes.get(code)
+  if (!entry || Date.now() > entry.expiry) {
+    if (code) authCodes.delete(code)
+    return res.status(400).json({ error: 'Código inválido ou expirado' })
+  }
+  authCodes.delete(code) // uso único
+  res.json({ token: entry.token })
 })
 
 module.exports = router

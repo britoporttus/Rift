@@ -7,6 +7,24 @@ const dev = process.env.NODE_ENV !== 'production'
 const port = parseInt(process.env.PORT || '3000', 10)
 const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001'
 
+// Erros de rede transitórios em conexões proxiadas (backend reiniciando, cliente
+// abortando, túnel caindo) NÃO podem derrubar o servidor inteiro. Sem isto, um
+// ECONNRESET vira uncaughtException e o processo morre — era a causa do crash-loop
+// (milhares de restarts no pm2) que apagava o chat e derrubava o WebSocket.
+const TRANSIENT = new Set(['ECONNRESET', 'EPIPE', 'ECONNREFUSED', 'ETIMEDOUT', 'ECANCELED'])
+function isTransientNetErr(err) {
+  return !!err && (TRANSIENT.has(err.code) || /socket hang up/i.test(err.message || ''))
+}
+process.on('uncaughtException', (err) => {
+  if (isTransientNetErr(err)) { console.warn('[server] erro de rede transitório ignorado:', err.message); return }
+  console.error('[server] uncaughtException fatal:', err)
+  process.exit(1)
+})
+process.on('unhandledRejection', (reason) => {
+  if (isTransientNetErr(reason)) { console.warn('[server] rejection de rede transitória ignorada:', reason && reason.message); return }
+  console.error('[server] unhandledRejection:', reason)
+})
+
 const app = next({ dev })
 const handle = app.getRequestHandler()
 
@@ -15,11 +33,14 @@ const proxy = httpProxy.createProxyServer({
   changeOrigin: true,
 })
 
-proxy.on('error', (err, _req, res) => {
-  console.error('[proxy] error:', err.message)
-  if (res && !res.headersSent && res.writeHead) {
-    res.writeHead(502)
-    res.end('Backend unavailable')
+// O 3º argumento é `res` (HTTP) ou o `socket` (upgrade WS) — tratar ambos.
+proxy.on('error', (err, _req, resOrSocket) => {
+  console.warn('[proxy] error:', err.message)
+  if (resOrSocket && typeof resOrSocket.writeHead === 'function') {
+    if (!resOrSocket.headersSent) resOrSocket.writeHead(502)
+    try { resOrSocket.end('Backend unavailable') } catch {}
+  } else if (resOrSocket && typeof resOrSocket.destroy === 'function') {
+    try { resOrSocket.destroy() } catch {}
   }
 })
 
@@ -31,6 +52,8 @@ app.prepare().then(() => {
 
   // Proxy WebSocket upgrades to backend
   server.on('upgrade', (req, socket, head) => {
+    // Sem este listener, um erro no socket de upgrade vira uncaughtException.
+    socket.on('error', (err) => console.warn('[ws-upgrade] socket error:', err.message))
     if (req.url.startsWith('/ws')) {
       proxy.ws(req, socket, head, { target: backendUrl })
     } else {

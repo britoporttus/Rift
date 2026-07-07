@@ -36,7 +36,8 @@ export function ChatInput({ onSend, onStop, agentRunning, connected }: Props) {
 
   function submit(text: string) {
     const t = text.trim()
-    if (!t || !connected) return
+    // Não envia enquanto o agente está rodando — só quando ele devolve o turno.
+    if (!t || !connected || agentRunning) return
     onSend(t)
     setValue('')
     setHints([])
@@ -86,8 +87,8 @@ export function ChatInput({ onSend, onStop, agentRunning, connected }: Props) {
           value={value}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKey}
-          placeholder={connected ? 'Mensagem... (/ para comandos)' : 'Conectando...'}
-          disabled={!connected}
+          placeholder={!connected ? 'Conectando...' : agentRunning ? 'Agente trabalhando — aguarde…' : 'Mensagem... (/ para comandos)'}
+          disabled={!connected || agentRunning}
           rows={1}
           style={{
             flex: 1, background: 'var(--surface)', border: '1px solid var(--border)',

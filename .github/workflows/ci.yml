@@ -21,9 +21,9 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      # npm ci na raiz: instalação reprodutível de todos os workspaces a partir do lockfile.
       - name: Install dependencies
-        working-directory: frontend
-        run: npm install
+        run: npm ci
 
       - name: Type check
         working-directory: frontend
@@ -40,7 +40,7 @@ jobs:
           NODE_ENV: production
 
   backend:
-    name: Backend — syntax check
+    name: Backend — tests & syntax
     runs-on: ubuntu-latest
 
     steps:
@@ -54,12 +54,15 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: backend
-        run: npm install
+        run: npm ci
 
       - name: Syntax check
         working-directory: backend
         run: |
-          for f in $(find src -name "*.js"); do
+          for f in $(find src scripts -name "*.js"); do
             node --check "$f" || exit 1
           done
+
+      - name: Unit tests
+        working-directory: backend
+        run: npm test

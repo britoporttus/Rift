@@ -3,18 +3,57 @@ const bcrypt = require('bcryptjs')
 const { Router } = require('express')
 const User = require('./models/User')
 
+// Fail-fast: nunca rodar com segredo ausente ou com um placeholder conhecido.
+// Sem isso, qualquer um forja um token { role: 'admin' } e assume a plataforma.
+const JWT_SECRET = process.env.JWT_SECRET
+const INSECURE_SECRETS = new Set(['dev-secret', 'change-me-in-production', 'changeme', 'secret', ''])
+if (!JWT_SECRET || INSECURE_SECRETS.has(JWT_SECRET) || JWT_SECRET.length < 32) {
+  console.error('[FATAL] JWT_SECRET ausente, fraco ou usando valor placeholder. ' +
+    'Defina JWT_SECRET no .env com pelo menos 32 caracteres aleatórios ' +
+    '(ex: `node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"`).')
+  process.exit(1)
+}
+
 const router = Router()
+
+// SEC-2: rate limit em memória para /login (app interno, 1 instância) — trava
+// brute force sem dependência externa. Chaveado por e-mail (dimensão que importa
+// aqui, já que o proxy do frontend colapsa os IPs em localhost).
+const LOGIN_MAX_ATTEMPTS = Number(process.env.LOGIN_MAX_ATTEMPTS) || 10
+const LOGIN_WINDOW_MS    = Number(process.env.LOGIN_WINDOW_MS) || 15 * 60 * 1000
+const loginAttempts = new Map() // key -> { count, resetAt }
+
+function loginRateLimit(req, res, next) {
+  const email = (req.body?.email || '').toLowerCase().trim()
+  const key = email || req.ip || 'unknown'
+  const now = Date.now()
+  let rec = loginAttempts.get(key)
+  if (!rec || now > rec.resetAt) { rec = { count: 0, resetAt: now + LOGIN_WINDOW_MS }; loginAttempts.set(key, rec) }
+  rec.count += 1
+  if (rec.count > LOGIN_MAX_ATTEMPTS) {
+    const retry = Math.ceil((rec.resetAt - now) / 1000)
+    res.setHeader('Retry-After', String(retry))
+    return res.status(429).json({ error: `Muitas tentativas de login. Tente novamente em ${Math.ceil(retry / 60)} min.` })
+  }
+  next()
+}
+// Limpeza periódica dos registros expirados (evita crescimento ilimitado do Map).
+const loginCleanup = setInterval(() => {
+  const now = Date.now()
+  for (const [k, r] of loginAttempts) if (now > r.resetAt) loginAttempts.delete(k)
+}, LOGIN_WINDOW_MS)
+if (loginCleanup.unref) loginCleanup.unref()
 
 function signToken(user) {
   return jwt.sign(
     { sub: user._id || user.id, email: user.email, role: user.role, name: user.name },
-    process.env.JWT_SECRET || 'dev-secret',
+    JWT_SECRET,
     { expiresIn: '12h' }
   )
 }
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', loginRateLimit, async (req, res) => {
   const { email, password } = req.body ?? {}
   if (!email || !password) return res.status(400).json({ error: 'email e password obrigatórios' })
 
@@ -45,7 +84,7 @@ function requireAuth(roles = []) {
     if (!token) return res.status(401).json({ error: 'Token ausente' })
 
     try {
-      const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret')
+      const payload = jwt.verify(token, JWT_SECRET)
       req.user = payload.user
         ? payload.user
         : { id: payload.sub, email: payload.email, role: payload.role, name: payload.name }
@@ -60,4 +99,4 @@ function requireAuth(roles = []) {
   }
 }
 
-module.exports = { router, requireAuth, signToken }
+module.exports = { router, requireAuth, signToken, JWT_SECRET }

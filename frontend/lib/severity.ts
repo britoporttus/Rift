@@ -1,0 +1,26 @@
+// Fonte única de cores/ordem de severidade — antes duplicado em ~6 componentes
+// (dashboard, findings, admin, FindingsReport…), com o "high" divergindo entre
+// #F59E0B / #f97316. Consolidar aqui evita a inconsistência.
+export const SEV_COLOR: Record<string, string> = {
+  critical: '#ef4444',
+  high:     '#f97316',
+  medium:   '#eab308',
+  low:      '#22c55e',
+  info:     '#3b82f6',
+}
+
+export const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const
+
+// SEC-5: só permite URLs http(s). URLs de findings vêm de dados do ALVO (hostil),
+// então um `javascript:`/`data:` viraria XSS na origem da app — onde o JWT mora no
+// localStorage. Devolve a href segura ou null (aí o chamador renderiza como texto).
+export function safeHref(uri?: string | null): string | null {
+  if (!uri) return null
+  const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+  try {
+    const u = new URL(String(uri), base)
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null
+  } catch {
+    return null
+  }
+}

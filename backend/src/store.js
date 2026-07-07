@@ -1,5 +1,6 @@
 const Engagement = require('./models/Engagement')
 const Usage = require('./models/Usage')
+const Finding = require('./models/Finding')
 
 async function readEngagements() {
   return Engagement.find().sort({ createdAt: -1 }).lean()
@@ -37,6 +38,12 @@ async function appendUsage(entry) {
   await Usage.create(entry)
 }
 
+// REL-4: total real de findings de um engagement (contagem idempotente, usada
+// para não inflar findingsCount a cada re-scan do watcher).
+async function countFindings(engagementId) {
+  return Finding.countDocuments({ engagementId })
+}
+
 module.exports = {
   readEngagements,
   writeEngagements,
@@ -46,4 +53,5 @@ module.exports = {
   deleteEngagement,
   readUsage,
   appendUsage,
+  countFindings,
 }
