@@ -4,24 +4,42 @@ on:
   push:
     branches: [main]
 
+# Evita dois deploys concorrentes pisando no mesmo checkout/pm2.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy production
     runs-on: self-hosted
 
     steps:
-      - name: Pull latest code
+      # DEP-2: nada de `git pull` sobre árvore suja. Se houver mudança não-commitada
+      # no servidor, ABORTA (fail-fast) para não perder trabalho nem subir código
+      # divergente. Commite/stash antes de deployar. Se limpo, alinha com origin/main.
+      - name: Checkout limpo (fail-fast se árvore suja)
         run: |
           cd /home/digitalbath/rift
-          git pull origin main
+          git fetch origin main
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Árvore de trabalho suja no servidor de deploy — commite ou faça stash antes."
+            git status --porcelain
+            exit 1
+          fi
+          git checkout main
+          git reset --hard origin/main
 
-      - name: Install dependencies
+      # DEP-3: npm ci (reprodutível a partir do lockfile) em vez de npm install.
+      - name: Install dependencies (reproducible)
         run: |
+          source ~/.nvm/nvm.sh
           cd /home/digitalbath/rift
-          npm install
+          npm ci
 
       - name: Build frontend
         run: |
+          source ~/.nvm/nvm.sh
           cd /home/digitalbath/rift/frontend
           npm run build
 
@@ -30,4 +48,22 @@ jobs:
           source ~/.nvm/nvm.sh
           cd /home/digitalbath/rift
           pm2 restart ecosystem.config.js --update-env
+
+      # DEP-5: health-check pós-restart — falha o deploy (sinal para rollback manual)
+      # se backend/frontend não responderem.
+      - name: Health check
+        run: |
+          source ~/.nvm/nvm.sh
+          BE=0
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:3001/api/health >/dev/null; then BE=1; break; fi
+            sleep 2
+          done
+          if [ "$BE" != "1" ]; then
+            echo "::error::backend não respondeu /api/health após o restart"
+            pm2 logs rift-backend --lines 40 --nostream || true
+            exit 1
+          fi
+          curl -sf -o /dev/null http://localhost:3000/login || { echo "::error::frontend não respondeu"; exit 1; }
+          echo "deploy saudável ✓"
           pm2 status

@@ -1,10 +1,13 @@
 const { Router } = require('express')
 const bcrypt = require('bcryptjs')
 const { requireAuth } = require('../auth')
+const { isLastAdmin } = require('../rbac')
 const User = require('../models/User')
 
 const router = Router()
 router.use(requireAuth(['admin']))
+
+const countAdmins = () => User.countDocuments({ role: 'admin' })
 
 function toDto(u) {
   const obj = u.toObject ? u.toObject() : u
@@ -54,6 +57,14 @@ router.patch('/:id', async (req, res) => {
   if (role && ['admin', 'user'].includes(role)) patch.role = role
   if (name) patch.name = name
 
+  // BUG-2: não rebaixar o último admin (senão ninguém mais administra).
+  if (patch.role === 'user') {
+    const target = await User.findById(req.params.id).lean()
+    if (target && isLastAdmin(target.role, await countAdmins())) {
+      return res.status(400).json({ error: 'Não é possível rebaixar o último administrador.' })
+    }
+  }
+
   const user = await User.findByIdAndUpdate(req.params.id, patch, { new: true })
     .select('-passwordHash')
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' })
@@ -62,6 +73,14 @@ router.patch('/:id', async (req, res) => {
 
 // DELETE /api/users/:id
 router.delete('/:id', async (req, res) => {
+  // BUG-2: não deletar a própria conta nem o último admin (anti-lockout).
+  if (String(req.params.id) === String(req.user?.id)) {
+    return res.status(400).json({ error: 'Você não pode excluir a própria conta.' })
+  }
+  const target = await User.findById(req.params.id).lean()
+  if (target && isLastAdmin(target.role, await countAdmins())) {
+    return res.status(400).json({ error: 'Não é possível excluir o último administrador.' })
+  }
   await User.findByIdAndDelete(req.params.id)
   res.status(204).end()
 })

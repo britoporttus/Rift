@@ -54,11 +54,11 @@ Detalhe completo em `docs/ROADMAP-HARDENING.md`.
 
 | ID | O quê | Arquivo(s) | Prioridade | Estado |
 |----|-------|------------|-----------|--------|
-| DEP-1 | Commitar/limpar a árvore de trabalho e adotar disciplina de branch → PR → merge (parar de rodar código não-commitado em prod) | repo (`git`) | P0 | ⏳ |
-| DEP-2 | `deploy.yml`: trocar `git pull` sobre árvore suja por `git fetch` + `git reset --hard origin/main` (ou **fail-fast** se `git status` sujo) | `.github/workflows/deploy.yml` | P0 | ⏳ |
-| DEP-3 | `deploy.yml`: `npm install` → `npm ci` (instalação reprodutível a partir do lockfile) | `.github/workflows/deploy.yml` | P0 | ⏳ |
-| DEP-4 | Push direto em `main` **não** dispara CI (`ci.yml` só roda em PR/`push develop`) → exigir CI verde antes do deploy (branch protection ou job de teste no próprio `deploy.yml`) | `.github/workflows/ci.yml`, `deploy.yml` | P0 | ⏳ |
-| DEP-5 | Health-check pós-deploy (`curl /api/health` + `pm2 status`) com sinalização de falha (base para rollback) | `.github/workflows/deploy.yml` | P0 | ⏳ |
+| DEP-1 | Commitar/limpar a árvore e adotar branch → PR → merge (parar de rodar código não-commitado em prod). Frontend/backend/framework já commitados; **falta** a disciplina de branch protection/PR | repo (`git`) | P0 | 🔨 parcial |
+| DEP-2 | `deploy.yml`: `git pull` sobre árvore suja → `git fetch` + **fail-fast se `git status` sujo** + `reset --hard origin/main` quando limpo (não destrói edição local por acidente) | `.github/workflows/deploy.yml` | P0 | ✅ |
+| DEP-3 | `deploy.yml`: `npm install` → `npm ci` (reprodutível) | `.github/workflows/deploy.yml` | P0 | ✅ |
+| DEP-4 | CI agora roda também em `push main` (antes só PR/`develop`). **Falta** branch protection no GitHub para *exigir* CI verde antes do merge (config manual) | `.github/workflows/ci.yml` | P0 | 🔨 parcial |
+| DEP-5 | Health-check pós-restart no `deploy.yml` (`/api/health` + `/login`) que **falha o deploy** se não subir (sinal para rollback) | `.github/workflows/deploy.yml` | P0 | ✅ |
 
 ---
 
@@ -72,10 +72,10 @@ Detalhe completo em `docs/ROADMAP-HARDENING.md`.
 
 | ID | O quê | Arquivo(s) | Prioridade | Estado |
 |----|-------|------------|-----------|--------|
-| BUG-1 | Deletar engagement deixa **findings órfãos** e **watcher vazado**: o handler `DELETE` remove só `ChatMessage`/`ChatSession`; falta `Finding.deleteMany({engagementId})` e `findingsWatcher.unwatch(id)` (e `store.deleteEngagement` não toca em findings) | `api/engagements.js`, `store.js`, `findings-watcher.js` | P1 | ⏳ |
-| BUG-2 | **Lockout de admin**: dá para rebaixar/deletar o último admin — ou a si mesmo. Sem guarda de *last-admin* nem de *self* no `PATCH /:id` (role) e `DELETE /:id` | `api/users.js` | P1 | ⏳ |
-| BUG-3 | **Race do watcher**: `watch()` faz `if (watchers.has(id)) return` → o primeiro `onFinding` vence. Se o `scheduler` abre o watcher antes do WS, o feed ao vivo do operador nunca recebe eventos. Suportar múltiplos assinantes por engagement (ou re-registrar o callback do WS) | `findings-watcher.js`, `server.js`, `scheduler.js` | P1 | ⏳ |
-| BUG-4 | **`sendInput` é no-op na prática**: o `claude` roda com `--print` (one-shot) e não consome `stdin`; a mensagem do operador enviada durante um run é perdida. Decidir: enfileirar até `idle`, dar feedback claro ("agente ocupado"), ou modo interativo | `agent-runner.js`, `server.js` | P1 | ⏳ |
+| BUG-1 | Deletar engagement deixava **findings órfãos** e **watcher vazado**. Agora o `DELETE` chama `findingsWatcher.unwatch(id)` + `Finding.deleteMany({engagementId})` (além de ChatMessage/ChatSession) | `api/engagements.js` | P1 | ✅ |
+| BUG-2 | **Lockout de admin** — guarda `isLastAdmin` (em `rbac.js`, testada) bloqueia rebaixar/excluir o último admin; `DELETE` também bloqueia auto-exclusão | `api/users.js`, `rbac.js` | P1 | ✅ |
+| BUG-3 | **Race do watcher** — a contagem passou para dentro do watcher e o broadcast ao vivo vai por um **notifier global** (`setNotifier`, setado 1x no server); funciona independente de quem abre o watcher (scheduler ou WS) | `findings-watcher.js`, `server.js`, `scheduler.js` | P1 | ✅ |
+| BUG-4 | **`sendInput` no-op** — mensagem enviada durante um run (`--print`, one-shot) era perdida silenciosamente. Agora o backend responde "agente ocupado, aguarde" em vez de fingir entrega | `server.js` | P1 | ✅ |
 
 ### 1b. Segurança diferida (do hardening)
 

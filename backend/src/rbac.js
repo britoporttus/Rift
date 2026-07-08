@@ -8,4 +8,11 @@ function isAdminOnlyCommand(text) {
   return m ? ADMIN_ONLY_COMMANDS.includes(m[1]) : false
 }
 
-module.exports = { ADMIN_ONLY_COMMANDS, isAdminOnlyCommand }
+// BUG-2: bloqueia rebaixar/excluir o ÚLTIMO admin (senão a plataforma fica sem
+// ninguém que possa administrar). `targetRole` = papel atual do alvo; `adminCount`
+// = total de admins no sistema.
+function isLastAdmin(targetRole, adminCount) {
+  return targetRole === 'admin' && adminCount <= 1
+}
+
+module.exports = { ADMIN_ONLY_COMMANDS, isAdminOnlyCommand, isLastAdmin }

@@ -73,11 +73,9 @@ async function triggerRun(eng) {
     status: 'active',
   })
 
-  // Watcher de findings (sem WS, ninguém conectado): persiste no Mongo e conta.
-  // REL-4: contagem idempotente via total real no banco.
-  findingsWatcher.watch(engId, eng.slug, eng.date, async () => {
-    try { await updateEngagement(engId, { findingsCount: await countFindings(engId) }) } catch {}
-  }, eng.name)
+  // Watcher de findings (sem WS): persiste no Mongo e atualiza a contagem
+  // internamente (BUG-3). O broadcast ao vivo, se alguém conectar, vai pelo notifier.
+  findingsWatcher.watch(engId, eng.slug, eng.date, eng.name)
 
   const prompt = buildPipelinePrompt(eng, engId2, schedule)
   // Usuário sintético do sistema; role reflete a permissão de exploração autônoma.

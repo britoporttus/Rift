@@ -3,7 +3,7 @@
 const { test } = require('node:test')
 const assert = require('node:assert')
 
-const { isAdminOnlyCommand, ADMIN_ONLY_COMMANDS } = require('../src/rbac')
+const { isAdminOnlyCommand, ADMIN_ONLY_COMMANDS, isLastAdmin } = require('../src/rbac')
 const { deriveState, computeFingerprint } = require('../src/findings-watcher')
 const { buildAgentEnv, ENV_ALLOWLIST } = require('../src/agent-runner')
 
@@ -18,6 +18,13 @@ test('RBAC: /pentest-exploit e /pentest-post são admin-only', () => {
 
 test('RBAC: lista de comandos agressivos é exatamente exploit/post', () => {
   assert.deepEqual([...ADMIN_ONLY_COMMANDS].sort(), ['pentest-exploit', 'pentest-post'])
+})
+
+test('BUG-2: isLastAdmin bloqueia rebaixar/excluir o último admin', () => {
+  assert.equal(isLastAdmin('admin', 1), true)   // é o último admin → bloqueia
+  assert.equal(isLastAdmin('admin', 2), false)  // há outro admin → permite
+  assert.equal(isLastAdmin('user', 1), false)   // alvo não é admin → não se aplica
+  assert.equal(isLastAdmin('admin', 0), true)   // defensivo
 })
 
 // ── Taxonomia de findings (anti-FP) ─────────────────────────────────────────────

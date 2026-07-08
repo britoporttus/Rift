@@ -4,6 +4,14 @@ const fs = require('fs')
 const crypto = require('crypto')
 const yaml = require('js-yaml')
 const Finding = require('./models/Finding')
+const { updateEngagement, countFindings } = require('./store')
+
+// BUG-3: notifier GLOBAL para broadcast ao vivo (setado 1x pelo server). Antes o
+// broadcast vinha de um callback do PRIMEIRO a abrir o watcher — se o scheduler
+// abrisse antes da conexão WS, o feed do operador nunca ligava. Agora a contagem
+// é feita dentro do watcher e o broadcast passa por este notifier único.
+let notifier = null
+function setNotifier(fn) { notifier = fn }
 
 const FRAMEWORK_PATH = process.env.FRAMEWORK_PATH || '/home/digitalbath/pentest-framework-v2'
 
@@ -94,14 +102,14 @@ async function persistFinding(engagementId, engagementName, finding, sourceFile)
   }
 }
 
-function watch(engagementId, slug, dateStr, onFinding, engagementName) {
+function watch(engagementId, slug, dateStr, engagementName) {
   if (watchers.has(engagementId)) return
 
   const dir = path.join(FRAMEWORK_PATH, 'clients', slug, dateStr, 'findings')
   fs.mkdirSync(dir, { recursive: true })
 
   // Processa um arquivo de finding. isNew = evento 'add' (vs 'change').
-  function handleFile(filePath, isNew) {
+  async function handleFile(filePath, isNew) {
     try {
       const raw = fs.readFileSync(filePath, 'utf-8')
       const ext = path.extname(filePath).toLowerCase()
@@ -143,16 +151,20 @@ function watch(engagementId, slug, dateStr, onFinding, engagementName) {
       // Broadcast ao feed AO VIVO: só findings NOVOS, não-false_positive, uma vez.
       // false_positive é persistido (abaixo) mas não aparece no feed — o
       // remediation-verifier ainda o vê como já descartado.
+      // Persiste sempre (add e change): upsert por sourceFile é idempotente e
+      // atualiza campos em re-scan (last_seen, remediation_status, etc.).
+      await persistFinding(engagementId, engagementName, finding, filePath)
+
+      // REL-4/BUG-3: contagem real (idempotente) feita AQUI — vale para scan
+      // agendado e para conexão WS, sem depender de callback do chamador.
+      try { await updateEngagement(engagementId, { findingsCount: await countFindings(engagementId) }) } catch {}
+
+      // Broadcast ao vivo (via notifier global): só findings NOVOS, não-false_positive, uma vez.
       const bkey = `${engagementId}::${filePath}`
       if (isNew && state !== 'false_positive' && !broadcasted.has(bkey)) {
         broadcasted.add(bkey)
-        onFinding(event)
+        if (notifier) notifier(engagementId, event)
       }
-
-      // Persiste sempre (add e change): upsert por sourceFile é idempotente e
-      // atualiza campos em re-scan (last_seen, remediation_status, etc.).
-      persistFinding(engagementId, engagementName, finding, filePath)
-
     } catch (e) {
       console.error('[watcher] erro ao processar finding:', filePath, e.message)
     }
@@ -184,4 +196,4 @@ function closeAll() {
   watchers.clear()
 }
 
-module.exports = { watch, unwatch, closeAll, deriveState, computeFingerprint }
+module.exports = { watch, unwatch, closeAll, setNotifier, deriveState, computeFingerprint }

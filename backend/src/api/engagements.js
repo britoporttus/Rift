@@ -4,6 +4,8 @@ const { requireAuth } = require('../auth')
 const { readEngagements, getEngagement, createEngagement, updateEngagement, deleteEngagement } = require('../store')
 const ChatMessage = require('../models/ChatMessage')
 const ChatSession = require('../models/ChatSession')
+const Finding = require('../models/Finding')
+const findingsWatcher = require('../findings-watcher')
 const scheduler = require('../scheduler')
 
 const router = Router()
@@ -67,9 +69,16 @@ router.patch('/:id', async (req, res) => {
 })
 
 router.delete('/:id', requireAuth(['admin']), async (req, res) => {
-  await deleteEngagement(req.params.id)
-  await ChatMessage.deleteMany({ engagementId: req.params.id }).catch(() => {})
-  await ChatSession.deleteMany({ engagementId: req.params.id }).catch(() => {})
+  const id = req.params.id
+  // BUG-1: para o watcher e apaga TUDO que pertence ao engagement — senão sobram
+  // findings órfãos no banco global e um chokidar observando um dir morto.
+  try { findingsWatcher.unwatch(id) } catch {}
+  await deleteEngagement(id)
+  await Promise.all([
+    Finding.deleteMany({ engagementId: id }).catch(() => {}),
+    ChatMessage.deleteMany({ engagementId: id }).catch(() => {}),
+    ChatSession.deleteMany({ engagementId: id }).catch(() => {}),
+  ])
   res.status(204).end()
 })
 

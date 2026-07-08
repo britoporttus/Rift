@@ -86,6 +86,10 @@ function getSessionClients(engagementId, sessionId) {
   return sessMap.get(sessionId) || new Set()
 }
 
+// BUG-3: registra o notifier global do watcher (broadcast ao vivo). Feito 1x —
+// o watcher passa a transmitir findings a QUALQUER conexão, não só à primeira.
+findingsWatcher.setNotifier((engagementId, event) => broadcastEngagement(engagementId, event))
+
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(s => s.trim())
 app.use(cors({
   origin: (origin, cb) => {
@@ -166,13 +170,9 @@ wss.on('connection', async (ws) => {
 
   const engagement = await getEngagement(engId)
   if (engagement) {
-    // findings are broadcast to ALL sessions in the engagement
-    findingsWatcher.watch(engId, engagement.slug, engagement.date, async (event) => {
-      broadcastEngagement(engId, event)
-      // REL-4: contagem idempotente — deriva do total real no banco (não +1 por
-      // evento, senão o contador inflava a cada re-scan do watcher no restart).
-      try { await updateEngagement(engId, { findingsCount: await countFindings(engId) }) } catch {}
-    }, engagement.name)
+    // Watcher por engagement: persiste findings, atualiza a contagem e transmite
+    // ao vivo via notifier global (broadcast + count vivem dentro do watcher agora).
+    findingsWatcher.watch(engId, engagement.slug, engagement.date, engagement.name)
   }
 
   ws.send(JSON.stringify({ type: 'connection_ready', text: '🔗 Rift conectado.' }))
@@ -344,7 +344,12 @@ async function handleMessage(msg, engId, sessionId, user) {
     }
 
     if (agentRunner.isRunning(runnerKey)) {
-      agentRunner.sendInput(runnerKey, text)
+      // BUG-4: o claude roda em --print (one-shot) e não lê stdin — o sendInput
+      // era no-op silencioso (mensagem perdida). Avisa que está ocupado.
+      broadcastSession(engId, sessionId, {
+        type: 'agent_message',
+        text: '⏳ O agente ainda está processando o turno atual. Aguarde ele finalizar para enviar uma nova mensagem.',
+      })
     } else {
       const eng = await getEngagement(engId)
       const slug = eng?.slug || eng?.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || ''
