@@ -547,23 +547,41 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
     }
   }
 
-  // A-LIVE-2: estado de fase inferido deste run. Só avança (nunca regride) para
-  // não "piscar" a timeline. progress sobe em degraus a cada sinal da mesma fase.
-  let curPhaseIdx = -1
-  let phaseSignals = 0
-  let lastPhaseProgress = -1
+  // A-LIVE-2: a fase reflete a ATIVIDADE ATUAL do agente (o que ele faz AGORA) e
+  // PERMITE regressão. O agente intercala recon/enum/vuln o tempo todo (analisa JS e
+  // swagger = enum, ao mesmo tempo em que tenta SQLi/redirect = vuln); o modelo antigo
+  // de catraca (forward-only) travava na fase mais alta já tocada e escondia todo o
+  // recon/enum que continua — o operador via "Vulnerabilidades" enquanto o agente
+  // ainda fazia recon. HISTERESE: só troca a fase exibida após 2 sinais CONSECUTIVOS
+  // de uma nova fase, então uma ação solta não faz a barra piscar/pular.
+  const phaseActivity = { recon: 0, enum: 0, vuln: 0, exploit: 0, post: 0 }
+  let shownPhase = null
+  let candidatePhase = null
+  let candidateHits = 0
+  let lastEmittedProgress = -1
+  const progressFor = (phase) => Math.min(90, 15 + phaseActivity[phase] * 10)
   function maybeEmitPhase(ev) {
     const p = inferPhaseFromEvent(ev)
-    if (!p) return
-    const idx = PHASE_ORDER.indexOf(p)
-    if (idx < 0 || idx < curPhaseIdx) return       // ignora regressão/desconhecida
-    if (idx > curPhaseIdx) { curPhaseIdx = idx; phaseSignals = 0 }  // transição
-    phaseSignals++
-    const progress = Math.min(90, 20 + phaseSignals * 12)
-    // dedupe: não reemite o mesmo (fase, progress) — limita ~7 msgs por fase.
-    if (idx === curPhaseIdx && progress === lastPhaseProgress) return
-    lastPhaseProgress = progress
-    emit({ type: 'phase_update', phase: p, progress })
+    if (!p || !(p in phaseActivity)) return
+    phaseActivity[p]++
+    if (p !== shownPhase) {
+      // acumula sinais consecutivos da fase candidata; troca só ao confirmar (>=2),
+      // exceto a 1ª fase do run (mostra de imediato).
+      if (p === candidatePhase) candidateHits++
+      else { candidatePhase = p; candidateHits = 1 }
+      if (shownPhase !== null && candidateHits < 2) return
+      shownPhase = p
+      candidatePhase = null
+      candidateHits = 0
+      lastEmittedProgress = -1                 // fase nova → reemite o progresso dela
+    } else {
+      candidatePhase = null                    // reafirma a fase atual → zera candidata
+      candidateHits = 0
+    }
+    const progress = progressFor(shownPhase)
+    if (progress === lastEmittedProgress) return    // dedupe (mesma fase, mesmo degrau)
+    lastEmittedProgress = progress
+    emit({ type: 'phase_update', phase: shownPhase, progress })
   }
 
   // A-LIVE-2 (marcos): correlaciona tool_use → tool_result. Quando uma ação começa,
@@ -659,10 +677,10 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
       // (operador parou, timeout, shutdown) — já têm mensagem própria; não é "erro".
       broadcast(subscribers, { type: 'agent_message', text: `⚠️ Agente encerrado com erro (código ${code}).` })
     }
-    // A-LIVE-2: concluiu sem erro → fecha a última fase alcançada em 100% (senão
-    // ela ficaria eternamente em ~90% na timeline).
-    if (code === 0 && curPhaseIdx >= 0) {
-      emit({ type: 'phase_update', phase: PHASE_ORDER[curPhaseIdx], progress: 100 })
+    // A-LIVE-2: concluiu sem erro → fecha a fase atual em 100% (senão ficaria
+    // eternamente em ~90% na timeline).
+    if (code === 0 && shownPhase) {
+      emit({ type: 'phase_update', phase: shownPhase, progress: 100 })
     }
     // Libera o input do operador — o turno do agente terminou.
     broadcast(subscribers, { type: 'agent_status', state: 'idle' })
