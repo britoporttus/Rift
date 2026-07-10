@@ -128,7 +128,7 @@ export default function EngagementPage() {
   // A-STATE-5: run limpo — resetSession descarta a memória do agente no backend
   // antes de iniciar (o estado do engagement em disco permanece).
   function handleRestartAuto() {
-    if (!confirm('Começar do zero descarta a memória da sessão do agente (o histórico de findings e o escopo são mantidos). Continuar?')) return
+    if (!confirm('Começar do zero: descarta a memória do agente E reseta as fases do framework (recon/enum/vuln voltam a ser executados do início). O escopo e os findings já salvos são mantidos. Continuar?')) return
     handleSend(AUTO_RUN_PROMPT, { resetSession: true })
   }
 

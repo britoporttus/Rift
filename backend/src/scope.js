@@ -127,4 +127,25 @@ function writeEngagementScope(eng) {
   return id
 }
 
-module.exports = { deriveEngId, buildScopeDoc, buildStateDoc, writeEngagementScope, asArray, isCredsProvided }
+// "Começar do zero": FORÇA o reset do engagement-state.yaml para o template inicial
+// (current_phase='idle', phases_completed=[], shadow_graph vazio). Sem isto, a guarda
+// de re-execução do framework (skills/phase-state.md) vê recon/enum/vuln "concluídos"
+// e o agente PULA as fases — por isso cada re-run rendia MENOS. O scope.yaml
+// (autorização) e os findings em disco são preservados. Retorna o id ou null.
+function resetEngagementState(eng) {
+  const id = deriveEngId(eng)
+  const ctxDir = path.join(FRAMEWORK_PATH, 'context', id)
+  try {
+    fs.mkdirSync(ctxDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(ctxDir, 'engagement-state.yaml'),
+      yaml.dump(buildStateDoc(eng), { lineWidth: -1 }),
+      'utf8'
+    )
+    return id
+  } catch {
+    return null
+  }
+}
+
+module.exports = { deriveEngId, buildScopeDoc, buildStateDoc, writeEngagementScope, resetEngagementState, asArray, isCredsProvided }

@@ -23,6 +23,7 @@ const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
 const scheduler = require('./scheduler')
 const { getEngagement, updateEngagement, appendUsage, countFindings } = require('./store')
+const { resetEngagementState } = require('./scope')
 const ChatSession = require('./models/ChatSession')
 const Engagement = require('./models/Engagement')
 
@@ -424,7 +425,12 @@ ${aggressiveRule}
         if (sessionId !== 'default') {
           await ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
         }
+        // CRÍTICO: resetar também o engagement-state.yaml do framework. Sem isto, a
+        // guarda de re-execução (skills/phase-state.md) vê recon/enum/vuln "concluídos"
+        // e o agente PULA as fases → cada re-run rendia MENOS. scope + findings ficam.
+        if (eng) { try { resetEngagementState(eng) } catch (e) { console.warn('[reset] state:', e.message) } }
         broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
+        broadcastSession(engId, sessionId, { type: 'phase_update', phase: 'recon', progress: 0 })
       }
 
       // Continuidade durável: recupera o claude session_id salvo no banco
