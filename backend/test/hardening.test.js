@@ -98,12 +98,18 @@ test('inferPhaseFromEvent: mapeia o binário do comando Bash para a fase', () =>
   assert.equal(P('hydra -l admin -P rockyou.txt ssh://t'), 'exploit')
 })
 
-test('inferPhaseFromEvent: slash-command explícito e ausência de falso-positivo em prosa', () => {
-  assert.equal(inferPhaseFromEvent({ type: 'agent_message', text: 'Rodando /pentest-enum agora' }), 'enum')
-  // prosa mencionando "vulnerabilidades" NÃO deve disparar fase (evita ruído)
+test('inferPhaseFromEvent: a fase segue AÇÃO real, nunca a prosa do agente', () => {
+  // binário no comando Bash define a fase
+  assert.equal(inferPhaseFromEvent({ type: 'agent_action', tool: 'Bash', args: 'subfinder -d x.com' }), 'recon')
+  assert.equal(inferPhaseFromEvent({ type: 'agent_action', tool: 'Bash', args: 'httpx -l subs.txt' }), 'enum')
+  assert.equal(inferPhaseFromEvent({ type: 'agent_action', tool: 'Bash', args: 'nuclei -u https://x.com' }), 'vuln')
+  // auditoria de TLS é ENUM, não vuln (não pode disparar a fase de vuln cedo)
+  assert.equal(inferPhaseFromEvent({ type: 'agent_action', tool: 'Bash', args: 'testssl https://x.com' }), 'enum')
+  // PROSA do agente NUNCA move a fase — nem mencionando um slash-command (raiz do
+  // "pulou para Vulnerabilidades enquanto ainda fazia recon")
+  assert.equal(inferPhaseFromEvent({ type: 'agent_message', text: 'Agora vou rodar /pentest-vuln' }), null)
+  assert.equal(inferPhaseFromEvent({ type: 'agent_message', text: 'Rodando /pentest-enum agora' }), null)
   assert.equal(inferPhaseFromEvent({ type: 'agent_message', text: 'depois vou buscar vulnerabilidades' }), null)
-  // binário só conta em ação (Bash), não em texto do agente
-  assert.equal(inferPhaseFromEvent({ type: 'agent_message', text: 'vou usar nmap em seguida' }), null)
   assert.equal(inferPhaseFromEvent({ type: 'agent_action', tool: 'Bash', args: 'cat notes.txt' }), null)
   assert.deepEqual(PHASE_ORDER, ['recon', 'enum', 'vuln', 'exploit', 'post'])
 })

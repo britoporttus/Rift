@@ -229,14 +229,15 @@ export default function DashboardPage() {
               const eFinds = findings.filter((f) => f.engagement_id === e.id)
               const findCount = e.findingsCount ?? eFinds.length
               const ac = alertColor(findCount)
-              const isDone = e.status === 'completed'
-              const isPaused = e.status === 'idle'
               const phase = e.phase ?? 'idle'
-              const badge = isDone
-                ? { t: 'DONE', c: 'var(--low)' }
-                : isPaused
-                ? { t: 'PAUSED', c: 'var(--critical)' }
-                : { t: 'ACTIVE', c: 'var(--purple-light)' }
+              // Estado REAL de execução vem de runState (idle/running/stopped/completed),
+              // não de `status` (que ficava sempre 'idle' → tudo aparecia "PAUSED").
+              const rs = e.runState ?? (e.status === 'completed' ? 'completed' : 'idle')
+              const badge =
+                  rs === 'running'   ? { t: 'RODANDO',    c: 'var(--purple-light)' }
+                : rs === 'completed' ? { t: 'CONCLUÍDO',  c: 'var(--low)' }
+                : rs === 'stopped'   ? { t: 'PARADO',     c: 'var(--medium)' }
+                :                      { t: 'AGUARDANDO', c: 'var(--text-mute)' }
 
               return (
                 <div key={e.id} style={{ position: 'relative' }}

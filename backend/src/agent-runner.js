@@ -18,26 +18,25 @@ const PHASE_ORDER = ['recon', 'enum', 'vuln', 'exploit', 'post']
 // binário/ferramenta → fase. Regex por fase (word-boundary, case-insensitive).
 const TOOL_PHASE = [
   { phase: 'recon',   re: /\b(subfinder|amass|assetfinder|findomain|dnsx|puredns|shuffledns|massdns|chaos|github-subdomains|waybackurls|gau|crt\.sh|dig|whois|theharvester)\b/i },
-  { phase: 'enum',    re: /\b(nmap|naabu|masscan|rustscan|httpx|whatweb|wappalyzer|gowitness|katana|hakrawler|gospider|gobuster|ffuf|feroxbuster|dirsearch|wafw00f|arjun)\b/i },
-  { phase: 'vuln',    re: /\b(nuclei|nikto|sqlmap|dalfox|testssl|sslscan|jaeles|wpscan|xsstrike|commix|retire)\b/i },
+  { phase: 'enum',    re: /\b(nmap|naabu|masscan|rustscan|httpx|whatweb|wappalyzer|gowitness|katana|hakrawler|gospider|gobuster|ffuf|feroxbuster|dirsearch|wafw00f|arjun|testssl|sslscan|sslyze)\b/i },
+  { phase: 'vuln',    re: /\b(nuclei|nikto|sqlmap|dalfox|jaeles|wpscan|xsstrike|commix|retire)\b/i },
   { phase: 'exploit', re: /\b(msfconsole|msfvenom|metasploit|hydra|medusa|crackmapexec|impacket|evil-winrm|responder)\b/i },
 ]
 const SLASH_PHASE_RE = /\/pentest-(recon|enum|vuln|exploit|post)\b/i
 
-// Deriva a fase de UM evento WS (agent_action/agent_message). Retorna a key da
-// fase ou null. Prioriza slash-command explícito; depois o binário no comando.
+// Deriva a fase de UM evento WS. Retorna a key da fase ou null.
+// REGRA: a fase segue o que o agente FAZ (ação real), NUNCA o que ele NARRA. A prosa
+// do agente mencionando "/pentest-vuln" ou "vou buscar vulnerabilidades" NÃO pode
+// avançar a fase — era a raiz do bug "pulou para Vulnerabilidades enquanto ainda
+// fazia recon (dig)". Só `agent_action` (uso de ferramenta) conta: slash-command nos
+// args (raro) ou o binário do comando Bash (dig=recon, httpx=enum, nuclei=vuln…).
 function inferPhaseFromEvent(ev) {
-  if (!ev) return null
-  const hay = ev.type === 'agent_action' ? String(ev.args || '')
-            : ev.type === 'agent_message' ? String(ev.text || '')
-            : ''
+  if (!ev || ev.type !== 'agent_action') return null
+  const hay = String(ev.args || '')
   if (!hay) return null
   const slash = hay.match(SLASH_PHASE_RE)
   if (slash) return slash[1].toLowerCase()
-  // binário só conta em ação real (comando Bash), não em prosa do agente.
-  if (ev.type === 'agent_action') {
-    for (const { phase, re } of TOOL_PHASE) if (re.test(hay)) return phase
-  }
+  for (const { phase, re } of TOOL_PHASE) if (re.test(hay)) return phase
   return null
 }
 
