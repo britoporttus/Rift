@@ -22,7 +22,7 @@ type Tab = 'exec' | 'chat' | 'findings' | 'report'
 
 // Prompt do "Iniciar mapeamento automático" (Agente 1 black-box, recon→enum→vuln).
 const AUTO_RUN_PROMPT =
-  'Inicie o mapeamento automático do alvo como Agente 1 (black-box, sem credenciais): rode recon, depois enumeração, depois vulnerabilidades simples, em sequência e sem me pedir confirmação entre as fases. Pare e pergunte apenas em checkpoint real (achado crítico ou decisão importante). Mostre os achados conforme forem confirmados.'
+  'Inicie o mapeamento automático do alvo como Agente 1 (black-box, sem credenciais): rode recon, depois enumeração, depois análise de vulnerabilidades não-autenticada (exploit-to-confirm), em sequência e sem me pedir confirmação entre as fases. Sua entrega tem DUAS metades: (1) um MAPA de superfície RICO — registre com generosidade como informational todo subdomínio, endpoint, tecnologia, parâmetro, token e exposição; (2) as vulnerabilidades que conseguir PROVAR sem credencial, marcadas confirmed com PoC. Candidato que você testar mas não fechar o PoC → probable (a confirmar), NÃO descarte. Cubra a superfície descoberta (não teste só uma amostra). Pare e pergunte apenas em checkpoint real (achado crítico ou decisão importante). Mostre os achados conforme forem surgindo.'
 
 export default function EngagementPage() {
   const { id } = useParams<{ id: string }>()
@@ -123,7 +123,7 @@ export default function EngagementPage() {
   // A-STATE-5: retoma via --resume (o claude session_id persistido) — o agente
   // continua de onde parou, sem re-rodar recon.
   function handleContinueAuto() {
-    handleSend('Continue o mapeamento automático do alvo de onde parou, seguindo o mesmo plano (recon → enumeração → vulnerabilidades simples), em sequência e sem me pedir confirmação entre as fases. Pare só em checkpoint real.')
+    handleSend('Continue o mapeamento automático do alvo de onde parou, seguindo o mesmo plano (recon → enumeração → análise de vulnerabilidades não-autenticada, exploit-to-confirm), cobrindo a superfície descoberta (não só uma amostra). Candidato testado mas não fechado → probable (a confirmar), não descarte. Em sequência, sem me pedir confirmação entre as fases. Pare só em checkpoint real.')
   }
   // A-STATE-5: run limpo — resetSession descarta a memória do agente no backend
   // antes de iniciar (o estado do engagement em disco permanece).

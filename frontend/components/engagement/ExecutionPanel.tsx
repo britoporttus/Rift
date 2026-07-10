@@ -29,7 +29,7 @@ const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 const PHASES = [
   { key: 'recon', label: 'Recon',            icon: Radar,       hint: 'Mapeamento externo' },
   { key: 'enum',  label: 'Enumeração',       icon: ScanSearch,  hint: 'Superfície + assets' },
-  { key: 'vuln',  label: 'Vulnerabilidades', icon: ShieldAlert, hint: 'Checagens simples' },
+  { key: 'vuln',  label: 'Vulnerabilidades', icon: ShieldAlert, hint: 'Exploit-to-confirm' },
 ]
 
 function normalizePhase(p: string): string {
@@ -284,8 +284,8 @@ export function ExecutionPanel({
             Pronto para mapear {engagement.target}
           </div>
           <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
-            O Agente 1 roda recon → enumeração → vulnerabilidades simples automaticamente,
-            sem credenciais, e mostra os achados aqui em tempo real.
+            O Agente 1 roda recon → enumeração → análise de vulnerabilidades (prova sem
+            credencial + mapa de superfície rico) automaticamente, e mostra os achados aqui em tempo real.
           </div>
           <button onClick={onStart} disabled={!connected} style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
