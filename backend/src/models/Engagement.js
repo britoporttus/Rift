@@ -6,6 +6,14 @@ const engagementSchema = new mongoose.Schema({
   target:       { type: String, required: true },
   scope:        { type: mongoose.Schema.Types.Mixed, default: {} },
   status:       { type: String, enum: ['idle', 'active', 'completed'], default: 'idle' },
+  // Estado de execução do run interativo (painel de Execução). Sobrevive à
+  // navegação e ao restart do backend (A-STATE-4). Distinto de `status`
+  // (lifecycle geral / usado pelo scheduler e dashboard):
+  //   idle       = nunca iniciado / resetado → CTA "Iniciar"
+  //   running    = run ativo                 → botão "Parar"
+  //   stopped    = parado pelo operador/erro  → "Continuar" | "Começar do zero"
+  //   completed  = run concluído sozinho      → "Continuar" | "Começar do zero"
+  runState:     { type: String, enum: ['idle', 'running', 'stopped', 'completed'], default: 'idle' },
   phase:        { type: String, default: null },
   progress:     { type: Number, default: 0 },
   findingsCount:{ type: Number, default: 0 },

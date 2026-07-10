@@ -85,7 +85,9 @@ async function triggerRun(eng) {
   }
 
   agentRunner.run(
-    sessionId, engId2, prompt, new Set(),
+    // Sem operador conectado (headless): broadcaster no-op. Findings/estado ainda
+    // são persistidos; se alguém conectar, os findings chegam via notifier global.
+    sessionId, engId2, prompt, () => {},
     (usd, tokens) => appendUsage({
       usd, tokens, engagementId: engId, engagementName: eng.name,
       userId: 'scheduler', userName: 'Agendador Rift', userEmail: 'scheduler@rift',

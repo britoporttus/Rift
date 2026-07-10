@@ -5,7 +5,7 @@ import { api, Engagement, Finding } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { SEV_COLOR, SEV_ORDER } from '@/lib/severity'
 import {
-  Plus, Trash2, Target, ShieldAlert, AlertTriangle, Bug, Radar, X,
+  Plus, Trash2, Target, ShieldAlert, AlertTriangle, Bug, Radar,
 } from 'lucide-react'
 
 const SEVERITIES = SEV_ORDER
@@ -15,13 +15,6 @@ function alertColor(count: number) {
   if (count >= 8)  return 'var(--high)'
   if (count >= 4)  return 'var(--medium)'
   return 'var(--low)'
-}
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '0.55rem 0.8rem',
-  background: 'rgba(2,2,8,0.6)', border: '1px solid var(--border-mid)',
-  borderRadius: 7, color: 'var(--text)', fontSize: 13,
-  outline: 'none', fontFamily: 'inherit',
 }
 
 // ── KPI card ──────────────────────────────────────────────────────
@@ -96,10 +89,6 @@ export default function DashboardPage() {
   const [engagements, setEngagements] = useState<Engagement[]>([])
   const [findings, setFindings]       = useState<Finding[]>([])
   const [loading, setLoading]         = useState(true)
-  const [showForm, setShowForm]       = useState(false)
-  const [name, setName]               = useState('')
-  const [target, setTarget]           = useState('')
-  const [creating, setCreating]       = useState(false)
   const [hovered, setHovered]         = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleting, setDeleting]       = useState<string | null>(null)
@@ -129,20 +118,6 @@ export default function DashboardPage() {
       document.removeEventListener('visibilitychange', onFocus)
     }
   }, [load])
-
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
-    setCreating(true)
-    try {
-      const eng = await api.engagements.create({ name, target })
-      setEngagements((prev) => [eng, ...prev])
-      setShowForm(false); setName(''); setTarget('')
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Erro')
-    } finally {
-      setCreating(false)
-    }
-  }
 
   async function handleDelete(id: string) {
     setDeleting(id)
@@ -194,7 +169,7 @@ export default function DashboardPage() {
             Engagements <span style={{ color: 'var(--text-mute)', fontWeight: 400 }}>({engagements.length})</span>
           </span>
           <button
-            onClick={() => setShowForm((s) => !s)}
+            onClick={() => router.push('/engagement/novo')}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '0.5rem 1rem', background: 'var(--purple)', border: 'none', borderRadius: 7,
@@ -202,35 +177,9 @@ export default function DashboardPage() {
               boxShadow: '0 0 18px var(--purple-glow)',
             }}
           >
-            {showForm ? <X size={14} /> : <Plus size={14} />} {showForm ? 'Fechar' : 'Novo Escopo'}
+            <Plus size={14} /> Novo Escopo
           </button>
         </div>
-
-        {/* Create form */}
-        {showForm && (
-          <form onSubmit={handleCreate} style={{
-            background: 'var(--surface)', border: '1px solid var(--border-mid)',
-            borderRadius: 12, padding: '1.25rem', marginBottom: 14,
-            display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
-            animation: 'fadeIn 0.2s ease',
-          }}>
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <label htmlFor="eng-name" style={{ color: 'var(--muted)', fontSize: 10, display: 'block', marginBottom: 6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Nome</label>
-              <input id="eng-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Cliente XYZ" required style={inputStyle} />
-            </div>
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <label htmlFor="eng-target" style={{ color: 'var(--muted)', fontSize: 10, display: 'block', marginBottom: 6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Alvo</label>
-              <input id="eng-target" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="target.com" required style={inputStyle} />
-            </div>
-            <button type="submit" disabled={creating} style={{
-              background: 'var(--purple)', border: 'none', borderRadius: 7,
-              color: 'white', fontWeight: 700, fontSize: 12.5, padding: '0.6rem 1.15rem',
-              cursor: creating ? 'not-allowed' : 'pointer', fontFamily: 'inherit', height: 37, opacity: creating ? 0.7 : 1,
-            }}>
-              {creating ? 'Criando…' : 'Criar'}
-            </button>
-          </form>
-        )}
 
         {/* Filter chips */}
         <div style={{ display: 'flex', gap: 7, overflowX: 'auto', marginBottom: 14, paddingBottom: 2 }}>

@@ -162,8 +162,16 @@ Cobertura do handoff: Dashboard/Findings/Relatórios/Usuários (login em v4). **
 ## 10. Roadmap de UI (pedidos do operador — 2026-07-07)
 
 Priorização atual (frontend only; backend/segurança é de outro agente):
-1. **Corrigir o botão de apagar engagement** (bug concreto). ← rápido
-2. **Página home** (net-new; definir conceito — não está no handoff).
-3. **Repaginar `/findings` e `/reports`** seguindo o handoff v3 (pixel-perfect) e o
-   padrão do `FindingsReport`.
+1. ✅ **Botão de apagar engagement** — corrigido (hover no wrapper + gated a admin).
+2. ✅ **Página home** — `app/page.tsx` virou landing pública (hero + CTA + value points,
+   estilo do nicho, sem listar engagements; CTA adapta se logado). Substitui o redirect.
+3. **Repaginar `/findings` e `/reports`** seguindo o handoff v3:
+   - ✅ **Findings V3** — header (título+subtítulo), chip "Todos", chips de severidade
+     (dot+count+label), linhas polidas com expand. `findings/page.tsx`.
+   - ✅ **Reports V3** — header de página (título+subtítulo) + accordion/FileRow já
+     alinhados ao handoff; preview/download preservados. `reports/page.tsx`.
 4. (transversal) **Extrair design-system** compartilhado para acabar com a duplicação.
+
+**Segurança:** rodada de hardening (Etapas 1–4 do [ROADMAP-HARDENING.md](ROADMAP-HARDENING.md))
+concluída/validada/no ar. Diferido: JWT em cookie HttpOnly, dedup de UI, pipeline anti-FP,
+RBAC por engagement.

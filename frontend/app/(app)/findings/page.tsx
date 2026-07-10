@@ -21,14 +21,13 @@ function SI({ s = 15, c = 'currentColor', sw = 1.75, children }: { s?: number; c
   )
 }
 
-const AlertIco  = (s?: number, c?: string) => <SI s={s || 11} c={c}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></SI>
-const ChevDown  = (s?: number, c?: string) => <SI s={s || 12} c={c || '#94A3B8'} sw={2}><polyline points="6 9 12 15 18 9" /></SI>
-const ChevRight = (s?: number, c?: string) => <SI s={s || 12} c={c || '#94A3B8'} sw={2}><polyline points="9 18 15 12 9 6" /></SI>
-const DownloadIco = (s?: number, c?: string) => <SI s={s || 12} c={c || 'white'}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></SI>
+const ChevDown  = (s?: number, c?: string) => <SI s={s || 12} c={c || '#3A3A58'} sw={2}><polyline points="6 9 12 15 18 9" /></SI>
+const ChevRight = (s?: number, c?: string) => <SI s={s || 12} c={c || '#3A3A58'} sw={2}><polyline points="9 18 15 12 9 6" /></SI>
+const DownloadIco = (s?: number, c?: string) => <SI s={s || 12} c={c || 'white'} sw={2.5}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></SI>
 
 const selectStyle: React.CSSProperties = {
-  background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.2)', borderRadius: 5,
-  color: '#E2E8F0', fontSize: 11, padding: '0.35rem 0.6rem',
+  background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 99,
+  color: '#94A3B8', fontSize: 11, padding: '0.3rem 0.8rem',
   outline: 'none', fontFamily: 'inherit', cursor: 'pointer',
 }
 
@@ -66,52 +65,69 @@ export default function FindingsPage() {
     return true
   })
 
+  const engCount = new Set(findings.map((f) => f.engagement_id)).size
+  const counts = Object.fromEntries(SEVERITIES.map((s) => [s, findings.filter((f) => f.severity === s).length]))
+
   return (
     <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: 12, animation: 'fadeIn 0.2s ease' }}>
 
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <select value={engFilter} onChange={(e) => setEngFilter(e.target.value)} style={selectStyle}>
-            <option value="">Todos engagements</option>
-            {engagements.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
+      {/* Page header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0', letterSpacing: '-0.01em' }}>Findings</div>
+          <div style={{ fontSize: 11.5, color: '#3A3A58', marginTop: 2 }}>
+            {findings.length} findings detectados · {engCount} {engCount === 1 ? 'engagement' : 'engagements'}
+          </div>
         </div>
         <button
           onClick={() => exportCSV(filtered)}
           style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '0.42rem 0.9rem',
+            display: 'flex', alignItems: 'center', gap: 6, padding: '0.42rem 0.9rem',
             background: '#7C3AED', border: 'none', borderRadius: 5,
-            color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            fontFamily: 'inherit',
+            color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            fontFamily: 'inherit', boxShadow: '0 0 16px rgba(124,58,237,0.28)',
           }}
         >
           {DownloadIco()} Exportar CSV
         </button>
       </div>
 
-      {/* Severity filter pills */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {/* Filters row: severity chips + engagement select */}
+      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', flexShrink: 0 }}>
+        {/* Todos */}
+        <button onClick={() => setSevFilter('')} style={{
+          padding: '0.3rem 0.8rem', borderRadius: 99, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
+          fontWeight: sevFilter === '' ? 700 : 400,
+          background: sevFilter === '' ? 'rgba(124,58,237,0.12)' : 'rgba(4,4,12,0.97)',
+          border: `1px solid ${sevFilter === '' ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.13)'}`,
+          color: sevFilter === '' ? '#A78BFA' : '#94A3B8',
+        }}>
+          Todos · {findings.length}
+        </button>
+
         {SEVERITIES.map((sev) => {
-          const count = findings.filter((f) => f.severity === sev).length
-          if (!count) return null
-          const color = SEV_COLOR[sev]
           const active = sevFilter === sev
+          const c = SEV_COLOR[sev]
           return (
             <button key={sev} onClick={() => setSevFilter(active ? '' : sev)} style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              background: active ? `${color}18` : 'rgba(4,4,12,0.97)',
-              border: `1px solid ${active ? color + '44' : 'rgba(124,58,237,0.13)'}`,
-              borderRadius: 99, padding: '0.25rem 0.75rem', cursor: 'pointer',
-              color: active ? color : '#94A3B8', fontSize: 11, fontFamily: 'inherit',
-              transition: 'all 0.12s',
+              padding: '0.3rem 0.8rem', borderRadius: 99, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
+              display: 'flex', alignItems: 'center', gap: 5, fontWeight: active ? 700 : 400,
+              background: active ? `${c}14` : 'rgba(4,4,12,0.97)',
+              border: `1px solid ${active ? c : 'rgba(124,58,237,0.13)'}`,
+              color: active ? c : '#94A3B8', transition: 'all 0.12s',
             }}>
-              {AlertIco(11, active ? color : '#94A3B8')}
-              {count} {sev}
+              <div style={{ width: 6, height: 6, borderRadius: 2, background: active ? c : '#3A3A58' }} />
+              <span style={{ fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{counts[sev]}</span>
+              <span style={{ opacity: 0.75 }}>{sev}</span>
             </button>
           )
         })}
+
+        {/* Engagement filter (mantido do app real; estilizado como chip) */}
+        <select value={engFilter} onChange={(e) => setEngFilter(e.target.value)} style={{ ...selectStyle, marginLeft: 'auto' }}>
+          <option value="">Todos engagements</option>
+          {engagements.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
       </div>
 
       {/* Findings list */}
@@ -119,88 +135,63 @@ export default function FindingsPage() {
         <div style={{ color: '#3A3A58', textAlign: 'center', padding: '3rem', fontSize: 12, letterSpacing: '0.1em' }}>CARREGANDO...</div>
       ) : filtered.length === 0 ? (
         <div style={{
-          background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 8,
+          background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 8,
           padding: '3rem', textAlign: 'center', color: '#3A3A58', fontSize: 13,
         }}>
           Nenhum finding encontrado.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
           {filtered.map((f, i) => {
             const color = SEV_COLOR[f.severity] ?? '#94A3B8'
             const isExpanded = expanded === f.id
             return (
-              <div key={`${f.engagement_id}-${f.id}`} style={{ animation: `rowIn 0.22s ease both`, animationDelay: `${i * 30}ms` }}>
-                <div
-                  onClick={() => setExpanded(isExpanded ? null : f.id)}
-                  style={{
-                    background: '#0C0C1A',
-                    border: `1px solid rgba(124,58,237,0.13)`,
-                    borderLeft: `3px solid ${color}`,
-                    borderRadius: isExpanded ? '8px 8px 0 0' : 8,
-                    padding: '0.7rem 1rem',
-                    display: 'flex', alignItems: 'center', gap: '0.85rem',
-                    cursor: 'pointer', transition: 'border-color 0.12s, background 0.12s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = color
-                    e.currentTarget.style.background = 'rgba(12,12,26,0.97)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(124,58,237,0.13)'
-                    e.currentTarget.style.background = '#0C0C1A'
-                    e.currentTarget.style.borderLeftColor = color
-                  }}
-                >
+              <div key={`${f.engagement_id}-${f.id}`}
+                onClick={() => setExpanded(isExpanded ? null : f.id)}
+                style={{
+                  background: 'rgba(4,4,12,0.97)',
+                  border: `1px solid ${isExpanded ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.13)'}`,
+                  borderLeft: `3px solid ${color}`,
+                  borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
+                  transition: 'border-color 0.12s', animation: `fadeIn 0.18s ease ${i * 0.03}s both`,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', padding: '0.8rem 1rem', gap: 10 }}>
                   {/* Severity badge */}
                   <span style={{
-                    color, fontWeight: 700, fontSize: 9,
-                    textTransform: 'uppercase', letterSpacing: '0.06em',
-                    minWidth: 56, flexShrink: 0,
-                    background: `${color}14`,
-                    border: `1px solid ${color}44`,
-                    borderRadius: 4,
-                    padding: '2px 6px',
+                    fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', padding: '2px 7px', borderRadius: 3, flexShrink: 0,
+                    textTransform: 'uppercase',
+                    background: `${color}14`, border: `1px solid ${color}44`, color,
                   }}>
                     {f.severity}
                   </span>
 
                   {/* Title */}
-                  <span style={{ color: '#E2E8F0', fontSize: 13, flex: 1, lineHeight: 1.3 }}>{f.title}</span>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#E2E8F0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {f.title}
+                  </span>
 
-                  {/* CVSS */}
                   {f.cvss && (
-                    <span style={{ color: '#94A3B8', fontSize: 11, flexShrink: 0 }}>CVSS {f.cvss}</span>
+                    <span style={{ fontSize: 10, color: '#3A3A58', whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" }}>CVSS {f.cvss}</span>
                   )}
-
-                  {/* Engagement name */}
                   {f.engagement_name && (
-                    <span style={{ color: '#3A3A58', fontSize: 11, flexShrink: 0, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 10.5, color: '#3A3A58', whiteSpace: 'nowrap', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {f.engagement_name}
                     </span>
                   )}
-
-                  {/* Expand chevron */}
-                  <span style={{ flexShrink: 0 }}>
-                    {f.description ? (isExpanded ? ChevDown() : ChevRight()) : null}
-                  </span>
+                  {f.description ? (isExpanded ? ChevDown() : ChevRight()) : null}
                 </div>
 
-                {/* Expanded content */}
                 {isExpanded && f.description && (
-                  <div style={{
-                    background: 'rgba(2,2,8,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderTop: 'none',
-                    borderLeft: `3px solid ${color}`, borderRadius: '0 0 8px 8px',
-                    padding: '0.85rem 1rem',
-                    color: '#94A3B8', fontSize: 12, lineHeight: 1.8, whiteSpace: 'pre-wrap',
-                  }}>
-                    {f.description}
+                  <div style={{ padding: '0 1rem 0.9rem', borderTop: '1px solid rgba(14,14,28,0.9)' }}>
+                    <p style={{ fontSize: 12, color: '#94A3B8', lineHeight: 1.8, paddingTop: '0.6rem', whiteSpace: 'pre-wrap' }}>
+                      {f.description}
+                    </p>
                     {f.evidence && (
                       <pre style={{
                         marginTop: 8, background: '#0C0C1A', borderRadius: 5,
                         padding: '0.5rem 0.75rem', fontSize: 11, color: '#94A3B8', overflowX: 'auto',
-                        border: '1px solid rgba(124,58,237,0.1)',
-                        fontFamily: "'JetBrains Mono', monospace",
+                        border: '1px solid rgba(124,58,237,0.1)', fontFamily: "'JetBrains Mono', monospace",
                       }}>
                         {f.evidence}
                       </pre>

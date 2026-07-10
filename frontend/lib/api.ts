@@ -101,6 +101,22 @@ export const api = {
     resetPassword: (id: string, password: string) =>
       req<{ ok: boolean }>(`/users/${id}/reset-password`, { method: 'PATCH', body: JSON.stringify({ password }) }),
   },
+  settings: {
+    getModel: () => req<AgentModelInfo>('/settings/model'),
+    setModel: (model: string) =>
+      req<{ current: string }>('/settings/model', { method: 'PUT', body: JSON.stringify({ model }) }),
+  },
+}
+
+export interface AgentModelOption {
+  id: string
+  label: string
+  note: string
+}
+export interface AgentModelInfo {
+  current: string
+  default: string
+  available: AgentModelOption[]
 }
 
 export interface User {
@@ -133,12 +149,18 @@ export interface Engagement {
   target: string
   scope: object
   status: 'idle' | 'active' | 'completed'
+  // Estado de execução do painel (A-STATE): sobrevive a reload/restart do backend.
+  runState?: 'idle' | 'running' | 'stopped' | 'completed'
   phase: string | null
   progress: number
   findingsCount: number
   slug: string
   date: string
   schedule?: EngagementSchedule
+  // Custo acumulado (soma de Usage no backend). Persiste entre reloads — o painel
+  // usa isto como baseline e soma os cost_update ao vivo por cima.
+  costUsd?: number
+  tokensTotal?: number
   createdAt: string
   updatedAt: string
 }

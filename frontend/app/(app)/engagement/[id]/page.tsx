@@ -9,6 +9,7 @@ import { FindingsSidebar } from '@/components/chat/FindingsSidebar'
 import { FindingsReport } from '@/components/findings/FindingsReport'
 import { ScheduleSettings } from '@/components/engagement/ScheduleSettings'
 import { ExecutionPanel } from '@/components/engagement/ExecutionPanel'
+import { ModelSwitcher } from '@/components/engagement/ModelSwitcher'
 import { useAuth } from '@/hooks/useAuth'
 import {
   ArrowLeft, Wifi, WifiOff, Play, MessageSquare, Shield, FileText,
@@ -18,6 +19,10 @@ import Link from 'next/link'
 import type { ReportFile } from '@/lib/api'
 
 type Tab = 'exec' | 'chat' | 'findings' | 'report'
+
+// Prompt do "Iniciar mapeamento automático" (Agente 1 black-box, recon→enum→vuln).
+const AUTO_RUN_PROMPT =
+  'Inicie o mapeamento automático do alvo como Agente 1 (black-box, sem credenciais): rode recon, depois enumeração, depois vulnerabilidades simples, em sequência e sem me pedir confirmação entre as fases. Pare e pergunte apenas em checkpoint real (achado crítico ou decisão importante). Mostre os achados conforme forem confirmados.'
 
 export default function EngagementPage() {
   const { id } = useParams<{ id: string }>()
@@ -34,7 +39,7 @@ export default function EngagementPage() {
   const [activeSession, setActiveSession] = useState<string | null>(null)  // null = not yet loaded
   const [loadingSessions, setLoadingSessions] = useState(true)
 
-  const { messages: liveMessages, connected, send, addLocal, isThinking, isStreaming, agentRunning, contextUsage, reconnectNonce } =
+  const { messages: liveMessages, connected, send, addLocal, isThinking, isStreaming, agentRunning, runState: wsRunState, contextUsage, reconnectNonce } =
     useEngagementWS(id, activeSession)
 
   const messages = useMemo(() => {
@@ -90,19 +95,12 @@ export default function EngagementPage() {
   // Fallback: o sinal explícito agent_status é a fonte de verdade, mas mantemos
   // o OR com streaming caso um status se perca numa reconexão.
   const running = agentRunning || isThinking || isStreaming
-  const [started, setStarted] = useState(false)
-  // Reset "started" when session changes (but not on null → first session load)
-  const prevSession = useRef<string | null>(null)
-  useEffect(() => {
-    if (activeSession && prevSession.current && prevSession.current !== activeSession) {
-      setStarted(false)
-    }
-    prevSession.current = activeSession
-  }, [activeSession])
+  // A-STATE-1: estado do run derivado do backend — nunca de um flag local. Enquanto
+  // o WS não informa (null), usa o valor persistido do engagement (sem "flash").
+  const runState = (wsRunState ?? engagement?.runState ?? 'idle') as 'idle' | 'running' | 'stopped' | 'completed'
 
-  function handleSend(text: string) {
-    send({ type: 'operator_message', text })
-    setStarted(true)
+  function handleSend(text: string, extra?: Record<string, unknown>) {
+    send({ type: 'operator_message', text, ...extra })
     // Refresh sessions after 2s to pick up auto-generated names
     setTimeout(() => refreshSessions(true), 2000)
   }
@@ -120,7 +118,18 @@ export default function EngagementPage() {
     handleSend('/rift-compact')
   }
   function handleStartAuto() {
-    handleSend('Inicie o mapeamento automático do alvo como Agente 1 (black-box, sem credenciais): rode recon, depois enumeração, depois vulnerabilidades simples, em sequência e sem me pedir confirmação entre as fases. Pare e pergunte apenas em checkpoint real (achado crítico ou decisão importante). Mostre os achados conforme forem confirmados.')
+    handleSend(AUTO_RUN_PROMPT)
+  }
+  // A-STATE-5: retoma via --resume (o claude session_id persistido) — o agente
+  // continua de onde parou, sem re-rodar recon.
+  function handleContinueAuto() {
+    handleSend('Continue o mapeamento automático do alvo de onde parou, seguindo o mesmo plano (recon → enumeração → vulnerabilidades simples), em sequência e sem me pedir confirmação entre as fases. Pare só em checkpoint real.')
+  }
+  // A-STATE-5: run limpo — resetSession descarta a memória do agente no backend
+  // antes de iniciar (o estado do engagement em disco permanece).
+  function handleRestartAuto() {
+    if (!confirm('Começar do zero descarta a memória da sessão do agente (o histórico de findings e o escopo são mantidos). Continuar?')) return
+    handleSend(AUTO_RUN_PROMPT, { resetSession: true })
   }
 
   // ── Session actions ──────────────────────────────────────────────────────────
@@ -182,7 +191,7 @@ export default function EngagementPage() {
           <div style={{ color: 'var(--muted)', fontSize: 12 }}>{engagement.target}</div>
         </div>
 
-        {connected && !running && !started && tab === 'chat' && (
+        {connected && !running && runState === 'idle' && tab === 'chat' && (
           <button onClick={handleStartTests} style={{
             display: 'flex', alignItems: 'center', gap: 6,
             background: 'var(--purple)', border: 'none', borderRadius: 6,
@@ -197,6 +206,8 @@ export default function EngagementPage() {
         {tab === 'chat' && contextUsage && (
           <ContextMeter usage={contextUsage} onCompact={handleCompact} disabled={running || !connected} />
         )}
+
+        {tab === 'chat' && <ModelSwitcher disabled={running} />}
 
         {isAdmin && (
           <button onClick={() => setShowSchedule(true)} title="Agendar scans recorrentes" style={{
@@ -256,8 +267,11 @@ export default function EngagementPage() {
             onAnswer={handleAnswer}
             agentRunning={running}
             connected={connected}
-            started={started}
+            runState={runState}
             onStart={handleStartAuto}
+            onStop={handleStop}
+            onContinue={handleContinueAuto}
+            onRestart={handleRestartAuto}
           />
         </div>
       )}

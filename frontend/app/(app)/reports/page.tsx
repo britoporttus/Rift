@@ -89,9 +89,18 @@ export default function ReportsPage() {
   }
 
   const withReports = engagements.filter((e) => (reports[e.id]?.length ?? 0) > 0)
+  const totalFiles = withReports.reduce((a, e) => a + (reports[e.id]?.length ?? 0), 0)
 
   return (
     <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: 12, animation: 'fadeIn 0.2s ease' }}>
+
+      {/* Page header */}
+      <div style={{ flexShrink: 0 }}>
+        <div style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0', letterSpacing: '-0.01em' }}>Relatórios</div>
+        <div style={{ fontSize: 11.5, color: '#3A3A58', marginTop: 2 }}>
+          {totalFiles} {totalFiles === 1 ? 'arquivo' : 'arquivos'} · {withReports.length} {withReports.length === 1 ? 'engagement' : 'engagements'}
+        </div>
+      </div>
 
       {loading ? (
         <div style={{ color: '#3A3A58', textAlign: 'center', padding: '3rem', fontSize: 12, letterSpacing: '0.1em' }}>CARREGANDO...</div>

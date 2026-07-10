@@ -18,11 +18,13 @@ const findingsRouter = require('./api/findings')
 const reportsRouter = require('./api/reports')
 const adminRouter = require('./api/admin')
 const usersRouter = require('./api/users')
+const settingsRouter = require('./api/settings')
 const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
 const scheduler = require('./scheduler')
 const { getEngagement, updateEngagement, appendUsage, countFindings } = require('./store')
 const ChatSession = require('./models/ChatSession')
+const Engagement = require('./models/Engagement')
 
 // Janela de contexto do modelo (tokens) — base do medidor de "memória".
 const CONTEXT_LIMIT = Number(process.env.CONTEXT_LIMIT) || 200000
@@ -86,6 +88,14 @@ function getSessionClients(engagementId, sessionId) {
   return sessMap.get(sessionId) || new Set()
 }
 
+// A-STATE: estado de execução por engagement. Persiste (sobrevive a reload/restart)
+// e transmite `run_state` para TODAS as sessões do engagement — o painel de
+// Execução deixa de depender de um flag local `started` que divergia do real.
+async function setRunState(engagementId, state) {
+  try { await updateEngagement(engagementId, { runState: state }) } catch {}
+  broadcastEngagement(engagementId, { type: 'run_state', state })
+}
+
 // BUG-3: registra o notifier global do watcher (broadcast ao vivo). Feito 1x —
 // o watcher passa a transmitir findings a QUALQUER conexão, não só à primeira.
 findingsWatcher.setNotifier((engagementId, event) => broadcastEngagement(engagementId, event))
@@ -109,6 +119,7 @@ app.use('/api/findings', findingsRouter)
 app.use('/api/reports', reportsRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/users', usersRouter)
+app.use('/api/settings', settingsRouter)
 
 // REL-1: 404 de API + middleware de erro global (DEPOIS das rotas). Sem o error
 // handler, a rejeição async capturada por express-async-errors não teria destino.
@@ -180,8 +191,21 @@ wss.on('connection', async (ws) => {
   // REL-5: informa o estado atual do agente a quem (re)conectou — corrige o input
   // que ficava destravado após uma reconexão no meio de um run.
   const runnerKey = `${engId}:${sessionId}`
+  const liveRunning = agentRunner.isRunning(runnerKey)
   if (ws.readyState === 1) {
-    ws.send(JSON.stringify({ type: 'agent_status', state: agentRunner.isRunning(runnerKey) ? 'running' : 'idle' }))
+    ws.send(JSON.stringify({ type: 'agent_status', state: liveRunning ? 'running' : 'idle' }))
+  }
+
+  // A-STATE-1: estado do run derivado do backend (nunca de um flag local). Se há
+  // um processo vivo → 'running'. Se o banco diz 'running' mas nada está vivo
+  // (crash/janela de falha), degrada para 'stopped' — nunca "mente" que roda.
+  if (engagement && ws.readyState === 1) {
+    const persistedRun = engagement.runState || 'idle'
+    const effectiveRun = liveRunning ? 'running' : (persistedRun === 'running' ? 'stopped' : persistedRun)
+    if (!liveRunning && persistedRun === 'running') {
+      updateEngagement(engId, { runState: 'stopped' }).catch(() => {})
+    }
+    ws.send(JSON.stringify({ type: 'run_state', state: effectiveRun }))
   }
 
   // Reidrata o medidor de contexto com o último valor conhecido desta sessão.
@@ -224,7 +248,7 @@ wss.on('connection', async (ws) => {
 })
 
 // Types worth persisting in chat history
-const SAVE_TYPES = new Set(['operator_message', 'agent_message', 'agent_action', 'agent_question', 'finding', 'phase_update'])
+const SAVE_TYPES = new Set(['operator_message', 'agent_message', 'agent_action', 'agent_question', 'finding', 'phase_update', 'milestone'])
 // System-generated transient messages that should not be persisted
 const SKIP_TEXTS = new Set(['🔗 Rift conectado.', '⏹ Agente parado pelo operador.'])
 
@@ -391,6 +415,18 @@ ${aggressiveRule}
 `
         : ''
 
+      // A-STATE-5 "Começar do zero": o front pede um run limpo (resetSession=true).
+      // Descartamos o claude session_id (memória + banco) → o próximo run NÃO usa
+      // --resume e a conversa começa do zero. O estado do engagement em disco
+      // (escopo, fase, findings) permanece — é só a memória do agente que zera.
+      if (msg.resetSession === true) {
+        agentRunner.clearSession(runnerKey)
+        if (sessionId !== 'default') {
+          await ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
+        }
+        broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
+      }
+
       // Continuidade durável: recupera o claude session_id salvo no banco
       // (sobrevive a restart do backend). 'default' não tem doc — fica só em memória.
       const persisted = sessionId !== 'default'
@@ -406,9 +442,15 @@ ${aggressiveRule}
         ? (cid) => ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: cid }).catch(() => {})
         : undefined
 
-      const sessionClients = getSessionClients(engId, sessionId)
+      // A-STATE: marca o run como ativo (persiste + transmite run_state='running').
+      // O painel de Execução espelha isto — trava o "Iniciar" e mostra "Parar".
+      setRunState(engId, 'running')
+
+      // Broadcaster VIVO: re-resolve os clientes atuais da sessão a cada evento
+      // (via broadcastSession) → reconexão de WS não quebra o feed ao vivo. Antes
+      // passávamos um Set capturado no início, que morria na 1ª reconexão.
       agentRunner.run(
-        runnerKey, engId2, text, sessionClients,
+        runnerKey, engId2, text, (event) => broadcastSession(engId, sessionId, event),
         (usd, tokens) => appendUsage({
           usd, tokens,
           engagementId:   engId,
@@ -440,14 +482,25 @@ ${aggressiveRule}
           agentRole: 'blackbox',
           resumeSessionId,
           onClaudeSession: persistClaudeSession,
-          onClose: isCompact ? () => {
-            agentRunner.clearSession(runnerKey)
-            if (sessionId !== 'default') {
-              ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
+          onClose: (code, info) => {
+            // A-STATE-4/5: ao encerrar, deriva o estado persistido do run.
+            //   saída limpa (código 0)     → 'completed' (concluiu sozinho)
+            //   erro / teto de custo / kill → 'stopped'  (operador pode Continuar)
+            // Se o operador já pediu Parar, o handler de agent_stop já gravou
+            // 'stopped'; aqui é idempotente.
+            const finalState = code === 0 ? 'completed' : 'stopped'
+            setRunState(engId, finalState)
+            // Compactação: /rift-compact escreve o resumo em disco e, ao terminar,
+            // descartamos o session_id → o próximo turno começa uma conversa enxuta.
+            if (isCompact) {
+              agentRunner.clearSession(runnerKey)
+              if (sessionId !== 'default') {
+                ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
+              }
+              broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
+              broadcastSession(engId, sessionId, { type: 'agent_message', text: '🧹 Contexto compactado. O estado do engagement (fase, findings, escopo) está salvo em disco — a próxima mensagem inicia uma sessão enxuta.' })
             }
-            broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
-            broadcastSession(engId, sessionId, { type: 'agent_message', text: '🧹 Contexto compactado. O estado do engagement (fase, findings, escopo) está salvo em disco — a próxima mensagem inicia uma sessão enxuta.' })
-          } : undefined,
+          },
         },
       )
     }
@@ -455,6 +508,9 @@ ${aggressiveRule}
 
   if (msg.type === 'agent_stop') {
     agentRunner.stop(runnerKey)
+    // A-STATE-3/5: grava 'stopped' já (não espera o processo morrer) → o painel
+    // troca "Parar" por "Continuar / Começar do zero" na hora. onClose reforça.
+    setRunState(engId, 'stopped')
     broadcastSession(engId, sessionId, { type: 'agent_message', text: '⏹ Agente parado pelo operador.' })
   }
 }
@@ -462,7 +518,16 @@ ${aggressiveRule}
 const PORT = process.env.PORT || 3001
 
 connect()
-  .then(() => {
+  .then(async () => {
+    // A-STATE-4: no boot, nenhum processo claude sobrevive (stopAll matou tudo no
+    // shutdown anterior). Qualquer engagement gravado como 'running' é órfão →
+    // reconcilia para 'stopped' para o painel não "mentir" que ainda roda.
+    try {
+      const r = await Engagement.updateMany({ runState: 'running' }, { $set: { runState: 'stopped' } })
+      if (r.modifiedCount) console.log(`[rift] reconciliados ${r.modifiedCount} engagement(s) 'running' → 'stopped' no boot`)
+    } catch (err) {
+      console.warn('[rift] reconcile de runState falhou:', err?.message)
+    }
     httpServer.listen(PORT, () => {
       console.log(`[rift] backend em http://localhost:${PORT}`)
     })

@@ -118,6 +118,10 @@ Detalhe completo em `docs/ROADMAP-HARDENING.md`.
 
 > Separados do hardening: são **evoluções de produto**, não correções. A regra
 > vale: **não avançar para B/C antes de A funcionar de verdade.**
+>
+> 📄 **Detalhamento de A e B** (com o feedback de uso de 2026-07-08 — novo fluxo de
+> "Novo Escopo" via intake, estado real do run + Parar/Continuar, progresso vivo,
+> separar superfície de achados): ver **`docs/ROADMAP-A-B-EXECUCAO.md`**.
 
 ### Etapa A — Painel de execução ponta a ponta (FOCO)
 

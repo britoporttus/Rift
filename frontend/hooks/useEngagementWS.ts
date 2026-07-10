@@ -15,6 +15,10 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
   const [isStreaming, setIsStreaming] = useState(false)
   // Travado pelo sinal explícito agent_status (running/idle) vindo do backend.
   const [agentRunning, setAgentRunning] = useState(false)
+  // A-STATE-1: estado de execução persistido (idle/running/stopped/completed),
+  // vindo do backend via run_state. null = ainda desconhecido (usa fallback do
+  // engagement). Fonte de verdade para o CTA do painel de Execução.
+  const [runState, setRunState] = useState<string | null>(null)
   // Medidor de "memória": tamanho do contexto no último turno.
   const [contextUsage, setContextUsage] = useState<{ tokens: number; limit: number; percent: number } | null>(null)
   // REL-5: incrementa a cada REconexão bem-sucedida (não na 1ª conexão). O painel
@@ -38,6 +42,7 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
     setIsThinking(false)
     setIsStreaming(false)
     setAgentRunning(false)
+    setRunState(null)
     setContextUsage(null)
 
     let cancelled = false  // distingue close intencional (unmount/troca) de queda de rede
@@ -71,6 +76,12 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
               return prev
             })
           }
+          return
+        }
+
+        // A-STATE: estado de execução persistido do run (para o CTA do painel).
+        if (msg.type === 'run_state') {
+          setRunState(String(msg.state ?? 'idle'))
           return
         }
 
@@ -205,5 +216,5 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
     setMessages((prev) => [...prev, { ...msg, _id: ++counter.current }])
   }, [])
 
-  return { messages, connected, send, addLocal, isThinking, isStreaming, agentRunning, contextUsage, reconnectNonce }
+  return { messages, connected, send, addLocal, isThinking, isStreaming, agentRunning, runState, contextUsage, reconnectNonce }
 }

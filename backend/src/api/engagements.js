@@ -5,8 +5,10 @@ const { readEngagements, getEngagement, createEngagement, updateEngagement, dele
 const ChatMessage = require('../models/ChatMessage')
 const ChatSession = require('../models/ChatSession')
 const Finding = require('../models/Finding')
+const Usage = require('../models/Usage')
 const findingsWatcher = require('../findings-watcher')
 const scheduler = require('../scheduler')
+const { writeEngagementScope } = require('../scope')
 
 const router = Router()
 router.use(requireAuth())
@@ -15,35 +17,70 @@ function toDto(e) {
   return { ...e, id: e._id }
 }
 
+// Custo ACUMULADO do engagement = soma dos registros de Usage (cada turno do agente
+// grava um). O custo mostrado na UI vem daqui (persiste entre reloads); os eventos
+// cost_update do WS só somam o turno em andamento por cima deste baseline.
+async function costFor(engagementId) {
+  const [row] = await Usage.aggregate([
+    { $match: { engagementId } },
+    { $group: { _id: null, usd: { $sum: '$usd' }, tokens: { $sum: '$tokens' } } },
+  ])
+  return { costUsd: row?.usd || 0, tokensTotal: row?.tokens || 0 }
+}
+
 router.get('/', async (_req, res) => {
-  res.json((await readEngagements()).map(toDto))
+  const engs = await readEngagements()
+  // Uma agregação só, agrupada por engagement (evita N queries).
+  const rows = await Usage.aggregate([
+    { $group: { _id: '$engagementId', usd: { $sum: '$usd' }, tokens: { $sum: '$tokens' } } },
+  ])
+  const byId = Object.fromEntries(rows.map((r) => [String(r._id), r]))
+  res.json(engs.map((e) => {
+    const u = byId[String(e._id)]
+    return { ...toDto(e), costUsd: u?.usd || 0, tokensTotal: u?.tokens || 0 }
+  }))
 })
 
 router.get('/:id', async (req, res) => {
   const e = await getEngagement(req.params.id)
   if (!e) return res.status(404).json({ error: 'not found' })
-  res.json(toDto(e))
+  const cost = await costFor(req.params.id)
+  res.json({ ...toDto(e), ...cost })
 })
 
 router.post('/', async (req, res) => {
   const { name, target, scope } = req.body ?? {}
-  if (!name || !target) return res.status(400).json({ error: 'name e target obrigatórios' })
+  // A-INTAKE: nome é opcional (default = alvo). Só o alvo é obrigatório — mesma
+  // filosofia da skill pentest-intake ("só o alvo é obrigatório, o resto tem default").
+  const finalName = (name && String(name).trim()) || (target && String(target).trim())
+  if (!target || !finalName) return res.status(400).json({ error: 'alvo obrigatório' })
 
   const now = new Date()
   const engagement = await createEngagement({
     _id: uuid(),
-    name,
-    target,
-    scope: scope ?? {},
+    name: finalName,
+    target: String(target).trim(),
+    // scope carrega as respostas do intake guiado (environment, appType, intensity,
+    // waf, foco, exclusões, gasto…). Persistido no Mongo e materializado em YAML abaixo.
+    scope: scope && typeof scope === 'object' ? scope : {},
     status: 'idle',
+    // A-STATE: novo engagement nasce 'idle' — sem run, mostra "Iniciar mapeamento".
+    runState: 'idle',
     phase: null,
     progress: 0,
     findingsCount: 0,
-    slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    slug: finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
     date: now.toISOString().slice(0, 10),
     createdAt: now,
     updatedAt: now,
   })
+
+  // A-INTAKE-3: materializa scope.yaml + engagement-state.yaml (idle) no framework.
+  // Best-effort: uma falha de FS não deve impedir a criação do engagement no Mongo.
+  try { writeEngagementScope(engagement) } catch (err) {
+    console.warn('[engagements] falha ao escrever scope do intake:', err?.message)
+  }
+
   res.status(201).json(toDto(engagement))
 })
 

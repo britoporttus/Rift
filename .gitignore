@@ -40,3 +40,11 @@ actions-runner/
 
 # Backups de env (contêm segredos)
 *.bak
+
+# Config local do Claude Code (settings.local.json contém permissões/estado da máquina)
+.claude/
+
+# Artefatos de scratch / design — não são fonte da aplicação
+graphify-out/
+design_handoff_rifit_v3/
+/Login Page v4.html

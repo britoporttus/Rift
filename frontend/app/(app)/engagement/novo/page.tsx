@@ -1,0 +1,296 @@
+'use client'
+import { useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
+import { api } from '@/lib/api'
+import Link from 'next/link'
+import { ArrowLeft, ArrowRight, Check, Target, Radar, Loader2 } from 'lucide-react'
+
+// A-INTAKE: "Novo Escopo" vira um intake guiado (não o form de 2 campos). Coleta
+// os mesmos campos da skill pentest-intake (alvo, ambiente, tipo, intensidade,
+// WAF, foco, exclusões, gasto) e SÓ no fim cria o engagement em `idle` — sem
+// iniciar testes. Depois o operador entra e clica "Iniciar mapeamento automático".
+
+type Opt = { value: string; label: string; hint?: string }
+
+const ENVIRONMENTS: Opt[] = [
+  { value: 'production', label: 'Produção', hint: 'mais conservador' },
+  { value: 'staging',    label: 'Staging' },
+  { value: 'dev',        label: 'Dev' },
+  { value: 'lab',        label: 'Lab', hint: 'sem limites de gasto padrão' },
+]
+const APP_TYPES: Opt[] = [
+  { value: 'web',         label: 'Web' },
+  { value: 'web+api',     label: 'Web + API', hint: 'mais comum' },
+  { value: 'api',         label: 'API' },
+  { value: 'saas-vendor', label: 'SaaS (fornecedor)' },
+  { value: 'saas-tenant', label: 'SaaS (tenant)' },
+]
+const INTENSITIES: Opt[] = [
+  { value: 'low',      label: 'Baixa',       hint: 'passivo, discreto' },
+  { value: 'medium',   label: 'Média' },
+  { value: 'high',     label: 'Alta',        hint: 'mais ruidoso' },
+  { value: 'targeted', label: 'Direcionada', hint: 'foco específico' },
+]
+const WAFS: Opt[] = [
+  { value: 'unknown', label: 'Não sei', hint: 'detecta no recon' },
+  { value: 'yes',     label: 'Sim' },
+  { value: 'no',      label: 'Não' },
+]
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '0.6rem 0.8rem',
+  background: 'var(--bg)', border: '1px solid var(--border)',
+  borderRadius: 8, color: 'var(--text)', fontSize: 13.5,
+  outline: 'none', fontFamily: 'inherit',
+}
+const labelStyle: React.CSSProperties = {
+  color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 7,
+  letterSpacing: '0.04em', fontWeight: 600,
+}
+
+function Chips({ options, value, onChange }: { options: Opt[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {options.map((o) => {
+        const active = o.value === value
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            title={o.hint}
+            style={{
+              padding: '0.45rem 0.85rem', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 12.5, fontWeight: 600, transition: 'all .12s',
+              background: active ? 'rgba(124,58,237,.15)' : 'transparent',
+              border: `1px solid ${active ? 'var(--purple)' : 'var(--border)'}`,
+              color: active ? 'var(--purple-light)' : 'var(--muted)',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {active && <Check size={12} />}
+            {o.label}
+            {o.hint && <span style={{ color: active ? 'var(--purple-light)' : 'var(--text-mute)', opacity: 0.7, fontWeight: 400, fontSize: 11 }}>· {o.hint}</span>}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+export default function NovoEngagementPage() {
+  const router = useRouter()
+  const [step, setStep] = useState<1 | 2>(1)
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Essencial
+  const [name, setName]           = useState('')
+  const [target, setTarget]       = useState('')
+  const [environment, setEnv]     = useState('production')
+  const [appType, setAppType]     = useState('web+api')
+  const [intensity, setIntensity] = useState('medium')
+  // Detalhes (opcional)
+  const [wafPresent, setWafPresent] = useState('unknown')
+  const [wafType, setWafType]       = useState('')
+  const [focusAreas, setFocus]      = useState('')
+  const [outOfScope, setOutOfScope] = useState('')
+  const [ipRanges, setIpRanges]     = useState('')
+  const [spending, setSpending]     = useState('')
+  const [notes, setNotes]           = useState('')
+
+  const targetOk = target.trim().length > 0
+  // Nome default = alvo (a skill trata nome como opcional).
+  const effectiveName = useMemo(() => name.trim() || target.trim(), [name, target])
+
+  async function handleCreate() {
+    setError(null)
+    if (!targetOk) { setStep(1); setError('Informe o alvo (domínio).'); return }
+    setCreating(true)
+    try {
+      const scope: Record<string, unknown> = {
+        environment, appType, intensity,
+        wafPresent, wafType: wafPresent === 'yes' ? wafType.trim() : '',
+        focusAreas, outOfScope, ipRanges, notes,
+      }
+      const n = Number(spending)
+      if (spending.trim() && !Number.isNaN(n) && n > 0) scope.spendingUsd = n
+
+      const eng = await api.engagements.create({ name: effectiveName, target: target.trim(), scope })
+      // Vai direto para o engagement recém-criado (idle) — lá aparece o CTA "Iniciar".
+      router.push(`/engagement/${eng.id}`)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Erro ao criar o escopo')
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div style={{ padding: '1.5rem 1.75rem', maxWidth: 760, margin: '0 auto', width: '100%' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+        <Link href="/dashboard" style={{ color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
+          <ArrowLeft size={18} />
+        </Link>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Novo escopo</h1>
+      </div>
+      <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 20px 30px' }}>
+        Configure o engagement. Nada é criado nem testado até você concluir — só o <strong style={{ color: 'var(--text)' }}>alvo</strong> é obrigatório; o resto tem padrão sensato.
+      </p>
+
+      {/* Step indicator */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        {[{ n: 1, t: 'Essencial' }, { n: 2, t: 'Detalhes (opcional)' }].map((s) => {
+          const active = step === s.n
+          const done = step > s.n
+          return (
+            <div key={s.n} style={{
+              flex: 1, display: 'flex', alignItems: 'center', gap: 8,
+              padding: '0.6rem 0.85rem', borderRadius: 10,
+              background: active ? 'rgba(124,58,237,.1)' : 'var(--surface)',
+              border: `1px solid ${active ? 'var(--purple)' : 'var(--border)'}`,
+            }}>
+              <div style={{
+                width: 22, height: 22, borderRadius: 99, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 700,
+                background: active || done ? 'var(--purple)' : 'var(--border)',
+                color: active || done ? 'white' : 'var(--muted)',
+              }}>{done ? <Check size={13} /> : s.n}</div>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: active ? 'var(--purple-light)' : 'var(--muted)' }}>{s.t}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12,
+        padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: 20,
+      }}>
+        {step === 1 ? (
+          <>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={labelStyle}>Alvo (domínio) *</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Target size={15} color="var(--purple-light)" style={{ flexShrink: 0 }} />
+                  <input autoFocus value={target} onChange={(e) => setTarget(e.target.value)} placeholder="exemplo.com" style={inputStyle} />
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={labelStyle}>Nome do engagement</label>
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder={target.trim() || 'Cliente XYZ'} style={inputStyle} />
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Ambiente</label>
+              <Chips options={ENVIRONMENTS} value={environment} onChange={setEnv} />
+            </div>
+            <div>
+              <label style={labelStyle}>Tipo de alvo</label>
+              <Chips options={APP_TYPES} value={appType} onChange={setAppType} />
+            </div>
+            <div>
+              <label style={labelStyle}>Intensidade</label>
+              <Chips options={INTENSITIES} value={intensity} onChange={setIntensity} />
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <label style={labelStyle}>WAF / proteção</label>
+              <Chips options={WAFS} value={wafPresent} onChange={setWafPresent} />
+              {wafPresent === 'yes' && (
+                <input value={wafType} onChange={(e) => setWafType(e.target.value)} placeholder="Qual? (ex.: Cloudflare, AWS WAF, Akamai)" style={{ ...inputStyle, marginTop: 10 }} />
+              )}
+            </div>
+            <div>
+              <label style={labelStyle}>Foco (áreas prioritárias)</label>
+              <input value={focusAreas} onChange={(e) => setFocus(e.target.value)} placeholder="ex.: autenticação, upload de arquivos, API de pagamento" style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={labelStyle}>Fora de escopo</label>
+                <input value={outOfScope} onChange={(e) => setOutOfScope(e.target.value)} placeholder="ex.: admin.exemplo.com, /logout" style={inputStyle} />
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={labelStyle}>Faixas de IP (opcional)</label>
+                <input value={ipRanges} onChange={(e) => setIpRanges(e.target.value)} placeholder="ex.: 203.0.113.0/24" style={inputStyle} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ width: 180 }}>
+                <label style={labelStyle}>Gasto máximo (US$)</label>
+                <input type="number" min="0" step="0.5" value={spending} onChange={(e) => setSpending(e.target.value)} placeholder={environment === 'lab' ? '20' : '5'} style={inputStyle} />
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={labelStyle}>Observações</label>
+                <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ex.: janela de teste, cuidado com rate limit" style={inputStyle} />
+              </div>
+            </div>
+          </>
+        )}
+
+        {error && (
+          <div style={{ color: 'var(--critical)', fontSize: 12.5, background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, padding: '0.6rem 0.8rem' }}>
+            {error}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+          {step === 2 && (
+            <button type="button" onClick={() => setStep(1)} style={{
+              display: 'flex', alignItems: 'center', gap: 6, background: 'transparent',
+              border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)',
+              fontSize: 13, fontWeight: 600, padding: '0.55rem 1rem', cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              <ArrowLeft size={14} /> Voltar
+            </button>
+          )}
+          <div style={{ flex: 1 }} />
+          <Link href="/dashboard" style={{ color: 'var(--muted)', fontSize: 12.5, textDecoration: 'none', padding: '0.55rem 0.5rem' }}>
+            Cancelar
+          </Link>
+          {step === 1 ? (
+            <button
+              type="button"
+              onClick={() => { if (!targetOk) { setError('Informe o alvo (domínio).'); return } setError(null); setStep(2) }}
+              disabled={!targetOk}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                background: targetOk ? 'var(--purple)' : 'var(--border)', border: 'none', borderRadius: 8,
+                color: 'white', fontSize: 13.5, fontWeight: 700, padding: '0.55rem 1.2rem',
+                cursor: targetOk ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+              }}
+            >
+              Avançar <ArrowRight size={14} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={creating}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                background: 'var(--purple)', border: 'none', borderRadius: 8,
+                color: 'white', fontSize: 13.5, fontWeight: 700, padding: '0.55rem 1.2rem',
+                cursor: creating ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: creating ? 0.75 : 1,
+                boxShadow: '0 0 18px var(--purple-glow)',
+              }}
+            >
+              {creating ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Criando…</> : <><Radar size={14} /> Criar escopo (sem iniciar testes)</>}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <p style={{ fontSize: 11.5, color: 'var(--text-mute)', textAlign: 'center', marginTop: 14 }}>
+        Ao concluir, o engagement é criado como <strong style={{ color: 'var(--muted)' }}>ocioso</strong>. Os testes só começam quando você clicar em “Iniciar mapeamento automático”.
+      </p>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </div>
+  )
+}
