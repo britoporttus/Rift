@@ -5,6 +5,7 @@ const Engagement = require('./models/Engagement')
 const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
 const { getEngagement, updateEngagement, appendUsage, countFindings } = require('./store')
+const { getFramework } = require('./frameworks')
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000 // varre a cada 5 min
 const FREQUENCY_MS = { daily: 24 * 60 * 60 * 1000, weekly: 7 * 24 * 60 * 60 * 1000 }
@@ -67,7 +68,16 @@ async function triggerRun(eng) {
     return
   }
 
-  console.log(`[scheduler] iniciando scan agendado: ${eng.name} (${schedule.phases}, teto US$ ${schedule.costCeilingUsd})`)
+  // Versão do agente do engagement (seletor A/B/C). Fail-safe: se a pasta sumiu,
+  // não dispara o scan num cwd inexistente — registra e marca erro.
+  const framework = getFramework(eng.frameworkId)
+  if (!framework.available) {
+    console.warn(`[scheduler] versão "${framework.label}" indisponível para ${eng.name} — scan pulado`)
+    await updateEngagement(engId, { schedule: { ...schedule, lastRunStatus: 'error' } })
+    return
+  }
+
+  console.log(`[scheduler] iniciando scan agendado: ${eng.name} (${schedule.phases}, versão ${framework.id}, teto US$ ${schedule.costCeilingUsd})`)
   await updateEngagement(engId, {
     schedule: { ...schedule, lastRunAt: new Date(), lastRunStatus: 'running' },
     status: 'active',
@@ -75,7 +85,7 @@ async function triggerRun(eng) {
 
   // Watcher de findings (sem WS): persiste no Mongo e atualiza a contagem
   // internamente (BUG-3). O broadcast ao vivo, se alguém conectar, vai pelo notifier.
-  findingsWatcher.watch(engId, eng.slug, eng.date, eng.name)
+  findingsWatcher.watch(engId, eng.slug, eng.date, eng.name, framework, eng.target)
 
   const prompt = buildPipelinePrompt(eng, engId2, schedule)
   // Usuário sintético do sistema; role reflete a permissão de exploração autônoma.
@@ -97,6 +107,7 @@ async function triggerRun(eng) {
     eng,
     sysUser,
     {
+      frameworkPath: framework.path,
       costCeiling: schedule.costCeilingUsd,
       onBudgetExceeded: async () => {
         const cur = await getEngagement(engId)

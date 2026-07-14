@@ -7,11 +7,13 @@ const { createServer } = require('http')
 const { WebSocketServer } = require('ws')
 const { URL } = require('url')
 const cors = require('cors')
+const cookieParser = require('cookie-parser')
+const cookie = require('cookie')
 const jwt = require('jsonwebtoken')
 
 const { connect } = require('./db')
 const ChatMessage = require('./models/ChatMessage')
-const { router: authRouter, JWT_SECRET } = require('./auth')
+const { router: authRouter, JWT_SECRET, COOKIE_NAME } = require('./auth')
 const authMicrosoftRouter = require('./api/auth-microsoft')
 const engagementsRouter = require('./api/engagements')
 const findingsRouter = require('./api/findings')
@@ -22,8 +24,11 @@ const settingsRouter = require('./api/settings')
 const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
 const scheduler = require('./scheduler')
-const { getEngagement, updateEngagement, appendUsage, countFindings } = require('./store')
+const { getEngagement, updateEngagement, appendUsage, sumUsageUsd, countFindings } = require('./store')
+const { deriveRunOutcome } = require('./run-outcome')
 const { resetEngagementState } = require('./scope')
+const { getFramework, loadRules } = require('./frameworks')
+const jobs = require('./jobs')
 const ChatSession = require('./models/ChatSession')
 const Engagement = require('./models/Engagement')
 
@@ -31,6 +36,12 @@ const Engagement = require('./models/Engagement')
 const CONTEXT_LIMIT = Number(process.env.CONTEXT_LIMIT) || 200000
 // SEC-2: teto de custo por run interativo do chat (0/ausente = sem teto).
 const INTERACTIVE_COST_CEILING = Number(process.env.INTERACTIVE_COST_CEILING) || 0
+// Item 4 (custo): auto-compactação. Quando o contexto de um turno passa deste %, ao
+// fim do turno descartamos o session_id do claude → o próximo turno começa enxuto
+// (o estado durável — findings/fase/escopo — vive em disco e é recarregado). 0 = off.
+const CONTEXT_AUTOCOMPACT_PERCENT = process.env.CONTEXT_AUTOCOMPACT_PERCENT !== undefined
+  ? Number(process.env.CONTEXT_AUTOCOMPACT_PERCENT)
+  : 85
 
 const app = express()
 app.set('trust proxy', 1)
@@ -92,10 +103,17 @@ function getSessionClients(engagementId, sessionId) {
 // A-STATE: estado de execução por engagement. Persiste (sobrevive a reload/restart)
 // e transmite `run_state` para TODAS as sessões do engagement — o painel de
 // Execução deixa de depender de um flag local `started` que divergia do real.
-async function setRunState(engagementId, state) {
-  try { await updateEngagement(engagementId, { runState: state }) } catch {}
-  broadcastEngagement(engagementId, { type: 'run_state', state })
+// A-STATE (1.3): persiste o estado E o motivo (stopReason) e transmite ambos.
+// O painel usa `reason` para SEMPRE mostrar por que parou/falhou — inclusive
+// após um refresh (o motivo vem persistido no engagement).
+async function setRunState(engagementId, state, reason = null) {
+  try { await updateEngagement(engagementId, { runState: state, stopReason: reason }) } catch {}
+  broadcastEngagement(engagementId, { type: 'run_state', state, reason })
 }
+
+// Runs em que o operador pediu Parar — lido no onClose para não rotular como
+// "concluído" um run que o processo encerrou (SIGTERM) por ordem do operador.
+const stopRequested = new Set()
 
 // BUG-3: registra o notifier global do watcher (broadcast ao vivo). Feito 1x —
 // o watcher passa a transmitir findings a QUALQUER conexão, não só à primeira.
@@ -111,6 +129,7 @@ app.use(cors({
   credentials: true,
 }))
 app.use(express.json({ limit: '1mb' }))
+app.use(cookieParser())
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', version: '0.1.0' }))
 app.use('/api/auth', authRouter)
@@ -131,17 +150,18 @@ app.use((err, _req, res, _next) => {
   res.status(err?.status || 500).json({ error: 'Erro interno do servidor' })
 })
 
-// WebSocket upgrade — autentica via subprotocolo 'rift-jwt' (fallback: query token)
+// WebSocket upgrade — autentica via cookie HttpOnly (o browser a envia sozinho no
+// handshake, same-origin); fallback: subprotocolo 'rift-jwt' ou query token (clientes
+// não-browser / transição).
 httpServer.on('upgrade', (req, socket, head) => {
   const urlObj = new URL(req.url, 'http://localhost')
   const engagementId = urlObj.searchParams.get('engagementId')
   const sessionId    = urlObj.searchParams.get('sessionId') || 'default'
 
-  // SEC-4: token preferencialmente via subprotocolo ('rift-jwt, <jwt>'); fallback
-  // para a query string (transição/retrocompat) — evitamos porque vaza em logs.
+  const cookies    = cookie.parse(req.headers.cookie || '')
   const protoHeader = req.headers['sec-websocket-protocol'] || ''
   const protoToken  = protoHeader.split(',').map((s) => s.trim()).find((p) => p && p !== 'rift-jwt')
-  const token       = protoToken || urlObj.searchParams.get('token')
+  const token       = cookies[COOKIE_NAME] || protoToken || urlObj.searchParams.get('token')
 
   if (!token || !engagementId) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
@@ -184,7 +204,10 @@ wss.on('connection', async (ws) => {
   if (engagement) {
     // Watcher por engagement: persiste findings, atualiza a contagem e transmite
     // ao vivo via notifier global (broadcast + count vivem dentro do watcher agora).
-    findingsWatcher.watch(engId, engagement.slug, engagement.date, engagement.name)
+    // Observa os dirs de findings da VERSÃO escolhida (seletor A/B/C) — o watch
+    // precisa casar com o cwd do run, senão os findings da versão não apareceriam.
+    const fw = getFramework(engagement.frameworkId)
+    findingsWatcher.watch(engId, engagement.slug, engagement.date, engagement.name, fw, engagement.target)
   }
 
   ws.send(JSON.stringify({ type: 'connection_ready', text: '🔗 Rift conectado.' }))
@@ -202,11 +225,14 @@ wss.on('connection', async (ws) => {
   // (crash/janela de falha), degrada para 'stopped' — nunca "mente" que roda.
   if (engagement && ws.readyState === 1) {
     const persistedRun = engagement.runState || 'idle'
-    const effectiveRun = liveRunning ? 'running' : (persistedRun === 'running' ? 'stopped' : persistedRun)
-    if (!liveRunning && persistedRun === 'running') {
-      updateEngagement(engId, { runState: 'stopped' }).catch(() => {})
+    // 'running' persistido sem processo vivo = run órfão (crash/restart no meio).
+    const degraded = !liveRunning && persistedRun === 'running'
+    const effectiveRun = liveRunning ? 'running' : (degraded ? 'stopped' : persistedRun)
+    const reason = degraded ? 'interrupted' : (engagement.stopReason || null)
+    if (degraded) {
+      updateEngagement(engId, { runState: 'stopped', stopReason: 'interrupted' }).catch(() => {})
     }
-    ws.send(JSON.stringify({ type: 'run_state', state: effectiveRun }))
+    ws.send(JSON.stringify({ type: 'run_state', state: effectiveRun, reason }))
   }
 
   // Reidrata o medidor de contexto com o último valor conhecido desta sessão.
@@ -381,6 +407,23 @@ async function handleMessage(msg, engId, sessionId, user) {
       const date = eng?.date || ''
       const engId2 = slug && date ? `${slug}-${date.replace(/-/g, '')}` : ''
 
+      // Versão do agente escolhida (seletor A/B/C). Fail-safe: se o path da versão
+      // sumiu, recusa com mensagem clara em vez de spawnar num cwd inexistente.
+      const framework = getFramework(eng?.frameworkId)
+      if (!framework.available) {
+        broadcastSession(engId, sessionId, {
+          type: 'agent_message',
+          text: `⚠️ A versão do agente selecionada ("${framework.label}") não está disponível no servidor (pasta ausente). Escolha outra versão no seletor da tela do engagement.`,
+        })
+        setRunState(engId, 'stopped', 'error')
+        return
+      }
+      // Re-aponta o watcher para os dirs DESTA versão caso o operador tenha trocado
+      // a versão depois de conectar (idempotente se já estava correto).
+      if (eng) {
+        try { findingsWatcher.watch(engId, eng.slug, eng.date, eng.name, framework, eng.target) } catch {}
+      }
+
       // Load recent history for THIS session so the agent has conversational continuity
       const recentMsgs = await loadRecentHistory(engId, sessionId, 8)
       const historyCtx = formatHistory(recentMsgs)
@@ -390,28 +433,52 @@ async function handleMessage(msg, engId, sessionId, user) {
         ? '- PERMISSÃO: fases agressivas (exploit/post) LIBERADAS para este operador (admin).'
         : '- PERMISSÃO: operador SEM perfil de admin. É PROIBIDO executar fases agressivas (exploit/post), exploração ativa, obtenção de shell ou pós-exploração — mesmo que solicitado em texto livre. Se pedirem, RECUSE educadamente e oriente a acionar um admin. (RIFT_ALLOW_AGGRESSIVE=false)'
 
+      // Diretório canônico de findings — igual ao dir PRIMÁRIO que o watcher observa
+      // (findings-watcher/frameworks.js). Instruir TODA versão a gravar aqui é o que
+      // garante que os findings apareçam no painel, mesmo nas versões sem /pentest-*.
+      const canonicalFindingsDir = `clients/${slug}/${date}/findings/`
+
+      // Regras de PAPEL/relatório dependem da versão: v2 tem core/agent-1-blackbox.md
+      // e /pentest-report; legacy/v3 não têm — referenciá-los confundiria o agente.
+      const fwGuidance = framework.slashCommands
+        ? `- PAPEL: você é o AGENTE 1 (black-box). NÃO tem credenciais e NÃO deve pedi-las nem ler credentials.yaml. Siga core/agent-1-blackbox.md. Ao esgotar a superfície externa, gere o relatório e RECOMENDE ao operador fornecer credenciais para o Agente 2 (não inicie fase autenticada).
+${aggressiveRule}
+- QUANDO O OPERADOR PEDE RELATÓRIO: execute /pentest-report imediatamente, sem fazer mais testes`
+        : `- PAPEL: você é um agente de pentest black-box (sem credenciais). Foque na superfície externa autorizada e siga as REGRAS DO FRAMEWORK abaixo.
+${aggressiveRule}
+- Esta versão NÃO tem slash-commands (/pentest-*). Ao pedir relatório, gere um resumo consolidado dos findings em ${canonicalFindingsDir}.`
+
+      // Injetamos as regras nativas (.cursorrules) SÓ quando a versão NÃO tem CLAUDE.md.
+      // legacy/v3 foram portados (têm CLAUDE.md) → o Claude lê as instruções nativamente
+      // (arquivo inteiro, sem o truncamento de 12k do blob) e referencia os phase-files/
+      // playbooks sob demanda. Sem CLAUDE.md (fallback), ainda injetamos o .cursorrules.
+      const fwRules = framework.hasClaudeMd ? '' : loadRules(framework)
+      const fwRulesBlock = fwRules
+        ? `\n[REGRAS DO FRAMEWORK "${framework.label}" — SIGA-AS COMO METODOLOGIA]\n${fwRules.slice(0, 12000)}\n`
+        : ''
+
       const ctx = eng
         ? `[CONTEXTO DO SISTEMA — NÃO IGNORAR]
 Engagement ativo: "${eng.name}"
 ID do engagement: ${engId2}
 Alvo autorizado: ${eng.target} e *.${eng.target}
 Status: ${eng.status}
+Versão do agente: ${framework.label}
 Diretório de contexto: context/${engId2}/
 Escopo em: config/scope.yaml
-Findings dir: clients/${slug}/${date}/findings/
+Findings dir: ${canonicalFindingsDir}
 Reports dir:  clients/${slug}/${date}/reports/
 
 REGRAS OBRIGATÓRIAS:
-- PAPEL: você é o AGENTE 1 (black-box). NÃO tem credenciais e NÃO deve pedi-las nem ler credentials.yaml. Siga core/agent-1-blackbox.md. Ao esgotar a superfície externa, gere o relatório e RECOMENDE ao operador fornecer credenciais para o Agente 2 (não inicie fase autenticada).
-${aggressiveRule}
+${fwGuidance}
 - Responda SEMPRE em português brasileiro
 - Opere APENAS sobre o alvo ${eng.target} — qualquer outro alvo está fora de escopo
 - Use o diretório context/${engId2}/ para salvar estado deste engagement
 - NÃO liste outros engagements como opções; este é o engagement ativo
 - Para SALVAR ARQUIVOS: use SEMPRE a ferramenta Write ou Edit, NUNCA "cat >" ou "tee" via Bash (esses comandos são bloqueados pelo safety hook)
-- Findings são salvos como YAML em clients/${slug}/${date}/findings/{id}.yaml
-- QUANDO O OPERADOR PEDE RELATÓRIO: execute /pentest-report imediatamente, sem fazer mais testes
-- Se existir context/${engId2}/session-summary.md, leia-o no início para retomar o contexto compactado${historyCtx}
+- CADA finding deve ser salvo como um arquivo YAML em ${canonicalFindingsDir}{id}.yaml (um por finding), com ao menos: id, title, severity (critical|high|medium|low|info), type, location, description, evidence, recommendation. É assim que o painel do Rift captura os findings em tempo real. Sempre que capturar valores reais (IDs, e-mails, tokens, tenant/client_id, paths expostos), COLOQUE-OS na evidência — o relatório os destaca.
+- Cloudflare Email Protection: se encontrar "[email protected]" ou \`data-cfemail="HEX"\` / \`/cdn-cgi/l/email-protection\`, o e-mail real está no HEX — decodifique (1º byte = chave; XOR cada byte seguinte com ela) e registre o e-mail real, não o placeholder. Ex.: \`python3 -c "h='HEX';b=bytes.fromhex(h);print(''.join(chr(x^b[0]) for x in b[1:]))"\`
+- Se existir context/${engId2}/session-summary.md, leia-o no início para retomar o contexto compactado${historyCtx}${fwRulesBlock}
 [OPERADOR — MENSAGEM ATUAL]
 `
         : ''
@@ -428,7 +495,7 @@ ${aggressiveRule}
         // CRÍTICO: resetar também o engagement-state.yaml do framework. Sem isto, a
         // guarda de re-execução (skills/phase-state.md) vê recon/enum/vuln "concluídos"
         // e o agente PULA as fases → cada re-run rendia MENOS. scope + findings ficam.
-        if (eng) { try { resetEngagementState(eng) } catch (e) { console.warn('[reset] state:', e.message) } }
+        if (eng) { try { resetEngagementState(eng, framework.path) } catch (e) { console.warn('[reset] state:', e.message) } }
         broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
         broadcastSession(engId, sessionId, { type: 'phase_update', phase: 'recon', progress: 0 })
       }
@@ -444,6 +511,26 @@ ${aggressiveRule}
       // descartamos o session_id → o próximo turno começa uma conversa enxuta.
       const isCompact = /^\/rift-compact\b/.test(text.trim())
 
+      // PORTA DE ORÇAMENTO (pré-turno). O `claude --print` só reporta o custo do
+      // turno NO FINAL — não dá pra abortar no meio quando estoura. Logo o único
+      // enforcement real do teto declarado no intake (scope.spendingUsd) é recusar
+      // INICIAR um novo turno quando o custo acumulado do engagement já o atingiu.
+      // Exceções: relatório e compactação continuam liberados (o operador precisa
+      // conseguir extrair o resultado e enxugar a sessão mesmo no teto).
+      const isReport = /\/pentest-report\b/.test(text)
+      const budget = Number(eng?.scope?.spendingUsd)
+      if (budget > 0 && !isCompact && !isReport) {
+        const spent = await sumUsageUsd(engId).catch(() => 0)
+        if (spent >= budget) {
+          broadcastSession(engId, sessionId, {
+            type: 'agent_message',
+            text: `🛑 Orçamento do engagement atingido: US$ ${spent.toFixed(2)} gastos de um teto de US$ ${budget.toFixed(2)} (definido no intake). Para continuar, aumente o "Gasto máximo" do engagement. Relatório (/pentest-report) e compactação seguem liberados.`,
+          })
+          setRunState(engId, 'stopped', 'budget')
+          return
+        }
+      }
+
       const persistClaudeSession = sessionId !== 'default'
         ? (cid) => ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: cid }).catch(() => {})
         : undefined
@@ -451,6 +538,19 @@ ${aggressiveRule}
       // A-STATE: marca o run como ativo (persiste + transmite run_state='running').
       // O painel de Execução espelha isto — trava o "Iniciar" e mostra "Parar".
       setRunState(engId, 'running')
+
+      // Item 4: acompanha o maior % de contexto visto neste turno → decide auto-compact.
+      let lastContextPercent = 0
+
+      // Jobs: abre o Job deste run (fluxo de tarefas). O backend o avança pelas etapas
+      // a partir da atividade real (phase_update) e o fecha no desfecho (onClose).
+      let jobId = null
+      try {
+        jobId = await jobs.startJob(
+          { engagementId: engId, sessionId, frameworkId: framework.id },
+          (job) => broadcastSession(engId, sessionId, { type: 'job_update', job }),
+        )
+      } catch (e) { console.warn('[jobs] start falhou:', e.message) }
 
       // Broadcaster VIVO: re-resolve os clientes atuais da sessão a cada evento
       // (via broadcastSession) → reconexão de WS não quebra o feed ao vivo. Antes
@@ -469,18 +569,32 @@ ${aggressiveRule}
         (event) => {
           saveMsg(engId, sessionId, event)
           // Persiste o tamanho do contexto para o medidor reaparecer ao recarregar.
-          if (event.type === 'context_usage' && sessionId !== 'default') {
-            ChatSession.findByIdAndUpdate(sessionId, { contextTokens: event.tokens }).catch(() => {})
+          if (event.type === 'context_usage') {
+            if (typeof event.percent === 'number') lastContextPercent = Math.max(lastContextPercent, event.percent)
+            if (sessionId !== 'default') {
+              ChatSession.findByIdAndUpdate(sessionId, { contextTokens: event.tokens }).catch(() => {})
+            }
+          }
+          // Jobs: a fase derivada da atividade real avança a etapa do fluxo.
+          if (event.type === 'phase_update' && jobId) {
+            jobs.advanceStep(jobId, event.phase, (job) => broadcastSession(engId, sessionId, { type: 'job_update', job })).catch(() => {})
           }
         },
         eng,
         user,
         {
+          // Versão do agente escolhida (seletor A/B/C): o claude roda com cwd nesta
+          // pasta. Sem isto, todo run usaria sempre o v2 default.
+          frameworkPath: framework.path,
           // O contexto de sistema (escopo, regras, histórico) só é injetado no
           // primeiro turno; ao retomar via --resume a sessão já o contém.
           systemContext: ctx,
           // SEC-2: teto de custo também no chat interativo (não só no scheduler).
-          costCeiling: INTERACTIVE_COST_CEILING || undefined,
+          // O operador declara um orçamento no intake (scope.spendingUsd) — até aqui
+          // esse número era só decorativo (só ia pro scope.yaml do framework, nunca
+          // era aplicado). Usa o teto do engagement quando existir; cai pro env global
+          // como fallback (ex.: engagements antigos sem spendingUsd definido).
+          costCeiling: (Number(eng?.scope?.spendingUsd) > 0 ? Number(eng.scope.spendingUsd) : null) || INTERACTIVE_COST_CEILING || undefined,
           // SEC-3: só admin libera fases agressivas neste run.
           allowAggressive: isAdminUser,
           // Fase 2: todo run é o Agente 1 (black-box). O Agente 2 (authenticated)
@@ -488,14 +602,33 @@ ${aggressiveRule}
           agentRole: 'blackbox',
           resumeSessionId,
           onClaudeSession: persistClaudeSession,
-          onClose: (code, info) => {
-            // A-STATE-4/5: ao encerrar, deriva o estado persistido do run.
-            //   saída limpa (código 0)     → 'completed' (concluiu sozinho)
-            //   erro / teto de custo / kill → 'stopped'  (operador pode Continuar)
-            // Se o operador já pediu Parar, o handler de agent_stop já gravou
-            // 'stopped'; aqui é idempotente.
-            const finalState = code === 0 ? 'completed' : 'stopped'
-            setRunState(engId, finalState)
+          onClose: async (code, info) => {
+            // A-STATE-4/5 (1.3): deriva o desfecho REAL das 4 saídas possíveis
+            // (ver src/run-outcome.js). Falha técnica (safeguard/timeout/erro) e
+            // run que parou antes de Vulnerabilidades NUNCA viram "concluído".
+            const operatorStopped = stopRequested.delete(runnerKey)
+            const { runState, stopReason } = deriveRunOutcome({
+              code,
+              operatorStopped,
+              budgetExceeded:     info?.budgetExceeded,
+              blockedBySafeguard: info?.blockedBySafeguard,
+              timedOut:           info?.timedOut,
+              phasesReached:      info?.phasesReached,
+            })
+            setRunState(engId, runState, stopReason)
+            // Jobs: fecha o fluxo com o desfecho real + totais (findings/custo).
+            if (jobId) {
+              const [fc, spent] = await Promise.all([
+                countFindings(engId).catch(() => undefined),
+                sumUsageUsd(engId).catch(() => undefined),
+              ])
+              const jobStatus = ['completed', 'stopped', 'failed'].includes(runState) ? runState : 'stopped'
+              jobs.closeJob(
+                jobId,
+                { status: jobStatus, reason: stopReason, findingsCount: fc, spentUsd: spent, phasesReached: info?.phasesReached || [] },
+                (job) => broadcastSession(engId, sessionId, { type: 'job_update', job }),
+              ).catch((e) => console.warn('[jobs] close falhou:', e.message))
+            }
             // Compactação: /rift-compact escreve o resumo em disco e, ao terminar,
             // descartamos o session_id → o próximo turno começa uma conversa enxuta.
             if (isCompact) {
@@ -505,6 +638,24 @@ ${aggressiveRule}
               }
               broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
               broadcastSession(engId, sessionId, { type: 'agent_message', text: '🧹 Contexto compactado. O estado do engagement (fase, findings, escopo) está salvo em disco — a próxima mensagem inicia uma sessão enxuta.' })
+            } else if (
+              CONTEXT_AUTOCOMPACT_PERCENT > 0 &&
+              lastContextPercent >= CONTEXT_AUTOCOMPACT_PERCENT
+            ) {
+              // Item 4: auto-compactação. O contexto ficou alto neste turno → descarta o
+              // session_id do claude para o PRÓXIMO turno começar enxuto (sem reenviar o
+              // transcript inteiro). O estado durável (findings/fase/escopo) está em disco
+              // e é recarregado pelo contexto de sistema + CLAUDE.md do framework. Reusa a
+              // mesma mecânica do /rift-compact, só que disparada por limite de contexto.
+              agentRunner.clearSession(runnerKey)
+              if (sessionId !== 'default') {
+                ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
+              }
+              broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
+              broadcastSession(engId, sessionId, {
+                type: 'agent_message',
+                text: `🧹 Contexto atingiu ${lastContextPercent}% — compactado automaticamente para conter custo. O estado (findings/fase/escopo) está salvo; a próxima mensagem inicia uma sessão enxuta.`,
+              })
             }
           },
         },
@@ -513,10 +664,13 @@ ${aggressiveRule}
   }
 
   if (msg.type === 'agent_stop') {
+    // Marca ANTES de matar: o onClose (SIGTERM → code 143) lê isto para rotular
+    // como parada do operador, não como "concluído".
+    stopRequested.add(runnerKey)
     agentRunner.stop(runnerKey)
-    // A-STATE-3/5: grava 'stopped' já (não espera o processo morrer) → o painel
-    // troca "Parar" por "Continuar / Começar do zero" na hora. onClose reforça.
-    setRunState(engId, 'stopped')
+    // A-STATE-3/5: grava 'stopped'/operador já (não espera o processo morrer) → o
+    // painel troca "Parar" por "Continuar / Começar do zero" na hora. onClose reforça.
+    setRunState(engId, 'stopped', 'operator')
     broadcastSession(engId, sessionId, { type: 'agent_message', text: '⏹ Agente parado pelo operador.' })
   }
 }
@@ -529,10 +683,17 @@ connect()
     // shutdown anterior). Qualquer engagement gravado como 'running' é órfão →
     // reconcilia para 'stopped' para o painel não "mentir" que ainda roda.
     try {
-      const r = await Engagement.updateMany({ runState: 'running' }, { $set: { runState: 'stopped' } })
+      const r = await Engagement.updateMany({ runState: 'running' }, { $set: { runState: 'stopped', stopReason: 'interrupted' } })
       if (r.modifiedCount) console.log(`[rift] reconciliados ${r.modifiedCount} engagement(s) 'running' → 'stopped' no boot`)
     } catch (err) {
       console.warn('[rift] reconcile de runState falhou:', err?.message)
+    }
+    // Jobs órfãos ('running' sem run vivo após restart) → fecham como 'failed'/interrupted.
+    try {
+      const n = await jobs.reconcileStaleJobs()
+      if (n) console.log(`[rift] reconciliados ${n} job(s) órfão(s) no boot`)
+    } catch (err) {
+      console.warn('[rift] reconcile de jobs falhou:', err?.message)
     }
     httpServer.listen(PORT, () => {
       console.log(`[rift] backend em http://localhost:${PORT}`)

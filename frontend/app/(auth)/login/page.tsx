@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/lib/api'
@@ -482,24 +482,30 @@ export default function LoginPage() {
 }
 
 function LoginPageInner() {
-  const { login, setToken } = useAuth()
+  const { login, refreshUser } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [ssoError, setSsoError] = useState('')
+  // O código do SSO é de uso único: uma 2ª troca falha ("invalid_grant") e
+  // mostraria um erro espúrio. Este guard garante que o callback seja processado
+  // UMA vez, mesmo que o effect re-execute (re-render, StrictMode em dev).
+  const exchangedRef = useRef(false)
 
   useEffect(() => {
     const code = searchParams.get('code')
     const err = searchParams.get('error')
     if (code) {
-      // Troca o código de uso único pelo JWT (token não trafega na URL).
+      if (exchangedRef.current) return
+      exchangedRef.current = true
+      // Troca o código de uso único por um cookie de sessão (nada trafega na URL).
       api.auth.exchange(code)
-        .then(({ token }) => setToken(token))
+        .then(() => refreshUser())
         .then(() => router.replace('/dashboard'))
         .catch(() => setSsoError(ERROR_MESSAGES['token_exchange_failed']))
     } else if (err) {
       setSsoError(ERROR_MESSAGES[err] || `Erro SSO: ${err}`)
     }
-  }, [searchParams, router, setToken])
+  }, [searchParams, router, refreshUser])
 
   const handleLogin = async (email: string, password: string) => {
     await login(email, password)

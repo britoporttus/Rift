@@ -1,24 +1,24 @@
 'use client'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { api, Engagement, ChatSession } from '@/lib/api'
+import { api, Engagement, ReportNarrativeStatus } from '@/lib/api'
 import { useEngagementWS, WsMsg } from '@/hooks/useEngagementWS'
-import { MessageFeed } from '@/components/chat/MessageFeed'
-import { ChatInput } from '@/components/chat/ChatInput'
-import { FindingsSidebar } from '@/components/chat/FindingsSidebar'
+import { mergeMessages } from '@/lib/mergeMessages'
 import { FindingsReport } from '@/components/findings/FindingsReport'
 import { ScheduleSettings } from '@/components/engagement/ScheduleSettings'
 import { ExecutionPanel } from '@/components/engagement/ExecutionPanel'
 import { ModelSwitcher } from '@/components/engagement/ModelSwitcher'
+import { FrameworkSwitcher } from '@/components/engagement/FrameworkSwitcher'
+import { JobPipeline } from '@/components/engagement/JobPipeline'
 import { useAuth } from '@/hooks/useAuth'
 import {
-  ArrowLeft, Wifi, WifiOff, Play, MessageSquare, Shield, FileText,
-  Eye, Download, X, Plus, MessageCircle, Trash2, Check, Pencil, Clock, Wand2, Radar,
+  ArrowLeft, Wifi, WifiOff, Shield, FileText,
+  Eye, Download, X, Clock, Wand2, Radar, Printer, ExternalLink,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { ReportFile } from '@/lib/api'
 
-type Tab = 'exec' | 'chat' | 'findings' | 'report'
+type Tab = 'exec' | 'findings' | 'report'
 
 // Prompt do "Iniciar mapeamento automático" (Agente 1 black-box, recon→enum→vuln).
 const AUTO_RUN_PROMPT =
@@ -34,84 +34,129 @@ export default function EngagementPage() {
   const [history, setHistory]           = useState<WsMsg[]>([])
   const [showSchedule, setShowSchedule] = useState(false)
 
-  // ── Session state ────────────────────────────────────────────────────────────
-  const [sessions, setSessions]           = useState<ChatSession[]>([])
-  const [activeSession, setActiveSession] = useState<string | null>(null)  // null = not yet loaded
-  const [loadingSessions, setLoadingSessions] = useState(true)
+  // ── Sessão do agente ──────────────────────────────────────────────────────────
+  // A aba Chat saiu (ETAPA 3.2), mas a SESSÃO continua sendo o canal WS que a
+  // Execução usa para comandar o agente (start/continue/stop/answer/relatório).
+  // Mantemos apenas o activeSession — a UI de múltiplos chats foi removida.
+  const [activeSession, setActiveSession] = useState<string | null>(null)  // null = ainda não carregado
 
-  const { messages: liveMessages, connected, send, addLocal, isThinking, isStreaming, agentRunning, runState: wsRunState, contextUsage, reconnectNonce } =
+  const { messages: liveMessages, connected, send, isThinking, isStreaming, agentRunning, runState: wsRunState, stopReason: wsStopReason, contextUsage, job, reconnectNonce } =
     useEngagementWS(id, activeSession)
 
-  const messages = useMemo(() => {
-    const liveDbIds = new Set(liveMessages.map((m) => m._dbId).filter(Boolean))
-    const filtered = history.filter((m) => !liveDbIds.has(m._dbId))
-    return [...filtered, ...liveMessages]
-  }, [history, liveMessages])
+  // Findings persistidos (banco) — reidratados via API. O feed AO VIVO zera a cada
+  // refresh e os findings NÃO ficam no histórico de chat (chegam pelo watcher, fora
+  // do ChatMessage), então sem isto o painel mostrava "Achados 0 / Superfície 0"
+  // após recarregar, mesmo com findings salvos. Fonte de verdade: coleção Finding.
+  const [persistedFindings, setPersistedFindings] = useState<WsMsg[]>([])
 
-  // Load engagement
+  // Merge/dedup extraído para helper puro (testado) — idempotente, então o botão
+  // "Atualizar dados" pode reexecutar sem duplicar registros.
+  const messages = useMemo(
+    () => mergeMessages(history, liveMessages, persistedFindings) as WsMsg[],
+    [history, liveMessages, persistedFindings]
+  )
+
+  // ── Loaders reutilizáveis (mesma lógica no mount, na reconexão e no refresh manual) ──
+  const loadEngagement = useCallback(
+    () => api.engagements.get(id).then(setEngagement),
+    [id]
+  )
+  const loadFindings = useCallback(
+    () => api.findings.list({ engagementId: id }).then((fs) =>
+      setPersistedFindings(fs.map((f, i) => ({
+        type: 'finding',
+        _id: -100000 - i,
+        id: f.id,
+        title: f.title,
+        severity: f.severity,
+        description: f.description,
+        cvss: f.cvss,
+        state: f.state,
+        engagement_id: f.engagement_id,
+      } as WsMsg)))),
+    [id]
+  )
+  const loadHistory = useCallback(() => {
+    if (!activeSession) return Promise.resolve()
+    return api.engagements.messages(id, activeSession).then((msgs) =>
+      setHistory(msgs.map((m, i) => ({ ...m, _id: -(i + 1) } as WsMsg))))
+  }, [id, activeSession])
+
+  // ── Refresh manual (ETAPA 2.1): reusa os MESMOS loaders da atualização automática ──
+  const refreshInFlight = useRef(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const [refreshStatus, setRefreshStatus] = useState<'ok' | 'partial' | 'error' | null>(null)
+  const refreshData = useCallback(async () => {
+    if (refreshInFlight.current) return   // impede cliques concorrentes
+    refreshInFlight.current = true
+    setRefreshing(true)
+    try {
+      const results = await Promise.allSettled([loadEngagement(), loadFindings(), loadHistory()])
+      const ok = results.filter((r) => r.status === 'fulfilled').length
+      setRefreshStatus(ok === results.length ? 'ok' : ok === 0 ? 'error' : 'partial')
+      setLastUpdated(Date.now())
+    } finally {
+      refreshInFlight.current = false
+      setRefreshing(false)
+    }
+  }, [loadEngagement, loadFindings, loadHistory])
+
+  // Load engagement (mount) — erro aqui volta ao dashboard (engagement inexistente).
   useEffect(() => {
-    api.engagements.get(id)
-      .then(setEngagement)
-      .catch(() => router.replace('/dashboard'))
-  }, [id, router])
+    loadEngagement().catch(() => router.replace('/dashboard'))
+  }, [loadEngagement, router])
 
-  // Load sessions list — first load sets the active session
-  const refreshSessions = useCallback((keepActive = false) => {
+  // Bootstrap da sessão: busca a lista e fixa a primeira como ativa — é o canal
+  // WS que a Execução usa para comandar o agente. (Sem UI de múltiplos chats.)
+  const bootstrapSession = useCallback(() => {
     api.engagements.sessions.list(id)
-      .then((s) => {
-        setSessions(s)
-        if (!keepActive && s.length > 0) {
-          setActiveSession(prev => prev === null ? s[0].id : prev)
-        } else if (keepActive && s.length > 0) {
-          // Silently update session names (e.g. after auto-naming) without changing active
-          setSessions(s)
-        }
-      })
+      .then((s) => { if (s.length > 0) setActiveSession((prev) => prev ?? s[0].id) })
       .catch(() => {})
-      .finally(() => setLoadingSessions(false))
   }, [id])
 
-  useEffect(() => { refreshSessions() }, [refreshSessions])
+  useEffect(() => { bootstrapSession() }, [bootstrapSession])
 
-  // Load history whenever active session changes
+  // Load history whenever active session changes (limpa antes p/ não misturar sessões)
   useEffect(() => {
     if (!activeSession) return
     setHistory([])
-    api.engagements.messages(id, activeSession)
-      .then((msgs) => setHistory(msgs.map((m, i) => ({ ...m, _id: -(i + 1) } as WsMsg))))
-      .catch(() => {})
-  }, [id, activeSession])
+    loadHistory().catch(() => {})
+  }, [loadHistory, activeSession])
 
   // REL-5: ao REconectar (queda de rede no meio de um run), recarrega o histórico
   // para recuperar mensagens/findings que chegaram durante a queda. Não limpa o
   // feed antes (evita flicker); o merge por _dbId com liveMessages dedup.
   useEffect(() => {
-    if (!activeSession || reconnectNonce === 0) return
-    api.engagements.messages(id, activeSession)
-      .then((msgs) => setHistory(msgs.map((m, i) => ({ ...m, _id: -(i + 1) } as WsMsg))))
-      .catch(() => {})
-  }, [reconnectNonce, id, activeSession])
+    if (reconnectNonce === 0) return
+    loadHistory().catch(() => {})
+  }, [reconnectNonce, loadHistory])
+
+  // Carrega findings persistidos do banco (no mount, ao trocar de engagement e a
+  // cada reconexão) → o painel de Execução reflete os Achados/Superfície reais mesmo
+  // logo após um refresh, sem depender do feed ao vivo.
+  useEffect(() => {
+    loadFindings().catch(() => {})
+  }, [loadFindings, reconnectNonce])
 
   // Fallback: o sinal explícito agent_status é a fonte de verdade, mas mantemos
   // o OR com streaming caso um status se perca numa reconexão.
   const running = agentRunning || isThinking || isStreaming
   // A-STATE-1: estado do run derivado do backend — nunca de um flag local. Enquanto
   // o WS não informa (null), usa o valor persistido do engagement (sem "flash").
-  const runState = (wsRunState ?? engagement?.runState ?? 'idle') as 'idle' | 'running' | 'stopped' | 'completed'
+  const runState = (wsRunState ?? engagement?.runState ?? 'idle') as 'idle' | 'running' | 'stopped' | 'completed' | 'failed'
+  // Motivo do desfecho (1.3): do WS ao vivo, com fallback no valor persistido —
+  // assim o painel mostra o porquê da parada/falha mesmo logo após um refresh.
+  const stopReason = (wsStopReason ?? engagement?.stopReason ?? null) as string | null
 
   function handleSend(text: string, extra?: Record<string, unknown>) {
     send({ type: 'operator_message', text, ...extra })
-    // Refresh sessions after 2s to pick up auto-generated names
-    setTimeout(() => refreshSessions(true), 2000)
   }
   function handleAnswer(opt: string) {
     send({ type: 'operator_answer', option: opt, text: opt })
   }
   function handleStop() {
     send({ type: 'agent_stop' })
-  }
-  function handleStartTests() {
-    handleSend('Iniciar testes automatizados no alvo.')
   }
   function handleCompact() {
     if (running || !connected) return
@@ -125,39 +170,22 @@ export default function EngagementPage() {
   function handleContinueAuto() {
     handleSend('Continue o mapeamento automático do alvo de onde parou, seguindo o mesmo plano (recon → enumeração → análise de vulnerabilidades não-autenticada, exploit-to-confirm), cobrindo a superfície descoberta (não só uma amostra). Candidato testado mas não fechado → probable (a confirmar), não descarte. Em sequência, sem me pedir confirmação entre as fases. Pare só em checkpoint real.')
   }
+  // 1.3: CTAs pós-fase. O relatório do Rift é gerado a partir dos findings no banco
+  // (sempre funciona, em qualquer framework) e vive na aba Relatório — então o botão
+  // leva para lá. Além disso pede ao agente a narrativa (best-effort; no-op se a versão
+  // não tiver /pentest-report). Fornecer credenciais inicia o handoff (Agente 2).
+  function handleGenerateReport() {
+    setTab('report')
+    if ((engagement?.frameworkId || 'v2') === 'v2') handleSend('/pentest-report')
+  }
+  function handleProvideCredentials() {
+    handleSend('Quero fornecer credenciais para teste autenticado (handoff para o Agente 2). Quais credenciais você precisa e como devo entregá-las com segurança?')
+  }
   // A-STATE-5: run limpo — resetSession descarta a memória do agente no backend
   // antes de iniciar (o estado do engagement em disco permanece).
   function handleRestartAuto() {
     if (!confirm('Começar do zero: descarta a memória do agente E reseta as fases do framework (recon/enum/vuln voltam a ser executados do início). O escopo e os findings já salvos são mantidos. Continuar?')) return
     handleSend(AUTO_RUN_PROMPT, { resetSession: true })
-  }
-
-  // ── Session actions ──────────────────────────────────────────────────────────
-  async function createSession() {
-    try {
-      const s = await api.engagements.sessions.create(id, `Chat ${sessions.length + 1}`)
-      setSessions(prev => [...prev, s])
-      setActiveSession(s.id)
-    } catch {}
-  }
-
-  async function deleteSession(sid: string) {
-    if (sessions.length <= 1) return // keep at least one
-    if (!confirm('Apagar este chat e todas as mensagens?')) return
-    try {
-      await api.engagements.sessions.delete(id, sid)
-      const remaining = sessions.filter(s => s.id !== sid)
-      setSessions(remaining)
-      if (activeSession === sid) setActiveSession(remaining[0]?.id || 'default')
-    } catch {}
-  }
-
-  async function renameSession(sid: string, name: string) {
-    if (!name.trim()) return
-    try {
-      await api.engagements.sessions.rename(id, sid, name.trim())
-      setSessions(prev => prev.map(s => s.id === sid ? { ...s, name: name.trim() } : s))
-    } catch {}
   }
 
   if (!engagement) {
@@ -170,7 +198,6 @@ export default function EngagementPage() {
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'exec',     label: 'Execução',  icon: <Radar size={14} /> },
-    { id: 'chat',     label: 'Chat',      icon: <MessageSquare size={14} /> },
     { id: 'findings', label: 'Findings',  icon: <Shield size={14} /> },
     { id: 'report',   label: 'Relatório', icon: <FileText size={14} /> },
   ]
@@ -191,23 +218,12 @@ export default function EngagementPage() {
           <div style={{ color: 'var(--muted)', fontSize: 12 }}>{engagement.target}</div>
         </div>
 
-        {connected && !running && runState === 'idle' && tab === 'chat' && (
-          <button onClick={handleStartTests} style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: 'var(--purple)', border: 'none', borderRadius: 6,
-            color: 'white', fontSize: 13, fontWeight: 600, padding: '0.4rem 0.85rem',
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-            <Play size={13} />
-            Iniciar testes
-          </button>
-        )}
-
-        {tab === 'chat' && contextUsage && (
+        {tab === 'exec' && contextUsage && (
           <ContextMeter usage={contextUsage} onCompact={handleCompact} disabled={running || !connected} />
         )}
 
-        {tab === 'chat' && <ModelSwitcher disabled={running} />}
+        {tab === 'exec' && <FrameworkSwitcher engagement={engagement} onUpdated={setEngagement} disabled={running} />}
+        {tab === 'exec' && <ModelSwitcher disabled={running} />}
 
         {isAdmin && (
           <button onClick={() => setShowSchedule(true)} title="Agendar scans recorrentes" style={{
@@ -260,7 +276,11 @@ export default function EngagementPage() {
 
       {/* Body */}
       {tab === 'exec' && (
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
+            <JobPipeline engagementId={id} liveJob={job} />
+          </div>
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
           <ExecutionPanel
             engagement={engagement}
             messages={messages}
@@ -268,40 +288,19 @@ export default function EngagementPage() {
             agentRunning={running}
             connected={connected}
             runState={runState}
+            stopReason={stopReason}
             onStart={handleStartAuto}
             onStop={handleStop}
             onContinue={handleContinueAuto}
             onRestart={handleRestartAuto}
+            onGenerateReport={handleGenerateReport}
+            onProvideCredentials={handleProvideCredentials}
+            onRefresh={refreshData}
+            refreshing={refreshing}
+            lastUpdated={lastUpdated}
+            refreshStatus={refreshStatus}
           />
-        </div>
-      )}
-
-      {tab === 'chat' && (
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-          {/* Session sidebar */}
-          <SessionSidebar
-            engId={id}
-            sessions={sessions}
-            activeSession={activeSession}
-            onSelect={setActiveSession}
-            onCreate={createSession}
-            onDelete={deleteSession}
-            onRename={renameSession}
-            loading={loadingSessions}
-          />
-
-          {/* Chat area */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <MessageFeed messages={messages} onAnswer={handleAnswer} isThinking={isThinking} />
-            <ChatInput
-              onSend={handleSend}
-              onStop={handleStop}
-              agentRunning={running}
-              connected={connected}
-            />
           </div>
-
-          <FindingsSidebar messages={messages} />
         </div>
       )}
 
@@ -312,7 +311,7 @@ export default function EngagementPage() {
       )}
 
       {tab === 'report' && (
-        <ReportTab engagementId={id} engagementName={engagement.name} />
+        <ReportTab engagementId={id} engagementName={engagement.name} isAdmin={isAdmin} />
       )}
     </div>
   )
@@ -366,183 +365,53 @@ function ContextMeter({
   )
 }
 
-// ── Session Sidebar ────────────────────────────────────────────────────────────
-
-function SessionSidebar({
-  engId, sessions, activeSession, onSelect, onCreate, onDelete, onRename, loading,
-}: {
-  engId: string
-  sessions: ChatSession[]
-  activeSession: string | null
-  onSelect: (id: string) => void
-  onCreate: () => void
-  onDelete: (id: string) => void
-  onRename: (id: string, name: string) => void
-  loading: boolean
-}) {
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editName, setEditName]   = useState('')
-  const editRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (editingId && editRef.current) editRef.current.focus()
-  }, [editingId])
-
-  function startEdit(s: ChatSession, e: React.MouseEvent) {
-    e.stopPropagation()
-    setEditingId(s.id)
-    setEditName(s.name)
-  }
-
-  function formatAge(dt: string) {
-    const diff = Date.now() - new Date(dt).getTime()
-    const m = Math.floor(diff / 60000)
-    if (m < 1)  return 'agora'
-    if (m < 60) return `${m}m`
-    const h = Math.floor(m / 60)
-    if (h < 24) return `${h}h`
-    return `${Math.floor(h / 24)}d`
-  }
-
-  return (
-    <div style={{
-      width: 180, flexShrink: 0,
-      borderRight: '1px solid var(--border)',
-      background: 'var(--surface)',
-      display: 'flex', flexDirection: 'column',
-      overflow: 'hidden',
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: '0.6rem 0.75rem',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      }}>
-        <span style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          Chats
-        </span>
-        <button
-          onClick={onCreate}
-          title="Novo chat"
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: 'var(--purple-light)', display: 'flex', padding: 2, borderRadius: 4,
-          }}
-        >
-          <Plus size={14} />
-        </button>
-      </div>
-
-      {/* Sessions list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0.25rem 0' }}>
-        {loading ? (
-          <div style={{ padding: '1rem', color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>…</div>
-        ) : sessions.map(s => {
-          const isActive = s.id === activeSession
-          return (
-            <div
-              key={s.id}
-              onClick={() => onSelect(s.id)}
-              style={{
-                padding: '0.45rem 0.75rem',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: isActive ? 'rgba(124,58,237,0.12)' : 'transparent',
-                borderLeft: isActive ? '2px solid var(--purple)' : '2px solid transparent',
-                transition: 'background .12s',
-                position: 'relative',
-              }}
-              className="session-row"
-            >
-              <MessageCircle size={12} color={isActive ? 'var(--purple-light)' : 'var(--muted)'} style={{ flexShrink: 0 }} />
-
-              {editingId === s.id ? (
-                <input
-                  ref={editRef}
-                  value={editName}
-                  onChange={e => setEditName(e.target.value)}
-                  onBlur={() => setEditingId(null)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      onRename(s.id, editName)
-                      setEditingId(null)
-                    }
-                    if (e.key === 'Escape') setEditingId(null)
-                  }}
-                  onClick={e => e.stopPropagation()}
-                  style={{
-                    flex: 1, background: 'var(--bg)', border: '1px solid var(--purple)',
-                    borderRadius: 4, color: 'var(--text)', fontSize: 12,
-                    padding: '1px 4px', fontFamily: 'inherit', outline: 'none',
-                  }}
-                />
-              ) : (
-                <span style={{
-                  flex: 1, fontSize: 12, minWidth: 0,
-                  color: isActive ? 'var(--text)' : 'var(--muted)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {s.name}
-                </span>
-              )}
-
-              {/* Actions shown on hover via CSS trick */}
-              <div className="session-actions" style={{ display: 'flex', gap: 2, opacity: 0, transition: 'opacity .12s' }}>
-                <button
-                  onClick={e => startEdit(s, e)}
-                  title="Renomear"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 1, display: 'flex', borderRadius: 3 }}
-                >
-                  <Pencil size={10} />
-                </button>
-                {sessions.length > 1 && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onDelete(s.id) }}
-                    title="Apagar"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 1, display: 'flex', borderRadius: 3 }}
-                  >
-                    <Trash2 size={10} />
-                  </button>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* CSS for hover actions */}
-      <style>{`
-        .session-row:hover .session-actions { opacity: 1 !important; }
-        .session-row:hover { background: rgba(124,58,237,0.07) !important; }
-      `}</style>
-    </div>
-  )
-}
-
 // ── Report Tab ────────────────────────────────────────────────────────────────
 
 function canPreview(ext: string) {
   return ['.html', '.md', '.txt'].includes(ext)
 }
 
-function ReportTab({ engagementId, engagementName }: { engagementId: string; engagementName: string }) {
+function ReportTab({ engagementId, engagementName, isAdmin }: { engagementId: string; engagementName: string; isAdmin: boolean }) {
+  const [type, setType]               = useState<'technical' | 'executive'>('technical')
   const [files, setFiles]             = useState<ReportFile[]>([])
-  const [loading, setLoading]         = useState(true)
+  const [showRaw, setShowRaw]         = useState(false)
   const [preview, setPreview]         = useState<{ name: string; blobUrl: string; ext: string } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [nonce, setNonce]             = useState(0)   // força reload do iframe após gerar IA
+  const [narr, setNarr]               = useState<ReportNarrativeStatus | null>(null)
+  const [genState, setGenState]       = useState<'idle' | 'loading' | 'error'>('idle')
+  const [genErr, setGenErr]           = useState<string | null>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  // Relatório GERADO pelo Rift a partir dos findings (sempre disponível, bonito).
+  const reportUrl = api.reports.generatedUrl(engagementId, type) + `&_=${nonce}`
 
   useEffect(() => {
-    api.reports.list(engagementId)
-      .then(setFiles)
-      .catch(console.error)
-      .finally(() => setLoading(false))
+    // Arquivos escritos pelo AGENTE (narrativa) — secundários, listados abaixo.
+    api.reports.list(engagementId).then(setFiles).catch(() => {})
+    // Status do resumo executivo por IA (existe? desatualizado?).
+    api.reports.narrativeStatus(engagementId).then(setNarr).catch(() => setNarr(null))
   }, [engagementId])
+
+  async function generateNarrative() {
+    setGenState('loading'); setGenErr(null)
+    try {
+      const r = await api.reports.generateNarrative(engagementId)
+      setNarr(r); setType('executive'); setNonce((n) => n + 1)   // recarrega o relatório com a narrativa
+      setGenState('idle')
+    } catch (e) {
+      setGenErr(e instanceof Error ? e.message : 'falha ao gerar'); setGenState('error')
+    }
+  }
+
+  function printReport() {
+    try { iframeRef.current?.contentWindow?.focus(); iframeRef.current?.contentWindow?.print() } catch {}
+  }
 
   async function openPreview(f: ReportFile) {
     setPreviewLoading(true)
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('rift_token') : null
-      const res = await fetch(f.viewUrl, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      const res = await fetch(f.viewUrl, { credentials: 'include' })
       if (!res.ok) throw new Error('Erro ao carregar')
       const blob = await res.blob()
       setPreview({ name: f.name, blobUrl: URL.createObjectURL(blob), ext: f.ext })
@@ -552,110 +421,145 @@ function ReportTab({ engagementId, engagementName }: { engagementId: string; eng
       setPreviewLoading(false)
     }
   }
-
   function closePreview() {
     if (preview) URL.revokeObjectURL(preview.blobUrl)
     setPreview(null)
   }
 
-  if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--muted)', fontSize: 13 }}>
-      Carregando relatórios...
-    </div>
+  const segBtn = (val: 'technical' | 'executive', label: string) => (
+    <button onClick={() => setType(val)} style={{
+      padding: '5px 14px', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+      background: type === val ? 'var(--purple)' : 'transparent',
+      color: type === val ? '#fff' : 'var(--muted)', border: 'none',
+    }}>{label}</button>
   )
-
-  if (files.length === 0) return (
-    <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
-      Nenhum relatório disponível para este engagement.
-    </div>
-  )
+  const toolBtn = (onClick: () => void, icon: React.ReactNode, label: string, href?: string) => {
+    const style: React.CSSProperties = {
+      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
+      fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textDecoration: 'none',
+      background: 'rgba(124,58,237,.12)', color: 'var(--purple-light)', border: '1px solid rgba(124,58,237,.3)',
+    }
+    return href
+      ? <a href={href} style={style}>{icon} {label}</a>
+      : <button onClick={onClick} style={style}>{icon} {label}</button>
+  }
 
   return (
     <>
-      <div style={{ padding: '1.5rem', maxWidth: 800, margin: '0 auto' }}>
-        <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--muted)' }}>
-          Relatórios de <span style={{ color: 'var(--text)', fontWeight: 600 }}>{engagementName}</span>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+        {/* Barra de ações */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
+            {segBtn('technical', 'Técnico')}
+            {isAdmin && segBtn('executive', 'Executivo')}
+          </div>
+          {type === 'executive' && isAdmin && (
+            <button
+              onClick={generateNarrative}
+              disabled={genState === 'loading'}
+              title="Gera resumo executivo em prosa + cadeias de ataque a partir dos findings (1 chamada ao modelo, ~1 min)"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 6,
+                fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                cursor: genState === 'loading' ? 'default' : 'pointer',
+                background: 'rgba(124,58,237,.16)', color: 'var(--purple-light)',
+                border: '1px solid var(--purple)', opacity: genState === 'loading' ? 0.7 : 1,
+              }}
+            >
+              <Wand2 size={12} />
+              {genState === 'loading' ? 'Gerando resumo (IA)… ~1 min' : narr?.exists ? 'Regerar resumo (IA)' : 'Gerar resumo (IA)'}
+            </button>
+          )}
+          {type === 'executive' && narr?.exists && narr?.stale && genState !== 'loading' && (
+            <span style={{ fontSize: 11, color: 'var(--medium)' }}>· resumo desatualizado (findings mudaram)</span>
+          )}
+          {genErr && <span style={{ fontSize: 11, color: 'var(--critical)' }}>{genErr}</span>}
+          <div style={{ flex: 1 }} />
+          {toolBtn(() => {}, <Download size={12} />, 'Baixar PDF', api.reports.pdfUrl(engagementId, type))}
+          {toolBtn(printReport, <Printer size={12} />, 'Imprimir')}
+          {toolBtn(() => {}, <ExternalLink size={12} />, 'Nova aba', reportUrl)}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {files.map(f => (
-            <div key={f.name} style={{
-              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-              padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12,
+
+        {/* Relatório renderizado (nosso template, seguro para inline) */}
+        <iframe
+          ref={iframeRef}
+          key={`${type}-${nonce}`}
+          src={reportUrl}
+          title={`Relatório ${type} — ${engagementName}`}
+          style={{ flex: 1, border: 'none', background: '#161826', minHeight: 0 }}
+          // Conteúdo é NOSSO template (findings escapados, sem <script>, CSP default-src 'none').
+          // allow-same-origin permite o print pelo parent; allow-modals abre o diálogo de impressão.
+          sandbox="allow-same-origin allow-modals"
+        />
+
+        {/* Relatórios narrativos do agente (secundário) */}
+        {files.length > 0 && (
+          <div style={{ borderTop: '1px solid var(--border)', flexShrink: 0, maxHeight: '38%', overflowY: 'auto' }}>
+            <button onClick={() => setShowRaw((v) => !v)} style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+              background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              padding: '10px 16px', color: 'var(--muted)', fontSize: 12, fontWeight: 600,
             }}>
-              <FileText size={16} color="var(--purple-light)" style={{ flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: 'var(--text)', fontWeight: 500, fontSize: 13 }}>{f.name}</div>
-                <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
-                  {(f.size / 1024).toFixed(1)} KB · {f.ext.toUpperCase().replace('.', '')}
-                </div>
+              <FileText size={13} /> Relatórios do agente ({files.length}) {showRaw ? '▾' : '▸'}
+            </button>
+            {showRaw && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 16px 16px' }}>
+                {files.map((f) => (
+                  <div key={f.name} style={{
+                    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+                    padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12,
+                  }}>
+                    <FileText size={15} color="var(--purple-light)" style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: 'var(--text)', fontWeight: 500, fontSize: 12.5 }}>{f.name}</div>
+                      <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
+                        {(f.size / 1024).toFixed(1)} KB · {f.ext.toUpperCase().replace('.', '')}
+                      </div>
+                    </div>
+                    {canPreview(f.ext) && (
+                      <button onClick={() => openPreview(f)} disabled={previewLoading} style={{
+                        display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
+                        fontSize: 12, fontWeight: 500, background: 'var(--surface)', color: 'var(--text)',
+                        border: '1px solid var(--border)', cursor: 'pointer', fontFamily: 'inherit',
+                      }}><Eye size={12} /> Visualizar</button>
+                    )}
+                    <a href={f.url} download style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
+                      fontSize: 12, fontWeight: 600, background: 'rgba(124,58,237,.12)', color: 'var(--purple-light)',
+                      border: '1px solid rgba(124,58,237,.3)', textDecoration: 'none',
+                    }}><Download size={12} /> Baixar</a>
+                  </div>
+                ))}
               </div>
-              {canPreview(f.ext) && (
-                <button
-                  onClick={() => openPreview(f)}
-                  disabled={previewLoading}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 500,
-                    background: 'var(--surface)', color: 'var(--text)',
-                    border: '1px solid var(--border)', cursor: 'pointer', fontFamily: 'inherit',
-                  }}
-                >
-                  <Eye size={12} /> Visualizar
-                </button>
-              )}
-              <a
-                href={f.url} download
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-                  background: 'rgba(124,58,237,.12)', color: 'var(--purple-light)',
-                  border: '1px solid rgba(124,58,237,.3)', textDecoration: 'none',
-                }}
-              >
-                <Download size={12} /> Baixar
-              </a>
-            </div>
-          ))}
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
       {preview && (
-        <div
-          onClick={closePreview}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-            zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem',
-          }}
-        >
-          <div
-            onClick={(ev) => ev.stopPropagation()}
-            style={{
-              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-              width: '100%', maxWidth: 1000, height: '85vh',
-              display: 'flex', flexDirection: 'column', overflow: 'hidden',
-            }}
-          >
+        <div onClick={closePreview} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem',
+        }}>
+          <div onClick={(ev) => ev.stopPropagation()} style={{
+            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+            width: '100%', maxWidth: 1000, height: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
             <div style={{
               padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)',
               display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
             }}>
               <FileText size={15} color="var(--purple-light)" />
               <span style={{ flex: 1, color: 'var(--text)', fontSize: 13, fontWeight: 500 }}>{preview.name}</span>
-              <a
-                href={preview.blobUrl} download={preview.name}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 4,
-                  color: 'var(--purple-light)', fontSize: 12, textDecoration: 'none',
-                  padding: '0.25rem 0.6rem', borderRadius: 4,
-                  border: '1px solid var(--purple)', background: 'var(--purple-glow)',
-                }}
-              >
-                <Download size={12} /> baixar
-              </a>
-              <button
-                onClick={closePreview}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, display: 'flex' }}
-              >
+              <a href={preview.blobUrl} download={preview.name} style={{
+                display: 'flex', alignItems: 'center', gap: 4, color: 'var(--purple-light)', fontSize: 12,
+                textDecoration: 'none', padding: '0.25rem 0.6rem', borderRadius: 4,
+                border: '1px solid var(--purple)', background: 'var(--purple-glow)',
+              }}><Download size={12} /> baixar</a>
+              <button onClick={closePreview} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, display: 'flex' }}>
                 <X size={18} />
               </button>
             </div>
@@ -663,8 +567,6 @@ function ReportTab({ engagementId, engagementName }: { engagementId: string; eng
               src={preview.blobUrl}
               style={{ flex: 1, border: 'none', background: preview.ext === '.html' ? '#fff' : 'var(--bg)' }}
               title={preview.name}
-              // Relatório é HTML não-confiável (deriva de dados do alvo). Sandbox sem
-              // allow-same-origin/allow-scripts → origem opaca, sem JS, sem acesso ao token.
               sandbox=""
             />
           </div>

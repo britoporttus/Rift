@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { api, SystemMetrics, UsageEntry, UserUsage } from '@/lib/api'
+import { api, SystemMetrics, UsageEntry, UserUsage, SkuUsage } from '@/lib/api'
 
 function fmtBytes(b: number) {
   if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -69,6 +69,7 @@ export default function AdminPage() {
   const [metrics, setMetrics]       = useState<SystemMetrics | null>(null)
   const [usage, setUsage]           = useState<UsageEntry[]>([])
   const [userUsage, setUserUsage]   = useState<UserUsage[]>([])
+  const [sku, setSku]               = useState<SkuUsage | null>(null)
   const [loading, setLoading]       = useState(true)
   const [lastRefresh, setLastRefresh] = useState(new Date())
   const [expandedUser, setExpandedUser] = useState<string | null>(null)
@@ -76,8 +77,8 @@ export default function AdminPage() {
 
   const refresh = useCallback(() => {
     setLoading(true)
-    Promise.all([api.admin.metrics(), api.admin.usage(), api.admin.usageByUser()])
-      .then(([m, u, uu]) => { setMetrics(m); setUsage(u); setUserUsage(uu); setLastRefresh(new Date()) })
+    Promise.all([api.admin.metrics(), api.admin.usage(), api.admin.usageByUser(), api.admin.sku()])
+      .then(([m, u, uu, s]) => { setMetrics(m); setUsage(u); setUserUsage(uu); setSku(s); setLastRefresh(new Date()) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
@@ -156,6 +157,47 @@ export default function AdminPage() {
         <div style={{ color: '#252545', fontSize: 10, marginTop: 6, textAlign: 'right', letterSpacing: '0.04em' }}>
           atualizado em {lastRefresh.toLocaleTimeString('pt-BR')}
         </div>
+      </div>
+
+      {/* Utilização da SKU (ETAPA 2.2) — consumo real; limite só se configurado. */}
+      <div style={{ marginTop: '1.75rem' }}>
+        <div style={SECTION_LABEL}>Utilização da SKU</div>
+        {!sku ? (
+          <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, padding: '2rem', textAlign: 'center', color: '#3A3A58', fontSize: 12 }}>
+            Carregando…
+          </div>
+        ) : !sku.available ? (
+          <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(234,179,8,0.25)', borderRadius: 4, padding: '1.15rem 1.25rem' }}>
+            <div style={{ color: '#E2E8F0', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              Consumo da SKU indisponível — integração não configurada.
+            </div>
+            <div style={{ color: '#94A3B8', fontSize: 11.5, lineHeight: 1.7 }}>
+              O consumo real registrado é <b>${sku.spentUsd.toFixed(4)}</b> ({sku.tokensTotal.toLocaleString()} tokens),
+              mas não há fonte oficial de <b>limite/saldo/período</b> do plano.
+              Para habilitar consumo × limite, defina{' '}
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", color: '#A78BFA' }}>SKU_LIMIT_USD</span>{' '}
+              (teto do plano) no backend — ou integre a API oficial de uso/custo da Anthropic. Nenhum valor é simulado.
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 8, marginBottom: '0.85rem' }}>
+              <MetricCard icon={DollarIco()} title="Consumo atual" value={`$${(sku.spentUsd ?? 0).toFixed(4)}`} sub={`${sku.tokensTotal.toLocaleString()} tokens`} />
+              <MetricCard icon={DollarIco()} title="Limite" value={`$${(sku.limitUsd ?? 0).toFixed(2)}`} sub={sku.period ? `período: ${sku.period}` : undefined} />
+              <MetricCard icon={DollarIco()} title="Saldo" value={`$${(sku.remainingUsd ?? 0).toFixed(2)}`} />
+            </div>
+            <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <Gauge
+                value={sku.percent ?? 0}
+                color={(sku.percent ?? 0) >= 85 ? '#EF4444' : (sku.percent ?? 0) >= 70 ? '#EAB308' : '#7C3AED'}
+                label="Utilizado"
+              />
+            </div>
+            <div style={{ color: '#252545', fontSize: 10, marginTop: 6, textAlign: 'right', letterSpacing: '0.04em' }}>
+              atualizado em {lastRefresh.toLocaleTimeString('pt-BR')}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Uso por Usuário */}

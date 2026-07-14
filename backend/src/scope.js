@@ -8,8 +8,11 @@
 const fs = require('fs')
 const path = require('path')
 const yaml = require('js-yaml')
+const { getFrameworkPath } = require('./frameworks')
 
-const FRAMEWORK_PATH = process.env.FRAMEWORK_PATH || '/home/digitalbath/pentest-framework-v2'
+// Path da versão DEFAULT (v2) resolvido pelo registro — casa com o cwd usado nos
+// runs. As funções aceitam um frameworkPath explícito quando a versão é conhecida.
+const DEFAULT_FRAMEWORK_PATH = process.env.FRAMEWORK_PATH || getFrameworkPath('v2')
 
 // Mesmo id determinístico que agent-runner deriva: {slug}-{YYYYMMDD}.
 function deriveEngId(eng) {
@@ -102,9 +105,9 @@ function buildStateDoc(eng) {
 
 // Escreve context/{id}/scope.yaml (+ dirs) e engagement-state.yaml (só se ainda
 // não existir — não sobrescreve estado de um run em andamento). Retorna o id.
-function writeEngagementScope(eng) {
+function writeEngagementScope(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH) {
   const id     = deriveEngId(eng)
-  const ctxDir = path.join(FRAMEWORK_PATH, 'context', id)
+  const ctxDir = path.join(frameworkPath, 'context', id)
   fs.mkdirSync(path.join(ctxDir, 'parsed'), { recursive: true })
   fs.mkdirSync(path.join(ctxDir, 'raw'), { recursive: true })
 
@@ -121,8 +124,8 @@ function writeEngagementScope(eng) {
   const slug = eng.slug || ''
   const date = eng.date || ''
   if (slug && date) {
-    fs.mkdirSync(path.join(FRAMEWORK_PATH, 'clients', slug, date, 'findings'), { recursive: true })
-    fs.mkdirSync(path.join(FRAMEWORK_PATH, 'clients', slug, date, 'reports'), { recursive: true })
+    fs.mkdirSync(path.join(frameworkPath, 'clients', slug, date, 'findings'), { recursive: true })
+    fs.mkdirSync(path.join(frameworkPath, 'clients', slug, date, 'reports'), { recursive: true })
   }
   return id
 }
@@ -132,9 +135,9 @@ function writeEngagementScope(eng) {
 // de re-execução do framework (skills/phase-state.md) vê recon/enum/vuln "concluídos"
 // e o agente PULA as fases — por isso cada re-run rendia MENOS. O scope.yaml
 // (autorização) e os findings em disco são preservados. Retorna o id ou null.
-function resetEngagementState(eng) {
+function resetEngagementState(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH) {
   const id = deriveEngId(eng)
-  const ctxDir = path.join(FRAMEWORK_PATH, 'context', id)
+  const ctxDir = path.join(frameworkPath, 'context', id)
   try {
     fs.mkdirSync(ctxDir, { recursive: true })
     fs.writeFileSync(

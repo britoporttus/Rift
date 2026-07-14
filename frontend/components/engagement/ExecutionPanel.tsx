@@ -7,16 +7,28 @@ import {
   Play, Radar, ScanSearch, ShieldAlert, CheckCircle2, Loader2, Circle,
   AlertTriangle, HelpCircle, ChevronDown, ChevronRight, DollarSign, Terminal,
   Square, RotateCcw, PlayCircle, Globe, Network, Cpu, Shield, Link2, Server, Flag,
-  BookOpen, Search, FileText, Crosshair, Bug, FolderSearch,
+  BookOpen, Search, FileText, Crosshair, Bug, FolderSearch, RefreshCw,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
-type RunState = 'idle' | 'running' | 'stopped' | 'completed'
+type RunState = 'idle' | 'running' | 'stopped' | 'completed' | 'failed'
+
+// 1.3: motivo do desfecho → texto para o operador SEMPRE ver por que parou/falhou.
+// tone: 'ok' concluído · 'warn' parada recuperável · 'bad' falha técnica.
+const REASON_TEXT: Record<string, { title: string; detail: string; tone: 'ok' | 'warn' | 'bad' }> = {
+  operator:    { title: 'Mapeamento parado',           detail: 'Você parou o run. Retome de onde parou ou comece do zero.', tone: 'warn' },
+  budget:      { title: 'Parado — limite de custo',    detail: 'O teto de custo do engagement foi atingido. Aumente o gasto máximo para continuar.', tone: 'warn' },
+  incomplete:  { title: 'Mapeamento incompleto',       detail: 'O run encerrou antes de cobrir a fase de Vulnerabilidades. Continue para completar o ciclo recon → enum → vuln.', tone: 'warn' },
+  interrupted: { title: 'Run interrompido',            detail: 'O run foi interrompido (ex.: reinício do servidor). Retome de onde parou.', tone: 'warn' },
+  safeguard:   { title: 'Falhou — safeguard do modelo', detail: 'O modelo recusou por safeguard de cibersegurança. "Continuar" bateria no mesmo bloqueio — troque o modelo (linha Sonnet) no seletor de modelo.', tone: 'bad' },
+  timeout:     { title: 'Falhou — tempo limite',       detail: 'O run atingiu o tempo limite de execução e foi encerrado. Você pode retomar.', tone: 'bad' },
+  error:       { title: 'Falhou — erro técnico',       detail: 'O agente encerrou com erro técnico. Veja a atividade do agente abaixo e tente retomar.', tone: 'bad' },
+}
 
 // A-LIVE-2 (marcos): ícone por tipo de marco de progresso.
 const MILESTONE_ICON: Record<string, LucideIcon> = {
   subdomains: Radar, dns: Server, hosts: Globe, ports: Network,
-  tech: Cpu, waf: Shield, urls: Link2,
+  tech: Cpu, waf: Shield, urls: Link2, paths: FolderSearch,
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -100,7 +112,9 @@ function humanizeAction(rawTool: unknown, rawArgs: unknown): { label: string; Ic
 }
 
 export function ExecutionPanel({
-  engagement, messages, onAnswer, agentRunning, connected, runState, onStart, onStop, onContinue, onRestart,
+  engagement, messages, onAnswer, agentRunning, connected, runState, stopReason,
+  onStart, onStop, onContinue, onRestart, onGenerateReport, onProvideCredentials,
+  onRefresh, refreshing, lastUpdated, refreshStatus,
 }: {
   engagement: Engagement
   messages: WsMsg[]
@@ -108,10 +122,17 @@ export function ExecutionPanel({
   agentRunning: boolean
   connected: boolean
   runState: RunState
+  stopReason?: string | null
   onStart: () => void
   onStop: () => void
   onContinue: () => void
   onRestart: () => void
+  onGenerateReport: () => void
+  onProvideCredentials: () => void
+  onRefresh: () => void
+  refreshing: boolean
+  lastUpdated: number | null
+  refreshStatus: 'ok' | 'partial' | 'error' | null
 }) {
   const [feedOpen, setFeedOpen] = useState(false)
   // A-LIVE-2: qual marco está expandido (mostra o que foi encontrado).
@@ -209,10 +230,17 @@ export function ExecutionPanel({
     if (m.type === 'agent_message' && /safeguard|API Error|cybersecurity|🛡️/i.test(String(m.text ?? ''))) { blockMsg = m; break }
   }
 
-  // Motivo da parada: só mostra "Run bloqueado" para bloqueio real de safeguard do
-  // modelo no turno atual (blockMsg). Parada normal do operador não é bloqueio.
-  const stopReason = (!agentRunning && runState === 'stopped' && blockMsg)
-    ? String(blockMsg.text ?? '') : null
+  // Texto cru do bloqueio de safeguard no turno atual (detalhe complementar).
+  const blockText = (!agentRunning && blockMsg) ? String(blockMsg.text ?? '') : null
+
+  // 1.3: desfecho legível a partir do motivo PERSISTIDO (sobrevive a refresh).
+  // Fallback: se não veio motivo mas há bloqueio de safeguard no feed, trata como tal.
+  const reasonKey = stopReason || (blockText ? 'safeguard' : null)
+  const outcome = runState === 'completed'
+    ? { title: 'Mapeamento concluído', detail: 'O Agente 1 cobriu o ciclo recon → enumeração → vulnerabilidades. Gere o relatório, forneça credenciais para teste autenticado, ou continue aprofundando.', tone: 'ok' as const }
+    : (reasonKey && REASON_TEXT[reasonKey]) || { title: runState === 'failed' ? 'Run falhou' : 'Mapeamento parado', detail: 'O run foi interrompido. Retome de onde parou ou comece do zero.', tone: runState === 'failed' ? 'bad' as const : 'warn' as const }
+  const outcomeColor = outcome.tone === 'bad' ? 'var(--critical)' : outcome.tone === 'ok' ? 'var(--low)' : 'var(--border)'
+  const hasResults = confirmed.length > 0 || surface.length > 0
 
   // A-LIVE-2 (marcos): pontos concretos de progresso derivados do backend,
   // deduplicados por label, em ordem de descoberta.
@@ -227,6 +255,34 @@ export function ExecutionPanel({
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', maxWidth: 1000, margin: '0 auto', width: '100%' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } } @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }`}</style>
+
+      {/* TOOLBAR: Atualizar dados (ETAPA 2.1) — refaz status/fase/achados/superfície/
+          custo/atividade sem recarregar a página; mesma lógica do refresh automático. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginBottom: 10 }}>
+        {lastUpdated != null && (
+          <span style={{
+            fontSize: 11,
+            color: refreshStatus === 'error' ? 'var(--critical)' : refreshStatus === 'partial' ? 'var(--medium)' : 'var(--muted)',
+          }}>
+            {refreshStatus === 'error' ? 'Falha ao atualizar' : refreshStatus === 'partial' ? 'Atualização parcial' : 'Última atualização'}
+            {': '}{new Date(lastUpdated).toLocaleTimeString('pt-BR')}
+          </span>
+        )}
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          title="Atualiza status, fase, achados, superfície, custo e atividade — sem recarregar a página"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: 'transparent', border: '1px solid var(--border-mid)', borderRadius: 8,
+            color: refreshing ? 'var(--text-mute)' : 'var(--muted)', fontSize: 12, fontWeight: 600,
+            padding: '0.35rem 0.8rem', cursor: refreshing ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <RefreshCw size={13} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} />
+          {refreshing ? 'Atualizando…' : 'Atualizar dados'}
+        </button>
+      </div>
 
       {/* HERO */}
       <div style={{
@@ -250,12 +306,13 @@ export function ExecutionPanel({
             fontSize: 12, fontWeight: 600, padding: '0.3rem 0.7rem', borderRadius: 20,
             display: 'flex', alignItems: 'center', gap: 6,
             background: agentRunning ? 'rgba(124,58,237,.15)' : 'var(--bg)',
-            border: `1px solid ${agentRunning ? 'var(--purple)' : runState === 'completed' ? 'var(--low)' : 'var(--border)'}`,
-            color: agentRunning ? 'var(--purple-light)' : runState === 'completed' ? 'var(--low)' : 'var(--muted)',
+            border: `1px solid ${agentRunning ? 'var(--purple)' : runState === 'completed' ? 'var(--low)' : runState === 'failed' ? 'var(--critical)' : 'var(--border)'}`,
+            color: agentRunning ? 'var(--purple-light)' : runState === 'completed' ? 'var(--low)' : runState === 'failed' ? 'var(--critical)' : 'var(--muted)',
           }}>
             {agentRunning
               ? <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> rodando</>
               : runState === 'completed' ? <><CheckCircle2 size={12} /> concluído</>
+              : runState === 'failed' ? <><AlertTriangle size={12} /> falhou</>
               : runState === 'stopped' ? 'parado'
               : 'não iniciado'}
           </div>
@@ -298,24 +355,28 @@ export function ExecutionPanel({
         </div>
       )}
 
-      {/* Depois de parado/concluído: retomar ou zerar (A-STATE-5) */}
-      {!agentRunning && (runState === 'stopped' || runState === 'completed') && (
+      {/* Depois de parado/concluído/falhou: motivo + CTAs (1.3).
+          O MOTIVO vem persistido (stopReason) → o operador SEMPRE vê por que parou,
+          inclusive após um refresh. Falha técnica nunca é rotulada "concluído". */}
+      {!agentRunning && (runState === 'stopped' || runState === 'completed' || runState === 'failed') && (
         <div style={{
-          background: 'var(--surface)', border: `1px solid ${stopReason ? 'var(--critical)' : 'var(--border)'}`, borderRadius: 12,
+          background: 'var(--surface)', border: `1px solid ${outcomeColor}`, borderRadius: 12,
           padding: '1.4rem 1.5rem', marginBottom: 16,
           display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
         }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ color: 'var(--text)', fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-              {runState === 'completed' ? 'Mapeamento concluído' : stopReason ? 'Run bloqueado' : 'Mapeamento parado'}
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ color: outcome.tone === 'bad' ? 'var(--critical)' : 'var(--text)', fontSize: 14, fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {outcome.tone === 'ok' ? <CheckCircle2 size={15} color="var(--low)" /> : outcome.tone === 'bad' ? <AlertTriangle size={15} color="var(--critical)" /> : <Square size={12} />}
+              {outcome.title}
             </div>
-            <div style={{ color: stopReason ? 'var(--critical)' : 'var(--muted)', fontSize: 12.5, lineHeight: 1.5 }}>
-              {stopReason
-                ? stopReason
-                : runState === 'completed'
-                ? 'O Agente 1 encerrou o ciclo. Você pode retomar (aprofundar) ou começar um novo mapeamento do zero.'
-                : 'O run foi interrompido. Retome de onde parou (mantém o progresso do agente) ou comece do zero.'}
+            <div style={{ color: outcome.tone === 'bad' ? 'var(--critical)' : 'var(--muted)', fontSize: 12.5, lineHeight: 1.5 }}>
+              {outcome.detail}
             </div>
+            {blockText && reasonKey === 'safeguard' && (
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-mute)', fontFamily: 'ui-monospace, monospace', maxHeight: 54, overflow: 'hidden' }}>
+                {blockText.slice(0, 220)}
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={onContinue} disabled={!connected} style={{
@@ -324,8 +385,28 @@ export function ExecutionPanel({
               color: 'white', fontSize: 13, fontWeight: 600, padding: '0.5rem 1.1rem',
               cursor: connected ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
             }}>
-              <PlayCircle size={14} /> Continuar
+              <PlayCircle size={14} /> Continuar testes
             </button>
+            {(runState === 'completed' || hasResults) && (
+              <button onClick={onGenerateReport} disabled={!connected} title="Dispara /pentest-report — os arquivos aparecem na aba Relatório" style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                background: 'rgba(124,58,237,.12)', border: '1px solid var(--purple)', borderRadius: 8,
+                color: 'var(--purple-light)', fontSize: 13, fontWeight: 600, padding: '0.5rem 1.1rem',
+                cursor: connected ? 'pointer' : 'not-allowed', opacity: connected ? 1 : 0.5, fontFamily: 'inherit',
+              }}>
+                <FileText size={14} /> Gerar relatório
+              </button>
+            )}
+            {runState === 'completed' && (
+              <button onClick={onProvideCredentials} disabled={!connected} title="Handoff para teste autenticado (Agente 2)" style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                background: 'transparent', border: '1px solid var(--border-mid)', borderRadius: 8,
+                color: 'var(--muted)', fontSize: 13, fontWeight: 600, padding: '0.5rem 1.1rem',
+                cursor: connected ? 'pointer' : 'not-allowed', opacity: connected ? 1 : 0.5, fontFamily: 'inherit',
+              }}>
+                <Shield size={14} /> Fornecer credenciais
+              </button>
+            )}
             <button onClick={onRestart} disabled={!connected} title="Descarta a memória da sessão do agente e recomeça" style={{
               display: 'inline-flex', alignItems: 'center', gap: 7,
               background: 'transparent', border: '1px solid var(--border)', borderRadius: 8,
@@ -452,6 +533,7 @@ export function ExecutionPanel({
                   <Icon size={13} color="var(--purple-light)" style={{ flexShrink: 0 }} />
                   <span>{String(m.label ?? '')}</span>
                   {m.source ? <span style={{ color: 'var(--text-mute)', fontSize: 10.5, fontFamily: 'var(--mono, monospace)' }}>{String(m.source)}</span> : null}
+                  {m.ts ? <span style={{ color: 'var(--text-mute)', fontSize: 10 }}>{new Date(Number(m.ts)).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span> : null}
                   {hasItems && (open ? <ChevronDown size={12} color="var(--muted)" /> : <ChevronRight size={12} color="var(--muted)" />)}
                 </button>
               )
@@ -536,6 +618,10 @@ export function ExecutionPanel({
             ))}
           </div>
         </div>
+        {/* 5.1: descrição curta da seção */}
+        <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: -4, marginBottom: 10, lineHeight: 1.5 }}>
+          Itens com evidência suficiente para serem tratados como findings confirmados (taxonomia <code style={{ fontFamily: 'var(--mono, monospace)' }}>confirmed</code>).
+        </div>
 
         {confirmed.length === 0 ? (
           <div style={{
@@ -583,16 +669,29 @@ export function ExecutionPanel({
       </div>
 
       {/* MAPA DE SUPERFÍCIE (A-LIVE-3/4: probable/informational — observações, não achados) */}
-      {surface.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-            <span style={{ color: 'var(--text)', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Radar size={15} color="var(--purple-light)" /> Mapa de superfície
-            </span>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--text)', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Radar size={15} color="var(--purple-light)" /> Mapa de superfície
+          </span>
+          {surface.length > 0 && (
             <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-              {surface.length} observaç{surface.length === 1 ? 'ão' : 'ões'} · hosts, tecnologias e exposições vistas (não confirmadas)
+              {surface.length} observaç{surface.length === 1 ? 'ão' : 'ões'}
             </span>
+          )}
+        </div>
+        {/* 5.1: descrição curta da seção */}
+        <div style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>
+          Hosts, domínios, portas, serviços, tecnologias, endpoints e exposições observadas. Uma observação de superfície não é, por si só, uma vulnerabilidade.
+        </div>
+        {surface.length === 0 ? (
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+            padding: '1.25rem', textAlign: 'center', color: 'var(--muted)', fontSize: 12.5,
+          }}>
+            {agentRunning ? 'Mapeando a superfície externa…' : 'Nenhuma observação de superfície ainda. Inicie o mapeamento para popular hosts, tecnologias e exposições.'}
           </div>
+        ) : (
           <div style={{
             background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
             maxHeight: 300, overflowY: 'auto',
@@ -622,8 +721,8 @@ export function ExecutionPanel({
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* FEED DE ATIVIDADE (colapsável, secundário) */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10 }}>
@@ -634,9 +733,14 @@ export function ExecutionPanel({
         }}>
           {feedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Terminal size={13} /> Atividade do agente ({feed.length})
+          <span style={{ marginLeft: 'auto', color: 'var(--text-mute)', fontSize: 11, fontWeight: 400 }}>linha do tempo operacional</span>
         </button>
         {feedOpen && (
           <div style={{ maxHeight: 320, overflowY: 'auto', padding: '0 1rem 0.75rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* 5.1: descrição curta da seção */}
+            <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.5, paddingBottom: 6 }}>
+              Fases, ferramentas executadas, atualizações, solicitações ao operador, paradas e erros — em ordem cronológica.
+            </div>
             {feed.length === 0 ? (
               <div style={{ color: 'var(--muted)', fontSize: 12, padding: '0.5rem 0' }}>Sem atividade ainda.</div>
             ) : feed.map((m) => (

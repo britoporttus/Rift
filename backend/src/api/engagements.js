@@ -9,6 +9,8 @@ const Usage = require('../models/Usage')
 const findingsWatcher = require('../findings-watcher')
 const scheduler = require('../scheduler')
 const { writeEngagementScope } = require('../scope')
+const { isValidFrameworkId, getFrameworkPath } = require('../frameworks')
+const jobs = require('../jobs')
 
 const router = Router()
 router.use(requireAuth())
@@ -77,7 +79,7 @@ router.post('/', async (req, res) => {
 
   // A-INTAKE-3: materializa scope.yaml + engagement-state.yaml (idle) no framework.
   // Best-effort: uma falha de FS não deve impedir a criação do engagement no Mongo.
-  try { writeEngagementScope(engagement) } catch (err) {
+  try { writeEngagementScope(engagement, getFrameworkPath(engagement.frameworkId)) } catch (err) {
     console.warn('[engagements] falha ao escrever scope do intake:', err?.message)
   }
 
@@ -92,6 +94,14 @@ router.patch('/:id', async (req, res) => {
   const patch = {}
   for (const key of allowed) {
     if (req.body[key] !== undefined) patch[key] = req.body[key]
+  }
+  // Versão do agente (seletor A/B/C): validado contra o registro; qualquer operador
+  // autenticado pode trocar (é escolha de teste, não muda o escopo autorizado).
+  if (req.body.frameworkId !== undefined) {
+    if (!isValidFrameworkId(req.body.frameworkId)) {
+      return res.status(400).json({ error: 'Versão de agente inválida.' })
+    }
+    patch.frameworkId = req.body.frameworkId
   }
   if (req.user?.role === 'admin') {
     for (const key of adminOnly) {
@@ -205,6 +215,12 @@ router.get('/:id/sessions', async (req, res) => {
   }
 
   res.json(result)
+})
+
+// Jobs/Work deste engagement — histórico de runs com o fluxo de etapas (fases).
+router.get('/:id/jobs', async (req, res) => {
+  const list = await jobs.listJobs(req.params.id).catch(() => [])
+  res.json(list)
 })
 
 router.post('/:id/sessions', async (req, res) => {

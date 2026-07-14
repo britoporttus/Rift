@@ -1,7 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { Sidebar } from '@/components/ui/Sidebar'
 
@@ -18,19 +17,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/admin': 'Admin',
 }
 
-function SI({ s = 15, c = 'currentColor', sw = 1.75, children }: { s?: number; c?: string; sw?: number; children: React.ReactNode }) {
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
-      strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, display: 'block' }}>
-      {children}
-    </svg>
-  )
-}
-
-const PlusIco = (s?: number, c?: string) => <SI s={s || 12} c={c || '#A78BFA'} sw={2}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></SI>
-
-function TopBar({ pageName, collapsed }: { pageName: string; collapsed: boolean }) {
+function TopBar({ pageName }: { pageName: string }) {
   return (
     <div style={{
       height: 52, flexShrink: 0,
@@ -62,21 +49,6 @@ function TopBar({ pageName, collapsed }: { pageName: string; collapsed: boolean 
           }} />
           <span style={{ fontSize: 10.5, color: '#3A3A58', letterSpacing: '0.06em' }}>Sistema online</span>
         </div>
-
-        <Link href="/dashboard" style={{ textDecoration: 'none' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 5,
-            padding: '0.42rem 0.9rem',
-            background: 'rgba(124,58,237,0.10)',
-            border: '1px solid rgba(124,58,237,0.28)',
-            borderRadius: 5,
-            fontSize: 12, fontWeight: 600, color: '#A78BFA',
-            cursor: 'pointer',
-          }}>
-            {PlusIco()}
-            Novo Engagement
-          </div>
-        </Link>
       </div>
     </div>
   )
@@ -117,7 +89,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         onLogout={() => { logout(); router.replace('/login') }}
       />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <TopBar pageName={pageName} collapsed={collapsed} />
+        <TopBar pageName={pageName} />
         <main style={{ flex: 1, overflow: 'auto', ...GRID_BG }}>
           {children}
         </main>

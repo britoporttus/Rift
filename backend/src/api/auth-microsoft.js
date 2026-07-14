@@ -3,7 +3,7 @@ const msal = require('@azure/msal-node')
 const crypto = require('crypto')
 const https = require('https')
 const User = require('../models/User')
-const { signToken } = require('../auth')
+const { signToken, COOKIE_NAME, cookieOptions } = require('../auth')
 
 const states = new Map()
 // Códigos de uso único para troca segura do JWT após o callback do SSO.
@@ -167,7 +167,8 @@ router.post('/exchange', (req, res) => {
     return res.status(400).json({ error: 'Código inválido ou expirado' })
   }
   authCodes.delete(code) // uso único
-  res.json({ token: entry.token })
+  res.cookie(COOKIE_NAME, entry.token, cookieOptions)
+  res.json({ ok: true })
 })
 
 module.exports = router

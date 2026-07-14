@@ -5,6 +5,7 @@ const crypto = require('crypto')
 const yaml = require('js-yaml')
 const Finding = require('./models/Finding')
 const { updateEngagement, countFindings } = require('./store')
+const { getFramework, resolveFindingsDirs } = require('./frameworks')
 
 // BUG-3: notifier GLOBAL para broadcast ao vivo (setado 1x pelo server). Antes o
 // broadcast vinha de um callback do PRIMEIRO a abrir o watcher — se o scheduler
@@ -13,9 +14,52 @@ const { updateEngagement, countFindings } = require('./store')
 let notifier = null
 function setNotifier(fn) { notifier = fn }
 
-const FRAMEWORK_PATH = process.env.FRAMEWORK_PATH || '/home/digitalbath/pentest-framework-v2'
+// Extensões que podem conter um finding. Guarda contra ler binários (a pasta
+// evidence/ da v3 tem screenshots/saídas cruas) e contra parse desnecessário.
+const FINDING_EXTS = ['.yaml', '.yml', '.json', '.md']
 
 const VALID_STATES = ['confirmed', 'probable', 'informational', 'false_positive']
+
+// framework pode chegar como objeto (do registro) OU id (string) OU nada.
+function normalizeFramework(framework) {
+  if (framework && typeof framework === 'object' && framework.findingsDirs) return framework
+  return getFramework(typeof framework === 'string' ? framework : framework?.id)
+}
+
+// Parser de findings em Markdown. Cobre DOIS formatos:
+//   (a) v2/genérico: título em `# Heading` + `**Severity:** high`
+//   (b) legacy (cursor): bloco `=== FINDING [STATE] ===` com chaves PLANAS
+//       (`Severity:`, `Title:`, `Type:`, `Endpoint:`, `Evidence:`, `Impact:`,
+//       `Recommendation:`). Sem cobrir (b), TODO finding do agente legacy era
+//       descartado silenciosamente (não tem `#` nem `**Severity**`).
+// Retorna um objeto-finding (mesma forma do YAML) ou null se não parecer finding.
+function parseMarkdownFinding(raw, fallbackId) {
+  // `Chave: valor` tolerante a markdown bold (**Chave:** valor), hífen de lista e
+  // blockquote. Remove asteriscos residuais do início/fim do valor (bold de fechamento).
+  const field = (key) => {
+    const m = raw.match(new RegExp('^[\\s\\-*>]*(?:\\*\\*)?' + key + '\\s*(?:\\*\\*)?\\s*[:\\-]\\s*(.+?)\\s*$', 'im'))
+    return m ? m[1].replace(/^\**\s*/, '').replace(/\s*\**$/, '').trim() : null
+  }
+  const heading = raw.match(/^#\s+(?:Finding\s+[\w-]+:\s*)?(.+)$/m)
+  const title = field('Title') || (heading ? heading[1].trim() : null)
+  if (!title) return null   // sem título reconhecível → não dá pra criar finding
+  const severity = field('Severity')
+  const stateTok = (raw.match(/===\s*FINDING\s*\[([A-Za-z_]+)\]/i) || [])[1]
+  return {
+    id:             fallbackId,
+    title,
+    severity:       severity ? severity.toLowerCase() : undefined,
+    type:           field('Type') || null,
+    location:       field('Endpoint') || field('Location') || field('URL') || null,
+    parameter:      field('Parameter') || null,
+    payload:        field('Payload') || null,
+    evidence:       field('Evidence') || null,
+    impact:         field('Impact') || null,
+    recommendation: field('Recommendation') || field('Remediation') || null,
+    description:    field('Description') || raw.slice(0, 800),
+    state:          stateTok ? stateTok.toLowerCase() : undefined,
+  }
+}
 
 // Deriva o estado de validação respeitando a taxonomia, com retrocompatibilidade:
 // findings antigos só têm `confirmed` (bool) — mapeamos para o novo `state`.
@@ -102,17 +146,32 @@ async function persistFinding(engagementId, engagementName, finding, sourceFile)
   }
 }
 
-function watch(engagementId, slug, dateStr, engagementName) {
-  if (watchers.has(engagementId)) return
+// framework = objeto do registro (ou id) da versão do agente deste engagement.
+// target é usado só pelo dir de fallback do legacy (results/{target}_{date}/findings).
+function watch(engagementId, slug, dateStr, engagementName, framework, target) {
+  const fw = normalizeFramework(framework)
+  const existing = watchers.get(engagementId)
+  if (existing) {
+    // Já observando: se é a MESMA versão, no-op. Se o operador trocou a versão
+    // (seletor A/B/C), re-aponta para os dirs da nova versão — senão os findings
+    // dela nunca apareceriam (o watch ficaria preso nos dirs da versão anterior).
+    if (existing.frameworkId === fw.id) return
+    try { existing.watcher.close() } catch {}
+    watchers.delete(engagementId)
+  }
 
-  const dir = path.join(FRAMEWORK_PATH, 'clients', slug, dateStr, 'findings')
-  fs.mkdirSync(dir, { recursive: true })
+  // Dirs onde ESTA versão pode gravar findings, escopados por engagement (nunca a
+  // raiz de clients/ — senão varreria o histórico antigo das cópias).
+  const dirs = resolveFindingsDirs(fw, slug, dateStr, target)
+  for (const d of dirs) { try { fs.mkdirSync(d, { recursive: true }) } catch {} }
 
   // Processa um arquivo de finding. isNew = evento 'add' (vs 'change').
   async function handleFile(filePath, isNew) {
     try {
-      const raw = fs.readFileSync(filePath, 'utf-8')
       const ext = path.extname(filePath).toLowerCase()
+      // Só arquivos que podem ser finding — evita ler binários (evidence/ da v3).
+      if (!FINDING_EXTS.includes(ext)) return
+      const raw = fs.readFileSync(filePath, 'utf-8')
 
       let finding
       if (ext === '.yaml' || ext === '.yml') {
@@ -120,15 +179,9 @@ function watch(engagementId, slug, dateStr, engagementName) {
       } else if (ext === '.json') {
         finding = JSON.parse(raw)
       } else {
-        // .md or other: try to extract a minimal finding from front-matter or first line
-        const titleMatch = raw.match(/^#\s+(?:Finding\s+\w+:\s*)?(.+)$/m)
-        const sevMatch   = raw.match(/\*\*Severity[:\*]+\s*(critical|high|medium|low|info)/i)
-        if (!titleMatch) return // can't parse, skip
-        finding = {
-          title:    titleMatch[1].trim(),
-          severity: sevMatch ? sevMatch[1].toLowerCase() : 'info',
-          description: raw.slice(0, 800),
-        }
+        // .md: cobre tanto o formato v2/genérico quanto o legacy (=== FINDING ===).
+        finding = parseMarkdownFinding(raw, path.basename(filePath, ext))
+        if (!finding) return // não parece finding, skip
       }
 
       if (!finding || !finding.title) return
@@ -173,27 +226,33 @@ function watch(engagementId, slug, dateStr, engagementName) {
   // REL-4: awaitWriteFinish evita ler um YAML escrito pela metade (o parse falha
   // e o finding se perde). Handler 'change' reprocessa quando o arquivo é
   // atualizado. ignoreInitial:false → arquivos existentes são pegos ao iniciar.
-  const watcher = chokidar.watch(dir, {
+  const watcher = chokidar.watch(dirs, {
     ignoreInitial: false,
     persistent: true,
+    // Não observa arquivos que não são finding (screenshots/saída crua da v3).
+    // Dirs têm extname '' → não são ignorados → a árvore é percorrida normalmente.
+    ignored: (p) => {
+      const e = path.extname(p).toLowerCase()
+      return !!e && !FINDING_EXTS.includes(e)
+    },
     awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
   })
   watcher.on('add',    (fp) => handleFile(fp, true))
   watcher.on('change', (fp) => handleFile(fp, false))
 
-  watchers.set(engagementId, watcher)
-  console.log(`[watcher] observando ${dir}`)
+  watchers.set(engagementId, { watcher, frameworkId: fw.id })
+  console.log(`[watcher] observando (${fw.id}): ${dirs.join(' | ')}`)
 }
 
 function unwatch(engagementId) {
   const w = watchers.get(engagementId)
-  if (w) { w.close(); watchers.delete(engagementId) }
+  if (w) { try { w.watcher.close() } catch {}; watchers.delete(engagementId) }
 }
 
 // REL-2: fecha todos os watchers no shutdown gracioso.
 function closeAll() {
-  for (const [, w] of watchers) { try { w.close() } catch {} }
+  for (const [, w] of watchers) { try { w.watcher.close() } catch {} }
   watchers.clear()
 }
 
-module.exports = { watch, unwatch, closeAll, setNotifier, deriveState, computeFingerprint }
+module.exports = { watch, unwatch, closeAll, setNotifier, deriveState, computeFingerprint, parseMarkdownFinding }

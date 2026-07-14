@@ -16,6 +16,19 @@ if (!JWT_SECRET || INSECURE_SECRETS.has(JWT_SECRET) || JWT_SECRET.length < 32) {
 
 const router = Router()
 
+// Cookie HttpOnly no lugar de token no localStorage — inacessível a JS (mitiga
+// roubo via XSS). SameSite=Lax cobre o fluxo de SSO (cookie é setado por fetch
+// same-origin no POST /exchange, não pelo redirect cross-site do Microsoft).
+const COOKIE_NAME = 'rift_token'
+const isProd = process.env.NODE_ENV === 'production'
+const cookieOptions = {
+  httpOnly: true,
+  secure: isProd,
+  sameSite: 'lax',
+  path: '/',
+  maxAge: 12 * 60 * 60 * 1000, // mesma janela do JWT (expiresIn: '12h')
+}
+
 // SEC-2: rate limit em memória para /login (app interno, 1 instância) — trava
 // brute force sem dependência externa. Chaveado por e-mail (dimensão que importa
 // aqui, já que o proxy do frontend colapsa os IPs em localhost).
@@ -66,8 +79,8 @@ router.post('/login', loginRateLimit, async (req, res) => {
   await User.findByIdAndUpdate(user._id, { lastLogin: new Date() })
 
   const token = signToken(user)
+  res.cookie(COOKIE_NAME, token, cookieOptions)
   return res.json({
-    token,
     user: { id: user._id, email: user.email, role: user.role, name: user.name },
   })
 })
@@ -77,10 +90,17 @@ router.get('/me', requireAuth(), (req, res) => {
   res.json({ user: req.user })
 })
 
+// POST /api/auth/logout — limpa o cookie no servidor (o browser não pode, é HttpOnly).
+router.post('/logout', (req, res) => {
+  res.clearCookie(COOKIE_NAME, { path: cookieOptions.path })
+  res.json({ ok: true })
+})
+
 function requireAuth(roles = []) {
   return (req, res, next) => {
     const header = req.headers.authorization ?? ''
-    const token = header.startsWith('Bearer ') ? header.slice(7) : null
+    const headerToken = header.startsWith('Bearer ') ? header.slice(7) : null
+    const token = req.cookies?.[COOKIE_NAME] || headerToken
     if (!token) return res.status(401).json({ error: 'Token ausente' })
 
     try {
@@ -99,4 +119,4 @@ function requireAuth(roles = []) {
   }
 }
 
-module.exports = { router, requireAuth, signToken, JWT_SECRET }
+module.exports = { router, requireAuth, signToken, JWT_SECRET, COOKIE_NAME, cookieOptions }

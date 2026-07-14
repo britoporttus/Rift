@@ -1,23 +1,26 @@
+import { shouldRedirectOn401 } from './authRedirect'
+
 const BASE = '/api'
 
-function token() {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem('rift_token')
-}
-
+// Auth via cookie HttpOnly (setado pelo backend) — o browser o envia sozinho em
+// requests same-origin, não precisamos ler/anexar nada aqui.
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const t = token()
   const res = await fetch(`${BASE}${path}`, {
     ...init,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(t ? { Authorization: `Bearer ${t}` } : {}),
       ...(init.headers ?? {}),
     },
   })
   if (res.status === 401) {
-    localStorage.removeItem('rift_token')
-    window.location.href = '/login'
+    // Só faz o hard-redirect FORA da área de login. Na tela de login, o probe
+    // me() do useAuth responde 401 quando não há sessão — redirecionar ali
+    // recarregaria a página em loop (ver lib/authRedirect.js). Os guards de rota
+    // cuidam da navegação para /login quando o usuário está de fato deslogado.
+    if (typeof window !== 'undefined' && shouldRedirectOn401(window.location.pathname)) {
+      window.location.href = '/login'
+    }
     throw new Error('Unauthorized')
   }
   if (!res.ok) {
@@ -31,14 +34,15 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   auth: {
     login: (email: string, password: string) =>
-      req<{ token: string; user: User }>('/auth/login', {
+      req<{ user: User }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       }),
     me: () => req<{ user: User }>('/auth/me'),
-    // Troca o código de uso único do SSO pelo JWT (token não trafega na URL).
+    logout: () => req<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+    // Troca o código de uso único do SSO pelo cookie de sessão (nada trafega na URL).
     exchange: (code: string) =>
-      req<{ token: string }>('/auth/exchange', {
+      req<{ ok: boolean }>('/auth/exchange', {
         method: 'POST',
         body: JSON.stringify({ code }),
       }),
@@ -53,6 +57,7 @@ export const api = {
     delete: (id: string) => req<void>(`/engagements/${id}`, { method: 'DELETE' }),
     setSchedule: (id: string, schedule: Partial<EngagementSchedule>) =>
       req<Engagement>(`/engagements/${id}/schedule`, { method: 'PATCH', body: JSON.stringify(schedule) }),
+    jobs: (id: string) => req<Job[]>(`/engagements/${id}/jobs`),
     runNow: (id: string) =>
       req<{ ok: boolean; message: string }>(`/engagements/${id}/run-now`, { method: 'POST' }),
     messages: (id: string, sessionId?: string) => {
@@ -85,11 +90,23 @@ export const api = {
   },
   reports: {
     list: (engagementId: string) => req<ReportFile[]>(`/reports/${engagementId}`),
+    // URL do relatório GERADO pelo Rift (a partir dos findings). Usada direto no
+    // iframe/download — o cookie HttpOnly autentica no request same-origin.
+    generatedUrl: (engagementId: string, type: 'technical' | 'executive' = 'technical', download = false) =>
+      `/api/reports/${engagementId}/generated?type=${type}${download ? '&download=1' : ''}`,
+    // PDF gerado via Chromium headless (design dark preservado). Sempre baixa.
+    pdfUrl: (engagementId: string, type: 'technical' | 'executive' = 'technical') =>
+      `/api/reports/${engagementId}/generated?type=${type}&format=pdf`,
+    // Resumo executivo por IA (opt-in, cacheado). GET = status; POST = gera (admin, ~1min).
+    narrativeStatus: (engagementId: string) => req<ReportNarrativeStatus>(`/reports/${engagementId}/narrative`),
+    generateNarrative: (engagementId: string) =>
+      req<ReportNarrativeStatus>(`/reports/${engagementId}/narrative`, { method: 'POST' }),
   },
   admin: {
     metrics: () => req<SystemMetrics>('/admin/metrics'),
     usage: () => req<UsageEntry[]>('/admin/usage'),
     usageByUser: () => req<UserUsage[]>('/admin/usage/by-user'),
+    sku: () => req<SkuUsage>('/admin/sku'),
   },
   users: {
     list: () => req<UserFull[]>('/users'),
@@ -105,7 +122,21 @@ export const api = {
     getModel: () => req<AgentModelInfo>('/settings/model'),
     setModel: (model: string) =>
       req<{ current: string }>('/settings/model', { method: 'PUT', body: JSON.stringify({ model }) }),
+    // Catálogo das versões do agente (seletor A/B/C). A escolha é por-engagement.
+    getFrameworks: () => req<FrameworkInfo>('/settings/frameworks'),
   },
+}
+
+export interface FrameworkOption {
+  id: string
+  label: string
+  note: string
+  available: boolean
+  slashCommands: boolean
+}
+export interface FrameworkInfo {
+  default: string
+  available: FrameworkOption[]
 }
 
 export interface AgentModelOption {
@@ -150,12 +181,16 @@ export interface Engagement {
   scope: object
   status: 'idle' | 'active' | 'completed'
   // Estado de execução do painel (A-STATE): sobrevive a reload/restart do backend.
-  runState?: 'idle' | 'running' | 'stopped' | 'completed'
+  runState?: 'idle' | 'running' | 'stopped' | 'completed' | 'failed'
+  // Motivo do desfecho (1.3): operator | budget | incomplete | interrupted | safeguard | timeout | error
+  stopReason?: string | null
   phase: string | null
   progress: number
   findingsCount: number
   slug: string
   date: string
+  // Versão do agente (seletor A/B/C). Ausente em engagements antigos → tratar como 'v2'.
+  frameworkId?: string
   schedule?: EngagementSchedule
   // Custo acumulado (soma de Usage no backend). Persiste entre reloads — o painel
   // usa isto como baseline e soma os cost_update ao vivo por cima.
@@ -163,6 +198,42 @@ export interface Engagement {
   tokensTotal?: number
   createdAt: string
   updatedAt: string
+}
+
+export interface JobStep {
+  key: string
+  label: string
+  status: 'pending' | 'active' | 'done' | 'skipped'
+  startedAt?: string | null
+  endedAt?: string | null
+}
+export interface Job {
+  id: string
+  engagementId: string
+  sessionId: string
+  frameworkId: string
+  status: 'running' | 'completed' | 'stopped' | 'failed'
+  reason?: string | null
+  steps: JobStep[]
+  currentStep?: string | null
+  findingsCount: number
+  spentUsd: number
+  startedAt: string
+  endedAt?: string | null
+}
+
+export interface ReportNarrativeStatus {
+  exists: boolean
+  stale?: boolean
+  summary?: string
+  riskLevel?: string | null
+  attackChains?: string[]
+  recommendations?: string[]
+  model?: string | null
+  findingsCount?: number
+  currentFindings?: number
+  costUsd?: number
+  generatedAt?: string
 }
 
 export type RemediationStatus = 'open' | 'fixed' | 'regressed' | 'accepted_risk'
@@ -212,6 +283,19 @@ export interface UsageEntry {
   date: string
   usd: number
   tokens: number
+}
+
+// Utilização da SKU (2.2). available:false quando não há fonte de limite configurada
+// — a UI mostra "indisponível" em vez de simular percentual/saldo.
+export interface SkuUsage {
+  available: boolean
+  reason?: string
+  spentUsd: number
+  tokensTotal: number
+  limitUsd?: number
+  remainingUsd?: number
+  percent?: number
+  period?: string
 }
 
 export interface UserUsage {

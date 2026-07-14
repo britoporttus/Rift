@@ -4,8 +4,12 @@ const fs = require('fs')
 const path = require('path')
 const yaml = require('js-yaml')
 const { getAgentModel } = require('./settings')
+const { getFrameworkPath } = require('./frameworks')
 
-const FRAMEWORK_PATH = process.env.FRAMEWORK_PATH || '/home/digitalbath/pentest-framework-v2'
+// Path do framework DEFAULT (v2). Cada run recebe o path da versão escolhida via
+// opts.frameworkPath (seletor A/B/C); este é só o fallback. env FRAMEWORK_PATH ainda
+// tem precedência (retrocompat), resolvida dentro do registro (frameworks.js).
+const FRAMEWORK_PATH = getFrameworkPath('v2')
 // Janela de contexto do modelo (tokens) — base do medidor de "memória".
 // Ajustável por env; 200k cobre Sonnet/Opus/Fable atuais.
 const CONTEXT_LIMIT = Number(process.env.CONTEXT_LIMIT) || 200000
@@ -24,6 +28,17 @@ const TOOL_PHASE = [
 ]
 const SLASH_PHASE_RE = /\/pentest-(recon|enum|vuln|exploit|post)\b/i
 
+// `curl` não bate em NENHUMA regex de TOOL_PHASE, mas é a ferramenta MAIS usada
+// pelo framework pra testar lógica de negócio de API (SSO/SAML, CORS, tenant
+// enumeration, bypass de auth) — coisa que nuclei/sqlmap não pegam. Sem isto o
+// indicador de fase fica cego pra praticamente todo teste de vulnerabilidade real
+// deste tipo de engagement, e nunca mostra "Vulnerabilidades" mesmo quando o
+// agente está literalmente injetando payload e validando a resposta.
+const CURL_RE = /\bcurl\b/i
+// Sinais de que o curl está testando uma HIPÓTESE de vulnerabilidade (payload de
+// injeção/redirect/traversal no comando), não só sondando/enumerando um endpoint.
+const CURL_VULN_RE = /(union(\s+all)?\s+select|['"]\s*(or|and)\s*['"]?\s*[\d'"]|<script|javascript:|\.\.%2f|\.\.\/\.\.\/|returnurl=|relaystate|redirect_uri=|\$\{jndi|<!entity|xxe)/i
+
 // Deriva a fase de UM evento WS. Retorna a key da fase ou null.
 // REGRA: a fase segue o que o agente FAZ (ação real), NUNCA o que ele NARRA. A prosa
 // do agente mencionando "/pentest-vuln" ou "vou buscar vulnerabilidades" NÃO pode
@@ -37,6 +52,7 @@ function inferPhaseFromEvent(ev) {
   const slash = hay.match(SLASH_PHASE_RE)
   if (slash) return slash[1].toLowerCase()
   for (const { phase, re } of TOOL_PHASE) if (re.test(hay)) return phase
+  if (CURL_RE.test(hay)) return CURL_VULN_RE.test(hay) ? 'vuln' : 'enum'
   return null
 }
 
@@ -65,6 +81,18 @@ function stripAnsi(s) {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')            // control chars soltos (mantem \t \n)
 }
 
+// Alvo (host) fuzzado por ffuf/gobuster/feroxbuster — extraído do comando. Serve
+// para SEPARAR execuções diferentes no marco (senão dois fuzz viram um só, ou
+// aparecem "38 / 1 / 29 caminhos" sem dizer contra o quê). Remove o token FUZZ.
+function parseFuzzTarget(command) {
+  const m = String(command || '').match(/(?:-u|--url)\s+(\S+)|(https?:\/\/\S+)/i)
+  const raw = m ? (m[1] || m[2]) : null
+  if (!raw) return null
+  const cleaned = raw.replace(/FUZZ/gi, '')
+  try { return new URL(cleaned).host } catch {}
+  return cleaned.replace(/^https?:\/\//i, '').split('/')[0] || null
+}
+
 // A-LIVE-2 (marcos): identifica o binário de scan dentro de um comando Bash.
 function detectBinary(command) {
   const m = String(command || '').match(/\b(subfinder|amass|assetfinder|findomain|dnsx|dig|httpx|nmap|naabu|masscan|rustscan|whatweb|wappalyzer|wafw00f|katana|gau|waybackurls|hakrawler|gospider|gobuster|ffuf|feroxbuster)\b/i)
@@ -76,8 +104,25 @@ function detectBinary(command) {
 // padrão claro, não emite nada (melhor silêncio que ruído/alucinação). Cada marco:
 //   { kind, label, phase, source }
 // Tokens que parecem "tech" entre colchetes mas NÃO são (métodos HTTP, status…).
-const TECH_STOP = new Set(['OPTIONS', 'GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'PATCH', 'TRACE', 'CONNECT',
-  'OK', 'MOVED', 'FOUND', 'FORBIDDEN', 'ERROR', 'FAILED', 'TIMEOUT', 'TITLE', 'REDIRECT'])
+const TECH_STOP = new Set([
+  // métodos + palavras de status HTTP
+  'OPTIONS', 'GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'PATCH', 'TRACE', 'CONNECT',
+  'OK', 'MOVED', 'FOUND', 'FORBIDDEN', 'ERROR', 'FAILED', 'TIMEOUT', 'TITLE', 'REDIRECT', 'NOTFOUND', 'NOCONTENT',
+  // nomes de header, atributos de cookie e campos de geo/meta que NÃO são tecnologia
+  // (raiz do "Stack detectada: Qualidade / Country, Cookies, HttpOnly, IP")
+  'COOKIE', 'COOKIES', 'HTTPONLY', 'SECURE', 'SAMESITE', 'DOMAIN', 'PATH', 'EXPIRES', 'MAX-AGE', 'SET-COOKIE',
+  'SERVER', 'DATE', 'CONNECTION', 'VARY', 'ETAG', 'LOCATION', 'AGE', 'VIA', 'ALLOW', 'LINK', 'REFRESH', 'PRAGMA',
+  'CONTENT-TYPE', 'CONTENT-LENGTH', 'CONTENT-ENCODING', 'CACHE-CONTROL', 'TRANSFER-ENCODING', 'ACCEPT-RANGES',
+  'X-FRAME-OPTIONS', 'X-CONTENT-TYPE-OPTIONS', 'X-XSS-PROTECTION', 'STRICT-TRANSPORT-SECURITY',
+  'REFERRER-POLICY', 'CONTENT-SECURITY-POLICY', 'PERMISSIONS-POLICY', 'ACCESS-CONTROL-ALLOW-ORIGIN',
+  'COUNTRY', 'IP', 'QUALITY', 'QUALIDADE', 'ASN', 'CDN', 'CNAME', 'WEBSERVER', 'SCHEME', 'PORT', 'HOST',
+  'URL', 'WORDS', 'LINES', 'CHARS', 'SIZE', 'STATUS',
+  // plugins de METADADO do whatweb (não são tecnologia): raiz do
+  // "Stack detectada: NET, Cookies, Country, HTTPServer, HttpOnly, IP"
+  'HTTPSERVER', 'UNCOMMONHEADERS', 'X-POWERED-BY', 'POWEREDBY', 'REDIRECTLOCATION', 'VIA-PROXY',
+  'SCRIPT', 'FRAME', 'IFRAME', 'PASSWORDFIELD', 'EMAIL', 'HTML5', 'OPEN-GRAPH-PROTOCOL',
+  'CONTENT-LANGUAGE', 'X-UA-COMPATIBLE', 'META-AUTHOR', 'META-REFRESH', 'METAREFRESH', 'PROBABLY',
+  'ACCESS-CONTROL-ALLOW-METHODS', 'ACCESS-CONTROL-ALLOW-CREDENTIALS'])
 
 function extractMilestones(toolName, command, output) {
   const bin = toolName === 'Bash' ? detectBinary(command) : null
@@ -140,8 +185,19 @@ function extractMilestones(toolName, command, output) {
       break
     }
     case 'gobuster': case 'ffuf': case 'feroxbuster': {
-      const found = lines.filter((l) => /Status:\s*[23]\d\d/i.test(l))
-      if (found.length) push('urls', `${found.length} caminho${plural(found.length)} encontrado${plural(found.length)} (fuzz)`, 'enum', found)
+      // Parseia cada achado (status 2xx/3xx) em {status, size, caminho} — item
+      // legível e estruturado. O alvo entra no label para separar execuções.
+      const target = parseFuzzTarget(command)
+      const rows = []
+      for (const l of lines) {
+        const st = l.match(/Status:\s*([23]\d\d)/i)
+        if (!st) continue
+        const size = (l.match(/(?:Size|Content-Length)[:=]?\s*(\d+)/i) || [])[1]
+        const pathTok = (l.match(/^\s*(\/?[^\s,]+)/) || [])[1] || ''
+        rows.push(`[${st[1]}]${size ? ` ${size}B` : ''}  ${pathTok}`.trim())
+      }
+      const n = rows.length
+      if (n) push('paths', `${n} caminho${plural(n)} encontrado${plural(n)}${target ? ` em ${target}` : ''} (fuzz)`, 'enum', rows)
       break
     }
   }
@@ -164,18 +220,18 @@ function extractToolResults(parsed) {
   }))
 }
 
-function writeScopeYaml(engagement) {
+function writeScopeYaml(engagement, frameworkPath = FRAMEWORK_PATH) {
   const target = engagement.target || 'unknown'
   const slug   = engagement.slug   || engagement.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'engagement'
   const date   = engagement.date   || new Date().toISOString().slice(0, 10)
   const id     = `${slug}-${date.replace(/-/g, '')}`
   const now    = new Date().toISOString()
 
-  const configDir = path.join(FRAMEWORK_PATH, 'config')
+  const configDir = path.join(frameworkPath, 'config')
   if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true })
 
   // Create context dir + subdirs for this engagement
-  const ctxDir = path.join(FRAMEWORK_PATH, 'context', id)
+  const ctxDir = path.join(frameworkPath, 'context', id)
   if (!fs.existsSync(ctxDir)) fs.mkdirSync(ctxDir, { recursive: true })
   const parsedDir = path.join(ctxDir, 'parsed')
   if (!fs.existsSync(parsedDir)) fs.mkdirSync(parsedDir, { recursive: true })
@@ -274,6 +330,10 @@ const CLAUDE_BIN = process.env.CLAUDE_PATH || findClaude()
 
 // sessionId -> { proc, subscribers: Set<WebSocket> }
 const runningSessions = new Map()
+
+// Sequência monotônica de runs — compõe o `runId` de cada marco (identificador da
+// execução), para o painel distinguir/agrupar marcos de execuções diferentes.
+let runSeq = 0
 
 // Rift sessionId -> claude CLI session_id (para --resume entre turnos).
 // Dá ao agente memória real da conversa: ele não re-roda recon nem
@@ -446,9 +506,17 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
   let budgetExceeded = false
   // Detecta recusa por safeguard/erro de API do modelo — para não virar loop silencioso.
   let blockedBySafeguard = false
+  // A-STATE (1.3): timeout mata o run; sinalizamos para o onClose distinguir
+  // "falha por tempo limite" de "concluído" (o código de saída é 143 nos dois).
+  let timedOut = false
+  // Identificador desta execução — carimba os marcos (ETAPA 4).
+  const runId = `${sessionId}#${++runSeq}`
+
+  // Versão do agente escolhida para este engagement (seletor A/B/C). Default = v2.
+  const frameworkPath = opts.frameworkPath || FRAMEWORK_PATH
 
   if (engagement) {
-    try { writeScopeYaml(engagement) } catch (err) {
+    try { writeScopeYaml(engagement, frameworkPath) } catch (err) {
       console.warn('[agent-runner] falha ao escrever scope.yaml:', err.message)
     }
   }
@@ -486,13 +554,17 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
     CLAUDE_BIN,
     args,
     {
-      cwd: FRAMEWORK_PATH,
+      cwd: frameworkPath,
       // detached: novo grupo de processos → conseguimos matar a árvore inteira
       // (as ferramentas que o agente dispara) no stop/timeout/shutdown.
       detached: true,
       // SEC-1: env mínima, sem segredos do backend (ver ENV_ALLOWLIST/buildAgentEnv).
       env: buildAgentEnv({
         ENGAGEMENT_ID:       engagementId,
+        // T1: raiz REAL do framework escolhido → os phase-files do v3 usam
+        // `${FRAMEWORK_ROOT:-...}`, então o valor certo do Rift vence o hardcode
+        // antigo (`/home/digitalbath/pentest-framework-3`) e evita o exit por path errado.
+        FRAMEWORK_ROOT:      frameworkPath,
         RIFT_USER_IS_ADMIN:  isAdmin ? 'true' : 'false',
         RIFT_USER_NAME:      userName,
         RIFT_USER_ROLE:      user?.role || (isAdmin ? 'admin' : 'user'),
@@ -509,6 +581,7 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
 
   // Timeout: se o claude travar, mata a árvore e libera a sessão.
   const timeoutTimer = setTimeout(() => {
+    timedOut = true
     broadcast(subscribers, {
       type: 'agent_message',
       text: `⏱️ Tempo limite de execução (${Math.round(RUN_TIMEOUT_MS / 60000)} min) atingido — encerrando o agente.`,
@@ -601,7 +674,8 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
       for (const m of extractMilestones(t?.name, t?.command, output)) {
         if (emittedMilestones.has(m.label)) continue
         emittedMilestones.add(m.label)
-        emit({ type: 'milestone', ...m })
+        // runId (execução) + ts (horário) para o painel distinguir/datar os marcos.
+        emit({ type: 'milestone', runId, ts: Date.now(), ...m })
       }
     }
   }
@@ -684,7 +758,11 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
     }
     // Libera o input do operador — o turno do agente terminou.
     broadcast(subscribers, { type: 'agent_status', state: 'idle' })
-    if (opts.onClose) opts.onClose(code, { budgetExceeded })
+    // A-STATE (1.3): fases efetivamente EXERCIDAS neste run (atividade > 0). O
+    // server usa isto para decidir se "concluído" (chegou a vuln) ou "parado
+    // incompleto". blockedBySafeguard/timedOut evitam rotular falha como concluído.
+    const phasesReached = Object.keys(phaseActivity).filter((k) => phaseActivity[k] > 0)
+    if (opts.onClose) opts.onClose(code, { budgetExceeded, blockedBySafeguard, timedOut, phasesReached })
   })
 }
 
@@ -715,7 +793,21 @@ function sendInput(sessionId, text) {
 }
 
 function isRunning(sessionId) {
-  return runningSessions.has(sessionId)
+  const s = runningSessions.get(sessionId)
+  if (!s) return false
+  // Robustez: se o processo morreu SEM disparar 'close' (kill externo, sessão do
+  // CLI esgotada, crash silencioso), a entrada fica presa no mapa para sempre —
+  // isRunning "mente" que roda, o reconcile por conexão do WS é pulado, e o painel
+  // trava eternamente em "rodando" com o input bloqueado. Confirma liveness real:
+  //   exitCode preenchido → já encerrou; ou PID não existe mais no OS (kill -0).
+  if (s.proc && s.proc.exitCode !== null) { runningSessions.delete(sessionId); return false }
+  try {
+    if (s.proc?.pid) process.kill(s.proc.pid, 0)
+  } catch {
+    runningSessions.delete(sessionId)
+    return false
+  }
+  return true
 }
 
 // Esquece o claude session_id desta sessão → o próximo turno começa uma
@@ -725,4 +817,4 @@ function clearSession(sessionId) {
   claudeSessions.delete(sessionId)
 }
 
-module.exports = { run, stop, stopAll, sendInput, isRunning, clearSession, buildAgentEnv, ENV_ALLOWLIST, inferPhaseFromEvent, PHASE_ORDER, extractMilestones, buildToolUseEvent, toWsEvent }
+module.exports = { run, stop, stopAll, sendInput, isRunning, clearSession, buildAgentEnv, ENV_ALLOWLIST, inferPhaseFromEvent, PHASE_ORDER, extractMilestones, buildToolUseEvent, toWsEvent, CLAUDE_BIN }

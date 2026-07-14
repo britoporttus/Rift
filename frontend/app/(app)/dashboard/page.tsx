@@ -226,8 +226,12 @@ export default function DashboardPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
             {filteredEngagements.map((e) => {
               const isH = hovered === e.id && confirmDelete !== e.id
+              // Fonte ÚNICA: o card conta a fatia do MESMO array de findings usado
+              // no total/severidade (já limpo de órfãos e deduplicado pela API).
+              // Antes preferia `e.findingsCount` (armazenado, defasado) → cards não
+              // batiam com o total (191 vs 44).
               const eFinds = findings.filter((f) => f.engagement_id === e.id)
-              const findCount = e.findingsCount ?? eFinds.length
+              const findCount = eFinds.length
               const ac = alertColor(findCount)
               const phase = e.phase ?? 'idle'
               // Estado REAL de execução vem de runState (idle/running/stopped/completed),
@@ -236,6 +240,7 @@ export default function DashboardPage() {
               const badge =
                   rs === 'running'   ? { t: 'RODANDO',    c: 'var(--purple-light)' }
                 : rs === 'completed' ? { t: 'CONCLUÍDO',  c: 'var(--low)' }
+                : rs === 'failed'    ? { t: 'FALHOU',     c: 'var(--critical)' }
                 : rs === 'stopped'   ? { t: 'PARADO',     c: 'var(--medium)' }
                 :                      { t: 'AGUARDANDO', c: 'var(--text-mute)' }
 

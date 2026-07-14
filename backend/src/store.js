@@ -38,6 +38,19 @@ async function appendUsage(entry) {
   await Usage.create(entry)
 }
 
+// Custo acumulado (US$) de um engagement ao longo da vida — soma de todos os
+// registros de Usage. Usado como porta de orçamento ANTES de iniciar um turno:
+// como o `claude --print` só reporta o custo do turno NO FINAL (não dá pra
+// interromper no meio), o único ponto de enforcement real é recusar começar um
+// novo turno quando o teto do engagement já foi atingido.
+async function sumUsageUsd(engagementId) {
+  const [row] = await Usage.aggregate([
+    { $match: { engagementId } },
+    { $group: { _id: null, usd: { $sum: '$usd' } } },
+  ])
+  return row?.usd || 0
+}
+
 // REL-4: total real de findings de um engagement (contagem idempotente, usada
 // para não inflar findingsCount a cada re-scan do watcher).
 async function countFindings(engagementId) {
@@ -53,5 +66,6 @@ module.exports = {
   deleteEngagement,
   readUsage,
   appendUsage,
+  sumUsageUsd,
   countFindings,
 }

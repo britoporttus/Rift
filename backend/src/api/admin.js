@@ -3,6 +3,7 @@ const os = require('os')
 const { execSync } = require('child_process')
 const { requireAuth } = require('../auth')
 const { readUsage } = require('../store')
+const { computeSkuUsage } = require('../sku')
 const Usage = require('../models/Usage')
 
 const router = Router()
@@ -48,6 +49,18 @@ router.get('/usage', async (_req, res) => {
     byDay[day].tokens += entry.tokens || 0
   }
   res.json(Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date)))
+})
+
+// ETAPA 2.2: utilização da SKU. Consumo REAL (soma de Usage) + limite APENAS se o
+// operador declarou o teto do plano em SKU_LIMIT_USD. Sem limite → available:false
+// (a UI mostra "indisponível — integração não configurada", sem simular).
+router.get('/sku', async (_req, res) => {
+  const all = await readUsage()
+  const spentUsd    = all.reduce((s, e) => s + (e.usd || 0), 0)
+  const tokensTotal = all.reduce((s, e) => s + (e.tokens || 0), 0)
+  const limitUsd    = Number(process.env.SKU_LIMIT_USD) || null
+  const periodLabel = process.env.SKU_PERIOD || null
+  res.json(computeSkuUsage({ limitUsd, spentUsd, tokensTotal, periodLabel }))
 })
 
 router.get('/usage/by-user', async (_req, res) => {

@@ -1,6 +1,8 @@
 const { Router } = require('express')
 const { requireAuth } = require('../auth')
 const Finding = require('../models/Finding')
+const Engagement = require('../models/Engagement')
+const { cleanFindings } = require('../findings-count')
 
 const router = Router()
 router.use(requireAuth())
@@ -30,6 +32,12 @@ function toDto(f) {
     fingerprint:       f.fingerprint,
     firstSeen:         f.firstSeen || (f.createdAt ? new Date(f.createdAt).toISOString() : null),
     lastSeen:          f.lastSeen,
+    // Dimensões de classificação (ETAPA 5.2) — antes não iam para a UI:
+    reproducible:      f.reproducible,   // Exploração (PoC reproduzível?)
+    cvssVector:        f.cvssVector,      // CVSS calculado (tem vetor) vs estimado
+    cwe:               f.cwe,
+    owasp:             f.owasp,
+    poc:               f.poc,
   }
 }
 
@@ -45,7 +53,11 @@ router.get('/', async (req, res) => {
   if (remediationStatus) filter.remediationStatus = remediationStatus
 
   const findings = await Finding.find(filter).lean()
-  res.json(sortBySeverity(findings).map(toDto))
+  // Fonte única: exclui findings de engagements já removidos (órfãos) e deduplica
+  // por (engagement, fingerprint). Sem isto o total global inflava (191 vs 44).
+  const existingIds = (await Engagement.find({}, { _id: 1 }).lean()).map((e) => e._id)
+  const cleaned = cleanFindings(findings, existingIds)
+  res.json(sortBySeverity(cleaned).map(toDto))
 })
 
 // PATCH /api/findings/:id/status — operador marca o estado de remediação
@@ -66,7 +78,9 @@ router.patch('/:id/status', async (req, res) => {
 
 router.get('/:engagementId', async (req, res) => {
   const findings = await Finding.find({ engagementId: req.params.engagementId }).lean()
-  res.json(sortBySeverity(findings).map(toDto))
+  // Dedup por fingerprint (mesma regra do total global) — re-scan não duplica.
+  const cleaned = cleanFindings(findings, [req.params.engagementId])
+  res.json(sortBySeverity(cleaned).map(toDto))
 })
 
 module.exports = router

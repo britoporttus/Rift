@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { api, Finding, RemediationStatus } from '@/lib/api'
 import { SEV_COLOR, SEV_ORDER, safeHref } from '@/lib/severity'
+import { findingType, findingConfirmation, findingExploitation, cvssKind } from '@/lib/findingClassify'
 
 // Status de remediação — fecha o ciclo "achei → corrigi → confirmei"
 const REMEDIATION: Record<RemediationStatus, { label: string; color: string; icon: string }> = {
@@ -17,11 +18,26 @@ function fmtDate(d?: string | null) {
   if (isNaN(t.getTime())) return null
   return t.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
-const TYPE_LABEL: Record<string, string> = {
-  vulnerability: 'Vulnerabilidade', weakness: 'Fraqueza', observation: 'Observação',
+// Dimensões independentes (ETAPA 5.2) com PALETAS DISTINTAS entre si — Tipo NÃO
+// reusa o vermelho/laranja da severidade (senão "tipo" e "severidade" se confundem).
+// Tipo → família violeta/fúcsia/ardósia. Severidade → rampa SEV_COLOR. Status →
+// verde/vermelho/cinza. Confirmação/Exploração → dot + rótulo neutros.
+const TYPE_META: Record<string, { label: string; color: string }> = {
+  vulnerability: { label: 'Vulnerabilidade', color: '#c026d3' },
+  weakness:      { label: 'Fraqueza',        color: '#8b5cf6' },
+  observation:   { label: 'Observação',      color: '#64748b' },
 }
-const TYPE_COLOR: Record<string, string> = {
-  vulnerability: '#ef4444', weakness: '#f97316', observation: '#3b82f6',
+const CONF_META: Record<string, { label: string; color: string }> = {
+  confirmed:      { label: 'Confirmado',     color: '#22c55e' },
+  probable:       { label: 'Provável',       color: '#eab308' },
+  unvalidated:    { label: 'Não validado',   color: '#94A3B8' },
+  false_positive: { label: 'Falso positivo', color: '#64748b' },
+}
+const EXPL_META: Record<string, { label: string; color: string }> = {
+  confirmed:       { label: 'Exploração confirmada',      color: '#ef4444' },
+  potential:       { label: 'Potencialmente explorável', color: '#f97316' },
+  not_exploitable: { label: 'Não explorável',            color: '#64748b' },
+  untested:        { label: 'Não testada',               color: '#94A3B8' },
 }
 
 // ── SVG donut chart ──────────────────────────────────────────────
@@ -65,7 +81,10 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const sev = f.severity
-  const type = f.finding_type || 'weakness'
+  const type = findingType(f)          // Tipo real (state/severity), não o finding_type inexistente
+  const conf = findingConfirmation(f)  // Confirmação (state)
+  const expl = findingExploitation(f)  // Exploração (reproducible)
+  const ck   = cvssKind(f)             // CVSS calculado vs estimado
   const instances = f.instances || []
   const rem = REMEDIATION[f.remediationStatus ?? 'open']
   const firstSeen = fmtDate(f.firstSeen)
@@ -118,15 +137,23 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
           }}>
             <span>{rem.icon}</span>{rem.label}
           </span>
-          {/* type badge */}
+          {/* TIPO (paleta própria, distinta da severidade) */}
           <span style={{
-            background: `${TYPE_COLOR[type]}22`, color: TYPE_COLOR[type],
-            border: `1px solid ${TYPE_COLOR[type]}55`,
+            background: `${TYPE_META[type].color}22`, color: TYPE_META[type].color,
+            border: `1px solid ${TYPE_META[type].color}55`,
             borderRadius: 999, padding: '1px 8px', fontSize: 10, fontWeight: 700,
           }}>
-            {TYPE_LABEL[type]}
+            {TYPE_META[type].label}
           </span>
-          {/* severity badge */}
+          {/* CONFIRMAÇÃO (dot + rótulo neutro) */}
+          <span title="Confirmação" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 10, fontWeight: 600, color: '#94A3B8',
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: CONF_META[conf].color, flexShrink: 0 }} />
+            {CONF_META[conf].label}
+          </span>
+          {/* SEVERIDADE (rampa canônica) */}
           <span style={{
             background: `${SEV_COLOR[sev]}22`, color: SEV_COLOR[sev],
             border: `1px solid ${SEV_COLOR[sev]}55`,
@@ -144,8 +171,10 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
               {instances.length} {instances.length === 1 ? 'instância' : 'instâncias'}
             </span>
           )}
-          {f.cvss && (
-            <span style={{ fontSize: 11, color: '#94A3B8' }}>CVSS {f.cvss}</span>
+          {ck && (
+            <span title={ck === 'calculated' ? 'CVSS calculado (com vetor)' : 'CVSS estimado (sem vetor)'} style={{ fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>
+              CVSS {f.cvss} <span style={{ color: '#64748b', fontSize: 9.5 }}>{ck === 'calculated' ? 'calc.' : 'est.'}</span>
+            </span>
           )}
           <span style={{ color: '#94A3B8', fontSize: 12, transition: 'transform .2s', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
         </div>
@@ -154,12 +183,20 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
       {/* body */}
       {open && (
         <div style={{ padding: '0 16px 16px 32px' }}>
+          {/* Exploração (dimensão 5) — dot + rótulo, separada da severidade/tipo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0 0' }}>
+            <span style={{ fontSize: 11, color: '#94A3B8' }}>Exploração:</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: EXPL_META[expl].color }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: EXPL_META[expl].color, flexShrink: 0 }} />
+              {EXPL_META[expl].label}
+            </span>
+          </div>
           {/* remediation control + temporal tracking */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
             padding: '10px 0 12px', borderBottom: '1px solid rgba(46,49,73,.5)', marginBottom: 12,
           }}>
-            <span style={{ fontSize: 11, color: '#94A3B8' }}>Remediação:</span>
+            <span style={{ fontSize: 11, color: '#94A3B8' }}>Status:</span>
             {(['open', 'fixed', 'accepted_risk'] as RemediationStatus[]).map(s => {
               const active = (f.remediationStatus ?? 'open') === s
               const cfg = REMEDIATION[s]
@@ -271,21 +308,21 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
     </div>
   )
 
+  const tOrder = { vulnerability: 0, weakness: 1, observation: 2 } as const
   const sorted = [...findings].sort((a, b) => {
-    const tOrder = { vulnerability: 0, weakness: 1, observation: 2 }
-    const td = (tOrder[a.finding_type as keyof typeof tOrder] ?? 1) - (tOrder[b.finding_type as keyof typeof tOrder] ?? 1)
+    const td = tOrder[findingType(a) as keyof typeof tOrder] - tOrder[findingType(b) as keyof typeof tOrder]
     if (td !== 0) return td
     return SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(b.severity)
   })
 
-  const byType = (t: string) => sorted.filter(f => (f.finding_type || 'weakness') === t)
+  const byType = (t: string) => sorted.filter(f => findingType(f) === t)
   const vulns = byType('vulnerability')
   const weaknesses = byType('weakness')
   const observations = byType('observation')
 
   const bySev = (s: string) => sorted.filter(f => f.severity === s)
   const remCount = (s: RemediationStatus) => sorted.filter(f => (f.remediationStatus ?? 'open') === s).length
-  const byTypeFiltered = filter === 'all' ? sorted : sorted.filter(f => (f.finding_type || 'weakness') === filter)
+  const byTypeFiltered = filter === 'all' ? sorted : sorted.filter(f => findingType(f) === filter)
   const displayed = statusFilter === 'all'
     ? byTypeFiltered
     : byTypeFiltered.filter(f => (f.remediationStatus ?? 'open') === statusFilter)
@@ -349,9 +386,9 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
           {/* type breakdown */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             {[
-              { type: 'vulnerability', items: vulns, color: '#ef4444', label: 'Vulnerabilidades confirmadas', sub: 'Exploração ativa verificada' },
-              { type: 'weakness', items: weaknesses, color: '#f97316', label: 'Fraquezas de configuração', sub: 'Aumentam a superfície de ataque' },
-              { type: 'observation', items: observations, color: '#3b82f6', label: 'Observações informacionais', sub: 'Sem impacto direto neste contexto' },
+              { type: 'vulnerability', items: vulns, color: TYPE_META.vulnerability.color, label: 'Vulnerabilidades confirmadas', sub: 'Confirmadas na taxonomia (state=confirmed)' },
+              { type: 'weakness', items: weaknesses, color: TYPE_META.weakness.color, label: 'Fraquezas', sub: 'Prováveis/indícios — aumentam a superfície' },
+              { type: 'observation', items: observations, color: TYPE_META.observation.color, label: 'Observações informativas', sub: 'Info/ruled-out — sem impacto direto' },
             ].map(({ type, items, color, label, sub }) => (
               <div key={type} style={{
                 background: 'var(--surface)', border: `1px solid ${color}33`,

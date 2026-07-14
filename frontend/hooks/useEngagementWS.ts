@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
+import type { Job } from '@/lib/api'
 
 export type WsMsg = {
   type: string
@@ -19,8 +20,13 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
   // vindo do backend via run_state. null = ainda desconhecido (usa fallback do
   // engagement). Fonte de verdade para o CTA do painel de Execução.
   const [runState, setRunState] = useState<string | null>(null)
+  // Motivo do desfecho (1.3): acompanha o run_state para o painel explicar por que
+  // o run parou/falhou (operator/budget/incomplete/interrupted/safeguard/timeout/error).
+  const [stopReason, setStopReason] = useState<string | null>(null)
   // Medidor de "memória": tamanho do contexto no último turno.
   const [contextUsage, setContextUsage] = useState<{ tokens: number; limit: number; percent: number } | null>(null)
+  // Jobs/Work: o job do run atual (fluxo de etapas), atualizado ao vivo via job_update.
+  const [job, setJob] = useState<Job | null>(null)
   // REL-5: incrementa a cada REconexão bem-sucedida (não na 1ª conexão). O painel
   // observa isto para recarregar o histórico e recuperar eventos perdidos na queda.
   const [reconnectNonce, setReconnectNonce] = useState(0)
@@ -33,8 +39,6 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
   useEffect(() => {
     // Don't connect until we know which session to use
     if (!engagementId || !sessionId) return
-    const token = localStorage.getItem('rift_token')
-    if (!token) return
 
     // Reset state only when the session/engagement actually changes — NOT on reconnect,
     // senão o feed "apaga" toda vez que a conexão cai e volta.
@@ -43,6 +47,8 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
     setIsStreaming(false)
     setAgentRunning(false)
     setRunState(null)
+    setStopReason(null)
+    setJob(null)
     setContextUsage(null)
 
     let cancelled = false  // distingue close intencional (unmount/troca) de queda de rede
@@ -82,6 +88,7 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
         // A-STATE: estado de execução persistido do run (para o CTA do painel).
         if (msg.type === 'run_state') {
           setRunState(String(msg.state ?? 'idle'))
+          setStopReason(msg.reason != null ? String(msg.reason) : null)
           return
         }
 
@@ -113,6 +120,12 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
             limit:   Number(msg.limit ?? 200000),
             percent: Number(msg.percent ?? 0),
           })
+          return
+        }
+
+        // Jobs: atualização do fluxo de etapas do run atual.
+        if (msg.type === 'job_update') {
+          if (msg.job) setJob(msg.job as Job)
           return
         }
 
@@ -148,11 +161,9 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
       if (cancelled) return
       const proto  = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const wsBase = `${proto}//${window.location.host}`
-      // SEC-4: o token vai no subprotocolo 'rift-jwt' (2º elemento), não na query
-      // string — que apareceria nos logs de acesso do proxy/Cloudflare.
+      // Auth via cookie HttpOnly — o browser o envia sozinho no handshake (same-origin).
       const ws = new WebSocket(
-        `${wsBase}/ws?engagementId=${engagementId}&sessionId=${encodeURIComponent(sessionId)}`,
-        ['rift-jwt', token]
+        `${wsBase}/ws?engagementId=${engagementId}&sessionId=${encodeURIComponent(sessionId)}`
       )
       wsRef.current = ws
 
@@ -216,5 +227,5 @@ export function useEngagementWS(engagementId: string | null, sessionId: string |
     setMessages((prev) => [...prev, { ...msg, _id: ++counter.current }])
   }, [])
 
-  return { messages, connected, send, addLocal, isThinking, isStreaming, agentRunning, runState, contextUsage, reconnectNonce }
+  return { messages, connected, send, addLocal, isThinking, isStreaming, agentRunning, runState, stopReason, contextUsage, job, reconnectNonce }
 }

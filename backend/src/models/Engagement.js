@@ -11,14 +11,22 @@ const engagementSchema = new mongoose.Schema({
   // (lifecycle geral / usado pelo scheduler e dashboard):
   //   idle       = nunca iniciado / resetado → CTA "Iniciar"
   //   running    = run ativo                 → botão "Parar"
-  //   stopped    = parado pelo operador/erro  → "Continuar" | "Começar do zero"
-  //   completed  = run concluído sozinho      → "Continuar" | "Começar do zero"
-  runState:     { type: String, enum: ['idle', 'running', 'stopped', 'completed'], default: 'idle' },
+  //   stopped    = parado (operador/limite/incompleto/interrompido) → "Continuar" | "Começar do zero"
+  //   completed  = run concluído (chegou a Vulnerabilidades) → "Continuar" | relatório
+  //   failed     = falha técnica explícita (safeguard/timeout/erro) — NUNCA "concluído"
+  runState:     { type: String, enum: ['idle', 'running', 'stopped', 'completed', 'failed'], default: 'idle' },
+  // Motivo do desfecho (1.3), para o operador SEMPRE ver por que parou/falhou e
+  // para o painel reconstruir isso após um refresh. Ver src/run-outcome.js:
+  //   operator | budget | incomplete | interrupted | safeguard | timeout | error | null
+  stopReason:   { type: String, default: null },
   phase:        { type: String, default: null },
   progress:     { type: Number, default: 0 },
   findingsCount:{ type: Number, default: 0 },
   slug:         { type: String },
   date:         { type: String },
+  // Versão do agente de pentest usada por ESTE engagement (seletor A/B/C). Validado
+  // contra src/frameworks.js. Default 'v2' → engagements antigos rodam idênticos.
+  frameworkId:  { type: String, default: 'v2' },
 
   // Agendamento de scans recorrentes (monitoramento contínuo da superfície de ataque)
   schedule: {

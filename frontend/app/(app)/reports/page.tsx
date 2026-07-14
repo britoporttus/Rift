@@ -68,10 +68,7 @@ export default function ReportsPage() {
   const openPreview = useCallback(async (file: ReportFile) => {
     setPreviewLoading(true)
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('rift_token') : null
-      const res = await fetch(file.viewUrl, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
+      const res = await fetch(file.viewUrl, { credentials: 'include' })
       if (!res.ok) throw new Error('Falha ao carregar relatório')
       const blob = await res.blob()
       const blobUrl = URL.createObjectURL(blob)
@@ -88,7 +85,29 @@ export default function ReportsPage() {
     setPreview(null)
   }
 
-  const withReports = engagements.filter((e) => (reports[e.id]?.length ?? 0) > 0)
+  // Abre o relatório GERADO pelo Rift (a partir dos findings) no modal de preview.
+  const openGenerated = useCallback(async (e: Engagement, type: 'technical' | 'executive') => {
+    setPreviewLoading(true)
+    try {
+      const res = await fetch(api.reports.generatedUrl(e.id, type), { credentials: 'include' })
+      if (!res.ok) throw new Error('Falha ao gerar relatório')
+      const blob = await res.blob()
+      setPreview({
+        name: `Relatório ${type === 'executive' ? 'executivo' : 'técnico'} — ${e.name}`,
+        blobUrl: URL.createObjectURL(blob),
+        ext: '.html',
+        downloadUrl: api.reports.pdfUrl(e.id, type),   // "baixar" no modal = PDF
+      })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Erro ao gerar relatório')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }, [])
+
+  // Mostra qualquer engagement que TENHA o que relatar: findings no banco (relatório
+  // gerado pelo Rift) OU arquivos narrativos do agente. Antes só listava arquivos crus.
+  const withReports = engagements.filter((e) => (e.findingsCount ?? 0) > 0 || (reports[e.id]?.length ?? 0) > 0)
   const totalFiles = withReports.reduce((a, e) => a + (reports[e.id]?.length ?? 0), 0)
 
   return (
@@ -118,37 +137,46 @@ export default function ReportsPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {withReports.map((e, ri) => {
-            const files = reports[e.id] ?? []
-            const open = expanded.has(e.id)
+            const nf = e.findingsCount ?? 0
             return (
               <div key={e.id} style={{
                 background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 8,
-                overflow: 'hidden', animation: `rowIn 0.3s ease both`, animationDelay: `${ri * 50}ms`,
+                padding: '0.9rem 1.2rem', display: 'flex', alignItems: 'center', gap: 12,
+                animation: `rowIn 0.3s ease both`, animationDelay: `${ri * 50}ms`,
               }}>
-                <div onClick={() => toggleExpand(e.id)} style={{
-                  display: 'flex', alignItems: 'center', padding: '0.9rem 1.2rem', cursor: 'pointer', gap: 10,
-                }}>
-                  <span style={{ color: open ? '#7C3AED' : '#94A3B8', transition: 'color 0.13s' }}>
-                    {open ? ChevDown() : ChevRight()}
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#E2E8F0' }}>{e.name}</div>
-                    <div style={{ fontSize: 10, color: '#3A3A58', marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>{e.target}</div>
-                  </div>
-                  <span style={{ fontSize: 10, color: '#3A3A58' }}>
-                    {files.length} {files.length === 1 ? 'arquivo' : 'arquivos'}
-                  </span>
+                <span style={{ color: '#7C3AED', opacity: 0.85 }}>{FileIco(15, '#7C3AED')}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#E2E8F0' }}>{e.name}</div>
+                  <div style={{ fontSize: 10, color: '#3A3A58', marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>{e.target}</div>
                 </div>
-
-                {open && files.map((f, fi) => (
-                  <FileRow
-                    key={f.name}
-                    file={f}
-                    previewLoading={previewLoading}
-                    onPreview={() => openPreview(f)}
-                    borderTop={fi === 0}
-                  />
-                ))}
+                <span style={{ fontSize: 10, color: '#3A3A58', whiteSpace: 'nowrap', marginRight: 4 }}>
+                  {nf} finding{nf === 1 ? '' : 's'}
+                </span>
+                {nf > 0 && (
+                  <button
+                    onClick={() => openGenerated(e, 'technical')}
+                    disabled={previewLoading}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
+                      fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+                      background: '#7C3AED', color: '#fff', border: 'none',
+                    }}
+                  >
+                    {EyeIco(12, '#fff')} Ver relatório
+                  </button>
+                )}
+                {nf > 0 && (
+                  <a
+                    href={api.reports.pdfUrl(e.id, 'technical')} download
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
+                      fontSize: 11.5, fontWeight: 600, textDecoration: 'none',
+                      background: 'transparent', color: '#A78BFA', border: '1px solid rgba(124,58,237,0.35)',
+                    }}
+                  >
+                    {DlIco(11, '#A78BFA')} PDF
+                  </a>
+                )}
               </div>
             )
           })}
@@ -168,7 +196,7 @@ export default function ReportsPage() {
           <div
             onClick={(ev) => ev.stopPropagation()}
             style={{
-              width: '72%', maxWidth: 900, height: '80vh',
+              width: '90%', maxWidth: 1180, height: '92vh',
               background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.28)',
               borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden',
               boxShadow: '0 24px 80px rgba(0,0,0,0.85)',
@@ -181,12 +209,12 @@ export default function ReportsPage() {
             }}>
               <span style={{ color: '#3B82F6' }}>{FileIco(14, '#3B82F6')}</span>
               <span style={{ flex: 1, fontSize: 12, color: '#94A3B8', fontWeight: 500, fontFamily: "'JetBrains Mono', monospace" }}>{preview.name}</span>
-              <a href={preview.downloadUrl} download={preview.name} style={{
+              <a href={preview.downloadUrl} download style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '0.28rem 0.7rem',
                 background: '#7C3AED', border: 'none', borderRadius: 5,
                 fontSize: 10, color: 'white', fontWeight: 600, textDecoration: 'none', marginRight: 8,
               }}>
-                {DlIco()} baixar
+                {DlIco()} Baixar PDF
               </a>
               <button onClick={closePreview} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: 4 }}
                 onMouseEnter={(e) => (e.currentTarget.style.color = '#E2E8F0')}
@@ -196,7 +224,7 @@ export default function ReportsPage() {
             </div>
             <iframe
               src={preview.blobUrl}
-              style={{ flex: 1, border: 'none', background: '#F8F9FA' }}
+              style={{ flex: 1, border: 'none', background: '#161826' }}
               title={preview.name}
               // Relatório é HTML não-confiável (deriva de dados do alvo). Sandbox sem
               // allow-same-origin/allow-scripts → origem opaca, sem JS, sem acesso ao token.
