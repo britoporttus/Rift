@@ -286,6 +286,7 @@ export default function EngagementPage() {
             messages={messages}
             onAnswer={handleAnswer}
             agentRunning={running}
+            job={job}
             connected={connected}
             runState={runState}
             stopReason={stopReason}

@@ -90,6 +90,23 @@ que o legacy perdeu por inteiro. A **disciplina de custo** vem do **RIFT-PLAYBOO
 
 Regra: **não avançar de fase sem o critério de "pronto" da anterior.**
 
+### Progresso (2026-07-14)
+
+- ✅ **F0** concluída — o gap v2×legacy é **cobertura de teste**, não calibração.
+- ✅ **F1** essencialmente **satisfeita sem mudança** — ao ler a `skills/finding-quality.md`
+  do v2, ela **já** surfacea `probable`, já tem severidade honesta e já proíbe esconder
+  verdadeiro-positivo. A taxonomia é um **ativo**, não o gargalo. Nada a afrouxar.
+- ✅ **F2** feita no workspace isolado `pentest-framework-v2-next` (não toca no v2 vivo):
+  - `skills/routing-table.md` — novo bloco **"SEMPRE RODAR (transporte/infra)"** que roteia
+    `ssl-tls`/`ssh-audit`/`oauth`/`security-headers` por **porta/serviço aberto**, não por stack
+    (a causa raiz do miss: a entrada FastAPI não chamava nenhum deles).
+  - `agents/auth/oauth-agent.md` — +técnica **PKCE ausente** (fecha F-010).
+  - `agents/crypto/ssl-tls-agent.md` — +técnica **downgrade HTTPS→HTTP por redirect** (fecha F-008).
+    (o agente já cobria versões TLS 1.0/1.1 — fecha F-002; só faltava ser roteado.)
+  - `agents/infrastructure/ssh-audit-agent.md` — **NOVO** (HMAC-SHA1/KEX/ciphers fracos — fecha F-006).
+- ⏳ **F3** (disciplina de custo do v3) e **F4** (golden test — exige um scan real + wiring breve
+  do seletor) a seguir.
+
 ---
 
 ## 4. Detalhe por fase

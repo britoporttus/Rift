@@ -40,6 +40,16 @@ const REGISTRY = [
     findingsDirs: (slug, date) => [`clients/${slug}/${date}/findings`],
   },
   {
+    id: 'v2c',
+    label: 'v2 consolidado (teste)',
+    note: 'Consolidação F2/F3: cobertura transporte/infra roteada (TLS/SSH/PKCE/downgrade) + disciplina de custo. Em validação (F4).',
+    path: path.join(AGENTS_DIR, 'pentest-framework-v2-next'),
+    hasClaudeMd: true,
+    slashCommands: true,
+    rulesFile: null,
+    findingsDirs: (slug, date) => [`clients/${slug}/${date}/findings`],
+  },
+  {
     id: 'legacy',
     label: 'legacy (mais findings)',
     note: 'Versão antiga, portada p/ Claude (CLAUDE.md). Playbooks agressivos por stack.',

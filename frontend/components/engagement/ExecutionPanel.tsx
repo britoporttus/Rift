@@ -1,13 +1,13 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { WsMsg } from '@/hooks/useEngagementWS'
-import { Engagement } from '@/lib/api'
+import { Engagement, Job } from '@/lib/api'
 import {
   Play, Radar, ScanSearch, ShieldAlert, CheckCircle2, Loader2, Circle,
   AlertTriangle, HelpCircle, ChevronDown, ChevronRight, DollarSign, Terminal,
   Square, RotateCcw, PlayCircle, Globe, Network, Cpu, Shield, Link2, Server, Flag,
-  BookOpen, Search, FileText, Crosshair, Bug, FolderSearch, RefreshCw,
+  BookOpen, Search, FileText, Crosshair, Bug, FolderSearch, RefreshCw, Clock,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -18,7 +18,7 @@ type RunState = 'idle' | 'running' | 'stopped' | 'completed' | 'failed'
 const REASON_TEXT: Record<string, { title: string; detail: string; tone: 'ok' | 'warn' | 'bad' }> = {
   operator:    { title: 'Mapeamento parado',           detail: 'Você parou o run. Retome de onde parou ou comece do zero.', tone: 'warn' },
   budget:      { title: 'Parado — limite de custo',    detail: 'O teto de custo do engagement foi atingido. Aumente o gasto máximo para continuar.', tone: 'warn' },
-  incomplete:  { title: 'Mapeamento incompleto',       detail: 'O run encerrou antes de cobrir a fase de Vulnerabilidades. Continue para completar o ciclo recon → enum → vuln.', tone: 'warn' },
+  incomplete:  { title: 'Recon e enumeração concluídos', detail: 'O run pausou antes de fechar a fase de Vulnerabilidades. Continue para completá-la, ou gere o relatório com o que já foi confirmado.', tone: 'warn' },
   interrupted: { title: 'Run interrompido',            detail: 'O run foi interrompido (ex.: reinício do servidor). Retome de onde parou.', tone: 'warn' },
   safeguard:   { title: 'Falhou — safeguard do modelo', detail: 'O modelo recusou por safeguard de cibersegurança. "Continuar" bateria no mesmo bloqueio — troque o modelo (linha Sonnet) no seletor de modelo.', tone: 'bad' },
   timeout:     { title: 'Falhou — tempo limite',       detail: 'O run atingiu o tempo limite de execução e foi encerrado. Você pode retomar.', tone: 'bad' },
@@ -111,8 +111,35 @@ function humanizeAction(rawTool: unknown, rawArgs: unknown): { label: string; Ic
   return { label: `Executando ${pretty}`, Icon: Terminal }
 }
 
+// Cronômetro do run: tempo decorrido enquanto roda (tick 1s); duração total ao concluir.
+function RunTimer({ job, running }: { job?: Job | null; running: boolean }) {
+  const startedAt = job?.startedAt ? new Date(job.startedAt).getTime() : null
+  const endedAt = job?.endedAt ? new Date(job.endedAt).getTime() : null
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!running || !startedAt) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [running, startedAt])
+  if (!startedAt) return null
+  const end = running ? now : (endedAt ?? now)
+  const s = Math.max(0, Math.floor((end - startedAt) / 1000))
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+  const label = h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+    : `${m}:${String(sec).padStart(2, '0')}`
+  return (
+    <div title={running ? 'Tempo decorrido do run' : 'Duração total do run'} style={{
+      display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600,
+      color: running ? 'var(--purple-light)' : 'var(--muted)', fontVariantNumeric: 'tabular-nums',
+    }}>
+      <Clock size={12} /> {label}
+    </div>
+  )
+}
+
 export function ExecutionPanel({
-  engagement, messages, onAnswer, agentRunning, connected, runState, stopReason,
+  engagement, messages, onAnswer, agentRunning, job, connected, runState, stopReason,
   onStart, onStop, onContinue, onRestart, onGenerateReport, onProvideCredentials,
   onRefresh, refreshing, lastUpdated, refreshStatus,
 }: {
@@ -120,6 +147,7 @@ export function ExecutionPanel({
   messages: WsMsg[]
   onAnswer: (opt: string) => void
   agentRunning: boolean
+  job?: Job | null
   connected: boolean
   runState: RunState
   stopReason?: string | null
@@ -295,13 +323,17 @@ export function ExecutionPanel({
             Mapeamento externo (Agente 1 · black-box)
           </div>
           <div style={{ color: 'var(--text)', fontSize: 18, fontWeight: 700, marginTop: 2 }}>
+            {engagement.name}
+          </div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, fontFamily: 'ui-monospace, monospace', marginTop: 1 }}>
             {engagement.target}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <Stat label="Achados" value={String(confirmed.length)} />
           <Stat label="Superfície" value={String(surface.length)} />
           <Stat label="Custo" value={`$${usd.toFixed(2)}`} />
+          <RunTimer job={job} running={agentRunning} />
           <div style={{
             fontSize: 12, fontWeight: 600, padding: '0.3rem 0.7rem', borderRadius: 20,
             display: 'flex', alignItems: 'center', gap: 6,
@@ -569,7 +601,7 @@ export function ExecutionPanel({
                   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12,
                 }}>
                   {items.map((it, i) => (
-                    <div key={i} style={{ color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it}</div>
+                    <div key={i} style={{ color: 'var(--muted)', wordBreak: 'break-all', overflowWrap: 'anywhere' }}>{it}</div>
                   ))}
                 </div>
               </div>
