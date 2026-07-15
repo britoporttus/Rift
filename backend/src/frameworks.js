@@ -11,7 +11,7 @@ const path = require('path')
 // Base das versões. Override por env (AGENTS_DIR) para outros hosts/CI.
 const AGENTS_DIR = process.env.AGENTS_DIR || path.resolve(__dirname, '..', '..', 'Agentes-Pentest')
 
-const DEFAULT_FRAMEWORK_ID = 'v2'
+const DEFAULT_FRAMEWORK_ID = 'v2c'
 
 // Sanitiza o alvo para compor o dir de results/ do legacy (localhost:3000 -> localhost_3000).
 // Só usado no caminho FALLBACK do legacy; o path canônico é sempre clients/{slug}/{date}.
@@ -30,8 +30,8 @@ function sanitizeTarget(target) {
 const REGISTRY = [
   {
     id: 'v2',
-    label: 'v2 (atual)',
-    note: 'Rift-native: skills /pentest-*, findings em YAML. Estável — recomendado.',
+    label: 'v2 original (backup)',
+    note: 'Rift-native original (antes da consolidação). Mantido como oráculo de regressão.',
     // env FRAMEWORK_PATH continua sendo override do v2 (retrocompatibilidade).
     path: process.env.FRAMEWORK_PATH || path.join(AGENTS_DIR, 'pentest-framework-v2'),
     hasClaudeMd: true,
@@ -41,8 +41,8 @@ const REGISTRY = [
   },
   {
     id: 'v2c',
-    label: 'v2 consolidado (teste)',
-    note: 'Consolidação F2/F3: cobertura transporte/infra roteada (TLS/SSH/PKCE/downgrade) + disciplina de custo. Em validação (F4).',
+    label: 'v2 consolidado (padrão)',
+    note: 'Tronco consolidado: cobertura transporte/infra roteada (TLS/SSH/PKCE/downgrade) + disciplina de custo + anti-FP. Validado (F4) — recomendado.',
     path: path.join(AGENTS_DIR, 'pentest-framework-v2-next'),
     hasClaudeMd: true,
     slashCommands: true,
@@ -51,7 +51,7 @@ const REGISTRY = [
   },
   {
     id: 'legacy',
-    label: 'legacy (mais findings)',
+    label: 'legacy (backup)',
     note: 'Versão antiga, portada p/ Claude (CLAUDE.md). Playbooks agressivos por stack.',
     path: path.join(AGENTS_DIR, 'pentest-framework'),
     // Portado: tem CLAUDE.md nativo → o Claude lê sozinho (não injetamos o .cursorrules).
@@ -65,7 +65,7 @@ const REGISTRY = [
   },
   {
     id: 'v3',
-    label: 'v3 (orchestrator)',
+    label: 'v3 (backup)',
     note: 'Orquestrador 7-fases + 75 agentes, portado p/ Claude (CLAUDE.md). Experimental.',
     path: path.join(AGENTS_DIR, 'pentest-framework-3'),
     // Portado: tem CLAUDE.md nativo → o Claude lê sozinho (não injetamos o .cursorrules).

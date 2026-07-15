@@ -49,9 +49,11 @@ graphify-out/
 design_handoff_rifit_v3/
 /Login Page v4.html
 
-# Workspace de consolidação do agente (WIP — cópia isolada do v2 p/ F1-F3;
-# é promovido/versionado na F5, não versionar o clone cru)
-Agentes-Pentest/pentest-framework-v2-next/
+# Frameworks de BACKUP mantidos só em disco (oráculo de regressão). Não versionados
+# no repo principal p/ evitar o gitlink de submódulo quebrado. O tronco consolidado
+# (pentest-framework-v2-next) É versionado.
+Agentes-Pentest/pentest-framework-v2/
+Agentes-Pentest/pentest-framework-3/
 
 # Relatórios de pentest gerados (contêm dados de alvo real — NUNCA versionar)
 Relatorio-Pentest-*.html
