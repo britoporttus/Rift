@@ -48,3 +48,13 @@ actions-runner/
 graphify-out/
 design_handoff_rifit_v3/
 /Login Page v4.html
+
+# Workspace de consolidação do agente (WIP — cópia isolada do v2 p/ F1-F3;
+# é promovido/versionado na F5, não versionar o clone cru)
+Agentes-Pentest/pentest-framework-v2-next/
+
+# Relatórios de pentest gerados (contêm dados de alvo real — NUNCA versionar)
+Relatorio-Pentest-*.html
+
+# Core dumps
+core.[0-9]*
