@@ -67,11 +67,16 @@ Mas o **sequenciamento** dele é suicida: empilha os dois maiores riscos (runner
 > **Nota de escopo:** o seletor de versão (v2c/legacy/v3) foi **mantido** — trocá-lo por completo agora seria risco desnecessário (v2c recém-validado). Domain pack e versão coexistem: versão = tronco, domain pack = conteúdo do domínio. A aposentadoria das versões legadas fica para quando o v2c for o único tronco em uso.
 > **Follow-up (ETAPA 1):** a injeção do prompt do pack no caminho **headless** (`scheduler.dispatchScheduledJob`) só é necessária quando um pack != `web` ficar `ready`; hoje é no-op. Wire-up junto do pack `azure`.
 
-### ETAPA 1 — Pack Azure/Cloud (sem runner) · `[ ]`
+### ETAPA 1 — Pack Azure/Cloud (sem runner) · `[~]` em andamento
 **Autenticado via API (Graph/ARM), bate da VPS sem runner.** Valida o eixo credencial + RBAC destrutivo + vault barato.
-- [ ] Pack `azure`: manifest com ferramentas de cloud (ex. ScoutSuite/Prowler/Pacu — validar o que o tronco já tolera).
-- [ ] Ingestão de credencial de cloud via **vault** (não em texto plano; ver ETAPA 4).
-- [ ] Exercitar **RBAC destrutivo por-ação** num tenant Azure de teste.
+- [x] Pack `azure` registrado (`domain-packs.js`) como `planned` — external, per-action, cred=vault.
+- [x] **Checkpoint por-ação** (`loadCheckpointDirective`) — gate destrutivo por AÇÃO injetado no contexto; inerte p/ web (per-phase). Commit `972a90c`.
+- [x] **Vault de credenciais** — decisão do operador: **efêmero, in-memory, nada em repouso** (`cred-vault.js`). Credencial por-run, TTL 2h, `clear()` no fim; sem persistência ⇒ sem run agendado autenticado. Commit `9f273d8`.
+- [ ] Conteúdo do pack `azure` (systemPrompt): metodologia Graph/ARM read-only → análise RBAC → escalada. **Faço a seguir (texto, seguro).**
+- [ ] Wire: endpoint/WS p/ operador submeter credencial → `cred-vault` → injeção no env do processo do run (in-memory); `clear` no onClose. **Precisa de alvo p/ verificar.**
+- [ ] **[bloqueio externo]** Tooling no VPS (`az` CLI, ScoutSuite/Prowler) — precisa de permissão p/ instalar.
+- [ ] **[bloqueio externo]** Tenant Azure de teste + credenciais — o operador precisa prover.
+- [ ] Flip `azure` → `ready` + bloquear run agendado p/ packs autenticados. **Só após os itens acima.**
 
 ### ETAPA 2 — Pack AD (valida o runner) · `[!]` bloqueado pela ETAPA 4
 **Tooling maduro que o Claude conhece: BloodHound / NetExec / Certipy.** É aqui que o runner interno é provado.
@@ -87,7 +92,7 @@ Mas o **sequenciamento** dele é suicida: empilha os dois maiores riscos (runner
 ### ETAPA 4 — Bloqueadores que destravam "ir pra dentro" (paralelo, começar já) · `[ ]`
 **Nada interno toca produção antes disto.**
 - [ ] **4a. Transporte de inferência** (o divisor de águas): **Bedrock-no-VPC / on-prem** — dado do cliente não sai pra Anthropic. Abrir como projeto de pesquisa **em paralelo à ETAPA 0**, porque é ele que decide se "ir pra dentro" é sequer contratualmente possível.
-- [ ] **4b. Segurança destrutiva:** RBAC **por-ação** + vault + dry-run/blast-radius por comando + kill-switch + **audit assinado** + **deconfliction com o SOC**.
+- [~] **4b. Segurança destrutiva:** RBAC **por-ação** (feito, `972a90c`) + vault (feito, efêmero in-memory, `9f273d8`) + dry-run/blast-radius por comando + kill-switch + **audit assinado** + **deconfliction com o SOC**. Faltam dry-run/kill-switch/audit/deconfliction.
 - [ ] **4c. Multi-tenancy + isolamento por tenant** (revisar a premissa "1 operador, 1 VPS" do CLAUDE.md).
 
 ---
