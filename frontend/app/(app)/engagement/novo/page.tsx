@@ -1,14 +1,16 @@
 'use client'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { api } from '@/lib/api'
+import { api, DomainPackOption } from '@/lib/api'
 import Link from 'next/link'
-import { ArrowLeft, ArrowRight, Check, Target, Radar, Loader2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Target, Radar, Loader2, Globe, Cloud, Network, KeyRound, Clock } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
-// A-INTAKE: "Novo Escopo" vira um intake guiado (não o form de 2 campos). Coleta
-// os mesmos campos da skill pentest-intake (alvo, ambiente, tipo, intensidade,
-// WAF, foco, exclusões, gasto) e SÓ no fim cria o engagement em `idle` — sem
-// iniciar testes. Depois o operador entra e clica "Iniciar mapeamento automático".
+// A-INTAKE (multi-domínio): o "Novo Escopo" começa pela ESCOLHA DO TIPO DE TESTE
+// (domain pack) e o formulário se adapta ao que cada domínio precisa. Web mantém o
+// intake guiado (ambiente/tipo/intensidade + detalhes); Azure pede o tenant + a
+// credencial do Service Principal (efêmera, só em memória). SAP/AD ficam "em
+// construção" (exigem runner interno). Só cria no fim, em `idle` — sem iniciar testes.
 
 type Opt = { value: string; label: string; hint?: string }
 
@@ -37,6 +39,13 @@ const WAFS: Opt[] = [
   { value: 'no',      label: 'Não' },
 ]
 
+// Ícone por domínio (visual do seletor de tipo).
+const PACK_ICON: Record<string, LucideIcon> = {
+  web: Globe, azure: Cloud, aws: Cloud, gcp: Cloud, ad: Network, sap: Network,
+}
+// Só estes tipos aparecem no intake (aws/gcp são futuros).
+const PACK_ORDER = ['web', 'azure', 'ad', 'sap']
+
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '0.6rem 0.8rem',
   background: 'var(--bg)', border: '1px solid var(--border)',
@@ -54,23 +63,54 @@ function Chips({ options, value, onChange }: { options: Opt[]; value: string; on
       {options.map((o) => {
         const active = o.value === value
         return (
-          <button
-            key={o.value}
-            type="button"
-            onClick={() => onChange(o.value)}
-            title={o.hint}
-            style={{
-              padding: '0.45rem 0.85rem', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
-              fontSize: 12.5, fontWeight: 600, transition: 'all .12s',
-              background: active ? 'rgba(124,58,237,.15)' : 'transparent',
-              border: `1px solid ${active ? 'var(--purple)' : 'var(--border)'}`,
-              color: active ? 'var(--purple-light)' : 'var(--muted)',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}
-          >
+          <button key={o.value} type="button" onClick={() => onChange(o.value)} title={o.hint} style={{
+            padding: '0.45rem 0.85rem', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+            fontSize: 12.5, fontWeight: 600, transition: 'all .12s',
+            background: active ? 'rgba(124,58,237,.15)' : 'transparent',
+            border: `1px solid ${active ? 'var(--purple)' : 'var(--border)'}`,
+            color: active ? 'var(--purple-light)' : 'var(--muted)',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
             {active && <Check size={12} />}
             {o.label}
-            {o.hint && <span style={{ color: active ? 'var(--purple-light)' : 'var(--text-mute)', opacity: 0.7, fontWeight: 400, fontSize: 11 }}>· {o.hint}</span>}
+            {o.hint && <span style={{ opacity: 0.7, fontWeight: 400, fontSize: 11 }}>· {o.hint}</span>}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Seletor do TIPO DE TESTE (domain pack). Disponíveis são clicáveis; os que exigem
+// runner (AD/SAP) aparecem desabilitados com "em construção".
+function PackPicker({ packs, value, onChange }: { packs: DomainPackOption[]; value: string; onChange: (id: string) => void }) {
+  const ordered = PACK_ORDER
+    .map((id) => packs.find((p) => p.id === id))
+    .filter((p): p is DomainPackOption => !!p)
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+      {ordered.map((p) => {
+        const Icon = PACK_ICON[p.id] || Globe
+        const active = p.id === value
+        const disabled = !p.available
+        return (
+          <button key={p.id} type="button" disabled={disabled} onClick={() => !disabled && onChange(p.id)} style={{
+            textAlign: 'left', padding: '12px 13px', borderRadius: 10, fontFamily: 'inherit',
+            cursor: disabled ? 'not-allowed' : 'pointer', transition: 'all .12s',
+            background: active ? 'rgba(124,58,237,.14)' : 'var(--bg)',
+            border: `1px solid ${active ? 'var(--purple)' : 'var(--border)'}`,
+            opacity: disabled ? 0.5 : 1,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+              <Icon size={16} color={active ? 'var(--purple-light)' : 'var(--muted)'} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: active ? 'var(--purple-light)' : 'var(--text)' }}>{p.label}</span>
+              {active && <Check size={13} color="var(--purple-light)" style={{ marginLeft: 'auto' }} />}
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--muted)', lineHeight: 1.35 }}>
+              {disabled
+                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--purple-light)', fontWeight: 600 }}><Clock size={10} /> em construção (exige runner)</span>
+                : (p.credentialHandling === 'vault' ? 'autenticado · pede credencial' : 'black-box · externo')}
+            </div>
           </button>
         )
       })}
@@ -84,13 +124,24 @@ export default function NovoEngagementPage() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Tipo de teste (domain pack)
+  const [packs, setPacks] = useState<DomainPackOption[]>([])
+  const [packId, setPackId] = useState('web')
+  useEffect(() => {
+    api.settings.getDomainPacks().then((info) => { setPacks(info.available); setPackId(info.default) }).catch(() => setPacks([]))
+  }, [])
+  const pack = useMemo(() => packs.find((p) => p.id === packId) || null, [packs, packId])
+  const isAuth = pack?.credentialHandling === 'vault'
+
   // Essencial
   const [name, setName]           = useState('')
   const [target, setTarget]       = useState('')
   const [environment, setEnv]     = useState('production')
   const [appType, setAppType]     = useState('web+api')
   const [intensity, setIntensity] = useState('medium')
-  // Detalhes (opcional)
+  // Credenciais (packs autenticados) — só em memória, enviadas ao cofre efêmero no fim.
+  const [creds, setCreds]         = useState<Record<string, string>>({})
+  // Detalhes (opcional, web)
   const [wafPresent, setWafPresent] = useState('unknown')
   const [wafType, setWafType]       = useState('')
   const [focusAreas, setFocus]      = useState('')
@@ -100,24 +151,40 @@ export default function NovoEngagementPage() {
   const [notes, setNotes]           = useState('')
 
   const targetOk = target.trim().length > 0
-  // Nome default = alvo (a skill trata nome como opcional).
+  // Campos de credencial obrigatórios preenchidos? (packs autenticados)
+  const credsOk = !isAuth || (pack?.credentialFields || [])
+    .filter((f) => !f.optional)
+    .every((f) => (creds[f.name] || '').trim().length > 0)
   const effectiveName = useMemo(() => name.trim() || target.trim(), [name, target])
+  const targetLabel = isAuth ? 'Domínio / Tenant *' : 'Alvo (domínio) *'
+  const targetPlaceholder = isAuth ? 'contoso.onmicrosoft.com' : 'exemplo.com'
 
   async function handleCreate() {
     setError(null)
-    if (!targetOk) { setStep(1); setError('Informe o alvo (domínio).'); return }
+    if (!targetOk) { setStep(1); setError('Informe o alvo/tenant.'); return }
+    if (!credsOk) { setError('Preencha as credenciais obrigatórias.'); return }
     setCreating(true)
     try {
-      const scope: Record<string, unknown> = {
-        environment, appType, intensity,
-        wafPresent, wafType: wafPresent === 'yes' ? wafType.trim() : '',
-        focusAreas, outOfScope, ipRanges, notes,
-      }
+      const scope: Record<string, unknown> = isAuth
+        ? { environment, intensity, focusAreas, outOfScope, notes }
+        : {
+            environment, appType, intensity,
+            wafPresent, wafType: wafPresent === 'yes' ? wafType.trim() : '',
+            focusAreas, outOfScope, ipRanges, notes,
+          }
       const n = Number(spending)
       if (spending.trim() && !Number.isNaN(n) && n > 0) scope.spendingUsd = n
 
-      const eng = await api.engagements.create({ name: effectiveName, target: target.trim(), scope })
-      // Vai direto para o engagement recém-criado (idle) — lá aparece o CTA "Iniciar".
+      const eng = await api.engagements.create({ name: effectiveName, target: target.trim(), scope, domainPackId: packId })
+
+      // Pack autenticado: carrega a credencial no cofre efêmero do engagement (só em
+      // memória do backend). Best-effort — se falhar (ex.: 403), o engagement já existe
+      // e o operador pode informar no painel de credenciais da tela do engagement.
+      if (isAuth) {
+        const filled = Object.fromEntries(Object.entries(creds).filter(([, v]) => (v || '').trim() !== ''))
+        try { await api.engagements.setCredentials(eng.id, filled) }
+        catch (e) { console.warn('cred set falhou:', e) }
+      }
       router.push(`/engagement/${eng.id}`)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Erro ao criar o escopo')
@@ -125,9 +192,12 @@ export default function NovoEngagementPage() {
     }
   }
 
+  // Web tem 2 passos (essencial + detalhes); packs autenticados têm 1 (essencial + creds).
+  const hasStep2 = !isAuth
+  const steps = hasStep2 ? [{ n: 1, t: 'Essencial' }, { n: 2, t: 'Detalhes (opcional)' }] : [{ n: 1, t: 'Essencial' }]
+
   return (
     <div style={{ padding: '1.5rem 1.75rem', maxWidth: 760, margin: '0 auto', width: '100%' }}>
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
         <Link href="/dashboard" style={{ color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
           <ArrowLeft size={18} />
@@ -135,27 +205,22 @@ export default function NovoEngagementPage() {
         <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Novo escopo</h1>
       </div>
       <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 20px 30px' }}>
-        Configure o engagement. Nada é criado nem testado até você concluir — só o <strong style={{ color: 'var(--text)' }}>alvo</strong> é obrigatório; o resto tem padrão sensato.
+        Escolha o <strong style={{ color: 'var(--text)' }}>tipo de teste</strong> e configure o engagement. Nada é criado nem testado até você concluir.
       </p>
 
-      {/* Step indicator */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-        {[{ n: 1, t: 'Essencial' }, { n: 2, t: 'Detalhes (opcional)' }].map((s) => {
+        {steps.map((s) => {
           const active = step === s.n
           const done = step > s.n
           return (
             <div key={s.n} style={{
-              flex: 1, display: 'flex', alignItems: 'center', gap: 8,
-              padding: '0.6rem 0.85rem', borderRadius: 10,
+              flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '0.6rem 0.85rem', borderRadius: 10,
               background: active ? 'rgba(124,58,237,.1)' : 'var(--surface)',
               border: `1px solid ${active ? 'var(--purple)' : 'var(--border)'}`,
             }}>
               <div style={{
-                width: 22, height: 22, borderRadius: 99, flexShrink: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 12, fontWeight: 700,
-                background: active || done ? 'var(--purple)' : 'var(--border)',
-                color: active || done ? 'white' : 'var(--muted)',
+                width: 22, height: 22, borderRadius: 99, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 700, background: active || done ? 'var(--purple)' : 'var(--border)', color: active || done ? 'white' : 'var(--muted)',
               }}>{done ? <Check size={13} /> : s.n}</div>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: active ? 'var(--purple-light)' : 'var(--muted)' }}>{s.t}</span>
             </div>
@@ -163,18 +228,22 @@ export default function NovoEngagementPage() {
         })}
       </div>
 
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12,
-        padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: 20,
-      }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: 20 }}>
         {step === 1 ? (
           <>
+            {/* Tipo de teste (domain pack) — sempre primeiro */}
+            <div>
+              <label style={labelStyle}>Tipo de teste</label>
+              {packs.length ? <PackPicker packs={packs} value={packId} onChange={(id) => { setPackId(id); setStep(1) }} />
+                : <div style={{ fontSize: 12, color: 'var(--muted)' }}>Carregando tipos…</div>}
+            </div>
+
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <label style={labelStyle}>Alvo (domínio) *</label>
+                <label style={labelStyle}>{targetLabel}</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Target size={15} color="var(--purple-light)" style={{ flexShrink: 0 }} />
-                  <input autoFocus value={target} onChange={(e) => setTarget(e.target.value)} placeholder="exemplo.com" style={inputStyle} />
+                  <input autoFocus value={target} onChange={(e) => setTarget(e.target.value)} placeholder={targetPlaceholder} style={inputStyle} />
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 200 }}>
@@ -183,20 +252,60 @@ export default function NovoEngagementPage() {
               </div>
             </div>
 
-            <div>
-              <label style={labelStyle}>Ambiente</label>
-              <Chips options={ENVIRONMENTS} value={environment} onChange={setEnv} />
-            </div>
-            <div>
-              <label style={labelStyle}>Tipo de alvo</label>
-              <Chips options={APP_TYPES} value={appType} onChange={setAppType} />
-            </div>
-            <div>
-              <label style={labelStyle}>Intensidade</label>
-              <Chips options={INTENSITIES} value={intensity} onChange={setIntensity} />
-            </div>
+            {isAuth ? (
+              // Formulário AUTENTICADO (Azure/…): credenciais do próprio pack.
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: -4 }}>
+                  <KeyRound size={14} color="var(--purple-light)" />
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>Credenciais ({pack?.label})</span>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: -12, lineHeight: 1.4 }}>
+                  Ficam só em memória do servidor, por este run, e são apagadas ao terminar. Nada é gravado em disco.
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                  {(pack?.credentialFields || []).map((f) => (
+                    <div key={f.name} style={{ flex: '1 1 220px', minWidth: 200 }}>
+                      <label style={labelStyle}>{f.label}{f.optional ? ' (opcional)' : ''}</label>
+                      <input
+                        type={f.secret ? 'password' : 'text'}
+                        autoComplete="off"
+                        value={creds[f.name] || ''}
+                        onChange={(e) => setCreds((c) => ({ ...c, [f.name]: e.target.value }))}
+                        placeholder={f.secret ? '••••••••' : ''}
+                        style={inputStyle}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <label style={labelStyle}>Ambiente</label>
+                  <Chips options={ENVIRONMENTS} value={environment} onChange={setEnv} />
+                </div>
+                <div style={{ width: 200 }}>
+                  <label style={labelStyle}>Gasto máximo (US$)</label>
+                  <input type="number" min="0" step="0.5" value={spending} onChange={(e) => setSpending(e.target.value)} placeholder="5" style={inputStyle} />
+                </div>
+              </>
+            ) : (
+              // Formulário WEB (black-box).
+              <>
+                <div>
+                  <label style={labelStyle}>Ambiente</label>
+                  <Chips options={ENVIRONMENTS} value={environment} onChange={setEnv} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Tipo de alvo</label>
+                  <Chips options={APP_TYPES} value={appType} onChange={setAppType} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Intensidade</label>
+                  <Chips options={INTENSITIES} value={intensity} onChange={setIntensity} />
+                </div>
+              </>
+            )}
           </>
         ) : (
+          // Step 2 (só web): detalhes opcionais.
           <>
             <div>
               <label style={labelStyle}>WAF / proteção</label>
@@ -238,48 +347,31 @@ export default function NovoEngagementPage() {
           </div>
         )}
 
-        {/* Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
           {step === 2 && (
             <button type="button" onClick={() => setStep(1)} style={{
-              display: 'flex', alignItems: 'center', gap: 6, background: 'transparent',
-              border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)',
-              fontSize: 13, fontWeight: 600, padding: '0.55rem 1rem', cursor: 'pointer', fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: '1px solid var(--border)',
+              borderRadius: 8, color: 'var(--muted)', fontSize: 13, fontWeight: 600, padding: '0.55rem 1rem', cursor: 'pointer', fontFamily: 'inherit',
             }}>
               <ArrowLeft size={14} /> Voltar
             </button>
           )}
           <div style={{ flex: 1 }} />
-          <Link href="/dashboard" style={{ color: 'var(--muted)', fontSize: 12.5, textDecoration: 'none', padding: '0.55rem 0.5rem' }}>
-            Cancelar
-          </Link>
-          {step === 1 ? (
-            <button
-              type="button"
-              onClick={() => { if (!targetOk) { setError('Informe o alvo (domínio).'); return } setError(null); setStep(2) }}
-              disabled={!targetOk}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                background: targetOk ? 'var(--purple)' : 'var(--border)', border: 'none', borderRadius: 8,
-                color: 'white', fontSize: 13.5, fontWeight: 700, padding: '0.55rem 1.2rem',
-                cursor: targetOk ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
-              }}
-            >
+          <Link href="/dashboard" style={{ color: 'var(--muted)', fontSize: 12.5, textDecoration: 'none', padding: '0.55rem 0.5rem' }}>Cancelar</Link>
+          {step === 1 && hasStep2 ? (
+            <button type="button" onClick={() => { if (!targetOk) { setError('Informe o alvo (domínio).'); return } setError(null); setStep(2) }} disabled={!targetOk} style={{
+              display: 'flex', alignItems: 'center', gap: 7, background: targetOk ? 'var(--purple)' : 'var(--border)', border: 'none', borderRadius: 8,
+              color: 'white', fontSize: 13.5, fontWeight: 700, padding: '0.55rem 1.2rem', cursor: targetOk ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+            }}>
               Avançar <ArrowRight size={14} />
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={handleCreate}
-              disabled={creating}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                background: 'var(--purple)', border: 'none', borderRadius: 8,
-                color: 'white', fontSize: 13.5, fontWeight: 700, padding: '0.55rem 1.2rem',
-                cursor: creating ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: creating ? 0.75 : 1,
-                boxShadow: '0 0 18px var(--purple-glow)',
-              }}
-            >
+            <button type="button" onClick={handleCreate} disabled={creating || !targetOk || !credsOk} style={{
+              display: 'flex', alignItems: 'center', gap: 7, background: (targetOk && credsOk) ? 'var(--purple)' : 'var(--border)', border: 'none', borderRadius: 8,
+              color: 'white', fontSize: 13.5, fontWeight: 700, padding: '0.55rem 1.2rem',
+              cursor: creating || !targetOk || !credsOk ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: creating ? 0.75 : 1,
+              boxShadow: (targetOk && credsOk) ? '0 0 18px var(--purple-glow)' : 'none',
+            }}>
               {creating ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Criando…</> : <><Radar size={14} /> Criar escopo (sem iniciar testes)</>}
             </button>
           )}

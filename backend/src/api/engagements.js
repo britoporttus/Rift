@@ -53,17 +53,22 @@ router.get('/:id', async (req, res) => {
 })
 
 router.post('/', async (req, res) => {
-  const { name, target, scope } = req.body ?? {}
+  const { name, target, scope, domainPackId } = req.body ?? {}
   // A-INTAKE: nome é opcional (default = alvo). Só o alvo é obrigatório — mesma
   // filosofia da skill pentest-intake ("só o alvo é obrigatório, o resto tem default").
   const finalName = (name && String(name).trim()) || (target && String(target).trim())
   if (!target || !finalName) return res.status(400).json({ error: 'alvo obrigatório' })
+
+  // Domain pack (tipo de teste). Só packs executáveis podem ser escolhidos no intake;
+  // um id inválido/planned cai no default 'web' em vez de recusar (intake é permissivo).
+  const pack = isRunnableDomainPackId(domainPackId) ? domainPackId : 'web'
 
   const now = new Date()
   const engagement = await createEngagement({
     _id: uuid(),
     name: finalName,
     target: String(target).trim(),
+    domainPackId: pack,
     // scope carrega as respostas do intake guiado (environment, appType, intensity,
     // waf, foco, exclusões, gasto…). Persistido no Mongo e materializado em YAML abaixo.
     scope: scope && typeof scope === 'object' ? scope : {},
@@ -190,7 +195,10 @@ router.post('/:id/run-now', requireAuth(['admin']), async (req, res) => {
 // só na memória do backend, chaveada por `${engagementId}:${sessionId}`, e é limpa no
 // fim do run. Submeter/limpar é ação de admin (dado sensível). Nunca retornamos os
 // VALORES — só metadados (describe). Ver docs/ROADMAP-MULTI-DOMINIO.md (ETAPA 1).
-function vaultKey(id, sessionId) { return `${id}:${sessionId || 'default'}` }
+// Chave por-ENGAGEMENT (não por-sessão): a credencial é "a do próximo run autenticado
+// deste engagement". Evita descasar a chave entre o intake e o run. O server.js usa a
+// MESMA chave no gate. Ver src/cred-vault.js e domain-packs (ETAPA 1).
+function vaultKey(id) { return `cred:${id}` }
 
 router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
   const e = await getEngagement(req.params.id)
@@ -203,19 +211,18 @@ router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
   if (!creds || typeof creds !== 'object') return res.status(400).json({ error: 'credentials (objeto) obrigatório' })
   const { ok, missing } = validateCredentials(pack, creds)
   if (!ok) return res.status(400).json({ error: `Campos obrigatórios ausentes: ${missing.join(', ')}` })
-  const key = vaultKey(req.params.id, req.body?.sessionId)
+  const key = vaultKey(req.params.id)
   credVault.set(key, creds)
   res.status(201).json({ ok: true, ...credVault.describe(key) })   // só metadados
 })
 
 router.get('/:id/credentials', async (req, res) => {
-  const key = vaultKey(req.params.id, req.query.sessionId)
-  const meta = credVault.describe(key)
+  const meta = credVault.describe(vaultKey(req.params.id))
   res.json(meta ? { set: true, ...meta } : { set: false })
 })
 
 router.delete('/:id/credentials', requireAuth(['admin']), async (req, res) => {
-  credVault.clear(vaultKey(req.params.id, req.query.sessionId))
+  credVault.clear(vaultKey(req.params.id))
   res.status(204).end()
 })
 

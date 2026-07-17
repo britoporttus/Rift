@@ -285,7 +285,7 @@ export default function EngagementPage() {
       {tab === 'exec' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
-            <CredentialPanel engagement={engagement} sessionId={activeSession || 'default'} disabled={running} />
+            <CredentialPanel engagement={engagement} disabled={running} />
             <JobPipeline engagementId={id} liveJob={job} />
           </div>
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>

@@ -499,7 +499,9 @@ ${aggressiveRule}
       // efêmera no cofre (in-memory, por-run); (3) tooling presente no servidor. A
       // credencial vira env SÓ deste processo (opts.credentialEnv) e é limpa no onClose.
       let credentialEnv = {}
-      const packVaultKey = `${engId}:${sessionId}`
+      // Chave por-ENGAGEMENT (mesma do POST /credentials) — a credencial é a "do próximo
+      // run autenticado deste engagement", independente da sessão de chat.
+      const packVaultKey = `cred:${engId}`
       if (domainPacks.needsCredentials(domainPack)) {
         if (domainPacks.requiresRunner(domainPack)) {
           broadcastSession(engId, sessionId, { type: 'agent_message', text: `⚠️ O domínio "${domainPack.label}" exige um runner interno na rede do alvo (ainda não disponível). Azure/nuvem rodam da VPS; AD/SAP dependem do runner.` })

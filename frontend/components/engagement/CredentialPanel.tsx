@@ -9,11 +9,9 @@ import { api, Engagement, DomainPackOption, CredentialField } from '@/lib/api'
 // Para packs que exigem runner interno (AD/SAP), avisa que ainda não roda da VPS.
 export function CredentialPanel({
   engagement,
-  sessionId = 'default',
   disabled,
 }: {
   engagement: Engagement
-  sessionId?: string
   disabled?: boolean
 }) {
   const [pack, setPack] = useState<DomainPackOption | null>(null)
@@ -31,8 +29,8 @@ export function CredentialPanel({
   }, [packId])
 
   useEffect(() => {
-    api.engagements.getCredentials(engagement.id, sessionId).then(setStatus).catch(() => setStatus(null))
-  }, [engagement.id, sessionId, packId])
+    api.engagements.getCredentials(engagement.id).then(setStatus).catch(() => setStatus(null))
+  }, [engagement.id, packId])
 
   // Só renderiza para packs autenticados (credentialHandling 'vault').
   if (!pack || pack.credentialHandling !== 'vault') return null
@@ -42,8 +40,8 @@ export function CredentialPanel({
   async function submit() {
     setSaving(true); setErr(null)
     try {
-      await api.engagements.setCredentials(engagement.id, values, sessionId)
-      const s = await api.engagements.getCredentials(engagement.id, sessionId)
+      await api.engagements.setCredentials(engagement.id, values)
+      const s = await api.engagements.getCredentials(engagement.id)
       setStatus(s)
       setValues({})   // não retém os valores no cliente após enviar
     } catch (e) {
@@ -56,7 +54,7 @@ export function CredentialPanel({
   async function clear() {
     setSaving(true); setErr(null)
     try {
-      await api.engagements.clearCredentials(engagement.id, sessionId)
+      await api.engagements.clearCredentials(engagement.id)
       setStatus({ set: false })
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'falha ao limpar')

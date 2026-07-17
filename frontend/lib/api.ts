@@ -50,7 +50,7 @@ export const api = {
   engagements: {
     list: () => req<Engagement[]>('/engagements'),
     get: (id: string) => req<Engagement>(`/engagements/${id}`),
-    create: (data: { name: string; target: string; scope?: object }) =>
+    create: (data: { name: string; target: string; scope?: object; domainPackId?: string }) =>
       req<Engagement>('/engagements', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: Partial<Engagement>) =>
       req<Engagement>(`/engagements/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -58,14 +58,14 @@ export const api = {
     setSchedule: (id: string, schedule: Partial<EngagementSchedule>) =>
       req<Engagement>(`/engagements/${id}/schedule`, { method: 'PATCH', body: JSON.stringify(schedule) }),
     jobs: (id: string) => req<Job[]>(`/engagements/${id}/jobs`),
-    // Credenciais efêmeras de pack autenticado (in-memory no backend, por-run). Só
-    // metadados voltam (nunca os valores). sessionId default = 'default'.
-    getCredentials: (id: string, sessionId = 'default') =>
-      req<{ set: boolean; fields?: string[]; expiresAt?: number }>(`/engagements/${id}/credentials?sessionId=${encodeURIComponent(sessionId)}`),
-    setCredentials: (id: string, credentials: Record<string, string>, sessionId = 'default') =>
-      req<{ ok: boolean; fields: string[]; expiresAt: number }>(`/engagements/${id}/credentials`, { method: 'POST', body: JSON.stringify({ credentials, sessionId }) }),
-    clearCredentials: (id: string, sessionId = 'default') =>
-      req<void>(`/engagements/${id}/credentials?sessionId=${encodeURIComponent(sessionId)}`, { method: 'DELETE' }),
+    // Credenciais efêmeras de pack autenticado (in-memory no backend, por-engagement).
+    // Só metadados voltam (nunca os valores).
+    getCredentials: (id: string) =>
+      req<{ set: boolean; fields?: string[]; expiresAt?: number }>(`/engagements/${id}/credentials`),
+    setCredentials: (id: string, credentials: Record<string, string>) =>
+      req<{ ok: boolean; fields: string[]; expiresAt: number }>(`/engagements/${id}/credentials`, { method: 'POST', body: JSON.stringify({ credentials }) }),
+    clearCredentials: (id: string) =>
+      req<void>(`/engagements/${id}/credentials`, { method: 'DELETE' }),
     runNow: (id: string) =>
       req<{ ok: boolean; message: string }>(`/engagements/${id}/run-now`, { method: 'POST' }),
     messages: (id: string, sessionId?: string) => {
