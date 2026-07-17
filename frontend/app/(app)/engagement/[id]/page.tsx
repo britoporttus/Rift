@@ -26,6 +26,11 @@ type Tab = 'exec' | 'findings' | 'report'
 const AUTO_RUN_PROMPT =
   'Inicie o mapeamento automático do alvo como Agente 1 (black-box, sem credenciais): rode recon, depois enumeração, depois análise de vulnerabilidades não-autenticada (exploit-to-confirm), em sequência e sem me pedir confirmação entre as fases. Sua entrega tem DUAS metades: (1) um MAPA de superfície RICO — registre com generosidade como informational todo subdomínio, endpoint, tecnologia, parâmetro, token e exposição; (2) as vulnerabilidades que conseguir PROVAR sem credencial, marcadas confirmed com PoC. Candidato que você testar mas não fechar o PoC → probable (a confirmar), NÃO descarte. Cubra a superfície descoberta (não teste só uma amostra). Pare e pergunte apenas em checkpoint real (achado crítico ou decisão importante). Mostre os achados conforme forem surgindo.'
 
+// Prompt do run AUTENTICADO (Azure/cloud): usa a credencial do ambiente e segue a
+// metodologia do domain pack. NÃO é recon web black-box.
+const AUTH_RUN_PROMPT =
+  'Inicie a avaliação AUTENTICADA seguindo ESTRITAMENTE a metodologia do domain pack deste engagement. A credencial já está no AMBIENTE deste run (variáveis de ambiente) — autentique com ela primeiro (ex.: `az login --service-principal ...`); NÃO peça credenciais e NÃO faça recon web black-box. Faça a enumeração READ-ONLY do ambiente em sequência (identidade e quem sou eu, subscriptions/escopo, RBAC atribuído, inventário de recursos, e o diretório/Entra se acessível), depois a ANÁLISE de caminhos de escalada — sem me pedir confirmação entre as fases de leitura. Registre com generosidade como informational tudo que enumerar (recursos, roles, apps, service principals, misconfigs) e como confirmed o que tiver evidência clara (com o valor real: tenant/subscription id, role assignment, permissão). Antes de QUALQUER ação que altere estado, PARE e peça aprovação (checkpoint por-ação). Mostre os achados conforme surgirem.'
+
 export default function EngagementPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -168,13 +173,17 @@ export default function EngagementPage() {
     if (running || !connected) return
     handleSend('/rift-compact')
   }
+  // Web = black-box; qualquer outro pack (azure/…) = autenticado (usa credencial).
+  const isAuthPack = (engagement?.domainPackId || 'web') !== 'web'
   function handleStartAuto() {
-    handleSend(AUTO_RUN_PROMPT)
+    handleSend(isAuthPack ? AUTH_RUN_PROMPT : AUTO_RUN_PROMPT)
   }
   // A-STATE-5: retoma via --resume (o claude session_id persistido) — o agente
   // continua de onde parou, sem re-rodar recon.
   function handleContinueAuto() {
-    handleSend('Continue o mapeamento automático do alvo de onde parou, seguindo o mesmo plano (recon → enumeração → análise de vulnerabilidades não-autenticada, exploit-to-confirm), cobrindo a superfície descoberta (não só uma amostra). Candidato testado mas não fechado → probable (a confirmar), não descarte. Em sequência, sem me pedir confirmação entre as fases. Pare só em checkpoint real.')
+    handleSend(isAuthPack
+      ? 'Continue a avaliação autenticada de onde parou, seguindo a metodologia do domain pack (enumeração read-only → análise de caminhos de escalada), usando a credencial do ambiente. Em sequência, sem me pedir confirmação entre as fases de leitura. Pare só em checkpoint (antes de qualquer ação que altere estado).'
+      : 'Continue o mapeamento automático do alvo de onde parou, seguindo o mesmo plano (recon → enumeração → análise de vulnerabilidades não-autenticada, exploit-to-confirm), cobrindo a superfície descoberta (não só uma amostra). Candidato testado mas não fechado → probable (a confirmar), não descarte. Em sequência, sem me pedir confirmação entre as fases. Pare só em checkpoint real.')
   }
   // 1.3: CTAs pós-fase. O relatório do Rift é gerado a partir dos findings no banco
   // (sempre funciona, em qualquer framework) e vive na aba Relatório — então o botão

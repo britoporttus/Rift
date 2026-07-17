@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { WsMsg } from '@/hooks/useEngagementWS'
 import { Engagement, Job } from '@/lib/api'
+import { RunHistory } from './RunHistory'
 import {
   Play, Radar, ScanSearch, ShieldAlert, CheckCircle2, Loader2, Circle,
   AlertTriangle, HelpCircle, ChevronDown, ChevronRight, DollarSign, Terminal,
@@ -320,7 +321,9 @@ export function ExecutionPanel({
       }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Mapeamento externo (Agente 1 · black-box)
+            {(engagement.domainPackId && engagement.domainPackId !== 'web')
+              ? 'Avaliação autenticada (Agente 2)'
+              : 'Mapeamento externo (Agente 1 · black-box)'}
           </div>
           <div style={{ color: 'var(--text)', fontSize: 18, fontWeight: 700, marginTop: 2 }}>
             {engagement.name}
@@ -785,6 +788,10 @@ export function ExecutionPanel({
           </div>
         )}
       </div>
+
+      {/* Histórico de runs — dá visibilidade à tabela durável de Jobs (agendados + chat,
+          concluído/parado/falhou, retomado após queda). */}
+      <RunHistory engagementId={engagement.id} liveJob={job} />
     </div>
   )
 }

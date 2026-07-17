@@ -462,15 +462,8 @@ async function handleMessage(msg, engId, sessionId, user) {
       // garante que os findings apareçam no painel, mesmo nas versões sem /pentest-*.
       const canonicalFindingsDir = `clients/${slug}/${date}/findings/`
 
-      // Regras de PAPEL/relatório dependem da versão: v2 tem core/agent-1-blackbox.md
-      // e /pentest-report; legacy/v3 não têm — referenciá-los confundiria o agente.
-      const fwGuidance = framework.slashCommands
-        ? `- PAPEL: você é o AGENTE 1 (black-box). NÃO tem credenciais e NÃO deve pedi-las nem ler credentials.yaml. Siga core/agent-1-blackbox.md. Ao esgotar a superfície externa, gere o relatório e RECOMENDE ao operador fornecer credenciais para o Agente 2 (não inicie fase autenticada).
-${aggressiveRule}
-- QUANDO O OPERADOR PEDE RELATÓRIO: execute /pentest-report imediatamente, sem fazer mais testes`
-        : `- PAPEL: você é um agente de pentest black-box (sem credenciais). Foque na superfície externa autorizada e siga as REGRAS DO FRAMEWORK abaixo.
-${aggressiveRule}
-- Esta versão NÃO tem slash-commands (/pentest-*). Ao pedir relatório, gere um resumo consolidado dos findings em ${canonicalFindingsDir}.`
+      // fwGuidance (PAPEL do agente) é definido APÓS o gate — depende do domain pack
+      // (black-box vs autenticado) e das variáveis de credencial injetadas no run.
 
       // Injetamos as regras nativas (.cursorrules) SÓ quando a versão NÃO tem CLAUDE.md.
       // legacy/v3 foram portados (têm CLAUDE.md) → o Claude lê as instruções nativamente
@@ -499,10 +492,11 @@ ${aggressiveRule}
       // efêmera no cofre (in-memory, por-run); (3) tooling presente no servidor. A
       // credencial vira env SÓ deste processo (opts.credentialEnv) e é limpa no onClose.
       let credentialEnv = {}
+      const isAuthPack = domainPacks.needsCredentials(domainPack)
       // Chave por-ENGAGEMENT (mesma do POST /credentials) — a credencial é a "do próximo
       // run autenticado deste engagement", independente da sessão de chat.
       const packVaultKey = `cred:${engId}`
-      if (domainPacks.needsCredentials(domainPack)) {
+      if (isAuthPack) {
         if (domainPacks.requiresRunner(domainPack)) {
           broadcastSession(engId, sessionId, { type: 'agent_message', text: `⚠️ O domínio "${domainPack.label}" exige um runner interno na rede do alvo (ainda não disponível). Azure/nuvem rodam da VPS; AD/SAP dependem do runner.` })
           setRunState(engId, 'stopped', 'error'); return
@@ -520,11 +514,26 @@ ${aggressiveRule}
         credentialEnv = domainPacks.buildCredentialEnv(domainPack, creds)
       }
 
+      // PAPEL do agente — depende do domain pack. Autenticado (Azure/…): usa a credencial
+      // do AMBIENTE e segue a metodologia do pack; NÃO faz recon web black-box. Black-box
+      // (web): comportamento atual do framework (Agente 1).
+      const credEnvNames = Object.keys(credentialEnv)
+      const fwGuidance = isAuthPack
+        ? `- PAPEL: você é o AGENTE AUTENTICADO do domínio ${domainPack.label}. A credencial JÁ ESTÁ no AMBIENTE deste run (variáveis: ${credEnvNames.join(', ') || 'no ambiente do processo'}) — autentique com ela ANTES de tudo (ex.: \`az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"\`, depois \`az account set --subscription "$AZURE_SUBSCRIPTION_ID"\` se houver). NÃO peça credenciais, NÃO leia credentials.yaml e NÃO faça recon web black-box: o alvo é o AMBIENTE ${domainPack.label} do tenant/conta "${eng.target}", acessado via API/CLI. Siga ESTRITAMENTE a metodologia do DOMAIN PACK abaixo (read-only primeiro).
+${aggressiveRule}`
+        : (framework.slashCommands
+          ? `- PAPEL: você é o AGENTE 1 (black-box). NÃO tem credenciais e NÃO deve pedi-las nem ler credentials.yaml. Siga core/agent-1-blackbox.md. Ao esgotar a superfície externa, gere o relatório e RECOMENDE ao operador fornecer credenciais para o Agente 2 (não inicie fase autenticada).
+${aggressiveRule}
+- QUANDO O OPERADOR PEDE RELATÓRIO: execute /pentest-report imediatamente, sem fazer mais testes`
+          : `- PAPEL: você é um agente de pentest black-box (sem credenciais). Foque na superfície externa autorizada e siga as REGRAS DO FRAMEWORK abaixo.
+${aggressiveRule}
+- Esta versão NÃO tem slash-commands (/pentest-*). Ao pedir relatório, gere um resumo consolidado dos findings em ${canonicalFindingsDir}.`)
+
       const ctx = eng
         ? `[CONTEXTO DO SISTEMA — NÃO IGNORAR]
 Engagement ativo: "${eng.name}"
 ID do engagement: ${engId2}
-Alvo autorizado: ${eng.target} e *.${eng.target}
+Alvo autorizado: ${isAuthPack ? `ambiente ${domainPack.label} do tenant/conta "${eng.target}" (acesso via credencial no ambiente do run)` : `${eng.target} e *.${eng.target}`}
 Status: ${eng.status}
 Versão do agente: ${framework.label}
 Diretório de contexto: context/${engId2}/
@@ -535,7 +544,7 @@ Reports dir:  clients/${slug}/${date}/reports/
 REGRAS OBRIGATÓRIAS:
 ${fwGuidance}
 - Responda SEMPRE em português brasileiro
-- Opere APENAS sobre o alvo ${eng.target} — qualquer outro alvo está fora de escopo
+- ${isAuthPack ? `Opere SOMENTE no tenant/subscription autorizado ("${eng.target}") usando a credencial do ambiente — NÃO faça recon web/DNS de ${eng.target}; a superfície aqui é a do ambiente ${domainPack.label} (recursos, RBAC, identidades), não um site` : `Opere APENAS sobre o alvo ${eng.target} — qualquer outro alvo está fora de escopo`}
 - Use o diretório context/${engId2}/ para salvar estado deste engagement
 - NÃO liste outros engagements como opções; este é o engagement ativo
 - Para SALVAR ARQUIVOS: use SEMPRE a ferramenta Write ou Edit, NUNCA "cat >" ou "tee" via Bash (esses comandos são bloqueados pelo safety hook)
