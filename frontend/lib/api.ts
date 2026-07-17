@@ -58,6 +58,14 @@ export const api = {
     setSchedule: (id: string, schedule: Partial<EngagementSchedule>) =>
       req<Engagement>(`/engagements/${id}/schedule`, { method: 'PATCH', body: JSON.stringify(schedule) }),
     jobs: (id: string) => req<Job[]>(`/engagements/${id}/jobs`),
+    // Credenciais efêmeras de pack autenticado (in-memory no backend, por-run). Só
+    // metadados voltam (nunca os valores). sessionId default = 'default'.
+    getCredentials: (id: string, sessionId = 'default') =>
+      req<{ set: boolean; fields?: string[]; expiresAt?: number }>(`/engagements/${id}/credentials?sessionId=${encodeURIComponent(sessionId)}`),
+    setCredentials: (id: string, credentials: Record<string, string>, sessionId = 'default') =>
+      req<{ ok: boolean; fields: string[]; expiresAt: number }>(`/engagements/${id}/credentials`, { method: 'POST', body: JSON.stringify({ credentials, sessionId }) }),
+    clearCredentials: (id: string, sessionId = 'default') =>
+      req<void>(`/engagements/${id}/credentials?sessionId=${encodeURIComponent(sessionId)}`, { method: 'DELETE' }),
     runNow: (id: string) =>
       req<{ ok: boolean; message: string }>(`/engagements/${id}/run-now`, { method: 'POST' }),
     messages: (id: string, sessionId?: string) => {
@@ -362,6 +370,12 @@ export interface FrameworkInfo {
 
 // Domain pack do módulo de pentest (ETAPA 0 multi-domínio). `available` = executável
 // hoje (status 'ready'); 'planned' = azure/ad/sap em construção (seletor desabilita).
+export interface CredentialField {
+  name: string
+  label: string
+  secret: boolean
+  optional?: boolean
+}
 export interface DomainPackOption {
   id: string
   label: string
@@ -371,6 +385,8 @@ export interface DomainPackOption {
   position: 'external' | 'network'
   checkpointPolicy: 'per-phase' | 'per-action'
   credentialHandling: 'none' | 'vault'
+  requiresRunner: boolean
+  credentialFields: CredentialField[]
 }
 export interface DomainPackInfo {
   default: string

@@ -10,6 +10,7 @@ import { ExecutionPanel } from '@/components/engagement/ExecutionPanel'
 import { ModelSwitcher } from '@/components/engagement/ModelSwitcher'
 import { FrameworkSwitcher } from '@/components/engagement/FrameworkSwitcher'
 import { DomainPackSwitcher } from '@/components/engagement/DomainPackSwitcher'
+import { CredentialPanel } from '@/components/engagement/CredentialPanel'
 import { JobPipeline } from '@/components/engagement/JobPipeline'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -284,6 +285,7 @@ export default function EngagementPage() {
       {tab === 'exec' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
+            <CredentialPanel engagement={engagement} sessionId={activeSession || 'default'} disabled={running} />
             <JobPipeline engagementId={id} liveJob={job} />
           </div>
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
