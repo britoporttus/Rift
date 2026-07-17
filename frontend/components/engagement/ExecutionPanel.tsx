@@ -296,8 +296,10 @@ export function ExecutionPanel({
   // Fallback: se não veio motivo mas há bloqueio de safeguard no feed, trata como tal.
   const reasonKey = stopReason || (blockText ? 'safeguard' : null)
   const outcome = runState === 'completed'
-    ? { title: 'Mapeamento concluído', detail: 'O Agente 1 cobriu o ciclo recon → enumeração → vulnerabilidades. Gere o relatório, forneça credenciais para teste autenticado, ou continue aprofundando.', tone: 'ok' as const }
-    : (reasonKey && REASON_TEXT[reasonKey]) || { title: runState === 'failed' ? 'Run falhou' : 'Mapeamento parado', detail: 'O run foi interrompido. Retome de onde parou ou comece do zero.', tone: runState === 'failed' ? 'bad' as const : 'warn' as const }
+    ? (isAuthPack
+        ? { title: 'Avaliação concluída', detail: 'O agente autenticou e cobriu o ciclo autenticação → enumeração → análise de escalada. Gere o relatório ou continue aprofundando (ações que alteram estado param em checkpoint).', tone: 'ok' as const }
+        : { title: 'Mapeamento concluído', detail: 'O Agente 1 cobriu o ciclo recon → enumeração → vulnerabilidades. Gere o relatório, forneça credenciais para teste autenticado, ou continue aprofundando.', tone: 'ok' as const })
+    : (reasonKey && REASON_TEXT[reasonKey]) || { title: runState === 'failed' ? 'Run falhou' : (isAuthPack ? 'Avaliação parada' : 'Mapeamento parado'), detail: 'O run foi interrompido. Retome de onde parou ou comece do zero.', tone: runState === 'failed' ? 'bad' as const : 'warn' as const }
   const outcomeColor = outcome.tone === 'bad' ? 'var(--critical)' : outcome.tone === 'ok' ? 'var(--low)' : 'var(--border)'
   const hasResults = confirmed.length > 0 || surface.length > 0
 
