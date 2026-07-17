@@ -67,27 +67,31 @@ Mas o **sequenciamento** dele é suicida: empilha os dois maiores riscos (runner
 > **Nota de escopo:** o seletor de versão (v2c/legacy/v3) foi **mantido** — trocá-lo por completo agora seria risco desnecessário (v2c recém-validado). Domain pack e versão coexistem: versão = tronco, domain pack = conteúdo do domínio. A aposentadoria das versões legadas fica para quando o v2c for o único tronco em uso.
 > **Follow-up (ETAPA 1):** a injeção do prompt do pack no caminho **headless** (`scheduler.dispatchScheduledJob`) só é necessária quando um pack != `web` ficar `ready`; hoje é no-op. Wire-up junto do pack `azure`.
 
-### ETAPA 1 — Pack Azure/Cloud (sem runner) · `[~]` em andamento
+### ETAPA 1 — Pack Azure/Cloud (sem runner) · `[~]` pronto, só falta o tenant de teste
 **Autenticado via API (Graph/ARM), bate da VPS sem runner.** Valida o eixo credencial + RBAC destrutivo + vault barato.
-- [x] Pack `azure` registrado (`domain-packs.js`) como `planned` — external, per-action, cred=vault.
-- [x] **Checkpoint por-ação** (`loadCheckpointDirective`) — gate destrutivo por AÇÃO injetado no contexto; inerte p/ web (per-phase). Commit `972a90c`.
-- [x] **Vault de credenciais** — decisão do operador: **efêmero, in-memory, nada em repouso** (`cred-vault.js`). Credencial por-run, TTL 2h, `clear()` no fim; sem persistência ⇒ sem run agendado autenticado. Commit `9f273d8`.
-- [x] Conteúdo do pack `azure` (`src/packs/azure.md`): read-only → análise RBAC → escalada sob checkpoint. Carregado por `promptFile`. Commit `79a41bd`.
-- [ ] Wire: endpoint/WS p/ operador submeter credencial → `cred-vault` → injeção no env do processo do run (in-memory); `clear` no onClose. **Precisa de alvo p/ verificar.**
-- [~] Tooling no VPS (`az` CLI, ScoutSuite/Prowler) — instalando via pipx (nível-usuário, sem sudo).
-- [ ] **[bloqueio externo]** Tenant Azure de teste + credenciais — o operador precisa prover.
-- [ ] Flip `azure` → `ready` + bloquear run agendado p/ packs autenticados. **Só após os itens acima.**
+- [x] Pack `azure` — external, per-action, cred=vault. **`status: 'ready'`** (`5719d34`).
+- [x] **Checkpoint por-ação** (`loadCheckpointDirective`) — gate destrutivo por AÇÃO. Commit `972a90c`.
+- [x] **Vault de credenciais** efêmero, in-memory, nada em repouso (`cred-vault.js`). Commit `9f273d8`.
+- [x] Conteúdo do pack `azure` (`src/packs/azure.md`). Commit `79a41bd`.
+- [x] **Wire da credencial:** API `POST/GET/DELETE /engagements/:id/credentials` (admin, só metadados) → `cred-vault` → `opts.credentialEnv` no env do run (in-memory) → `clear` no `onClose`. UI `CredentialPanel`. Verificado ao vivo (secret não vaza). Commits `5719d34`, `2631178`.
+- [x] **Gate de run** (`server.js`): recusa pack autenticado sem credencial / sem tooling / que exige runner, ANTES de gastar turno.
+- [x] Tooling no VPS via pipx: **azure-cli 2.88, scoutsuite 5.14, prowler 5.35** (`~/.local/bin`, no PATH do agente).
+- [ ] **[bloqueio externo — só isto falta]** Tenant Azure de teste + credencial (SP) → o operador provê. Aí: rodar de ponta a ponta e ajustar a metodologia com o resultado real.
+- [ ] Bloquear run **agendado** p/ packs autenticados (sem cred persistida não há headless) — guarda a adicionar no scheduler quando fizer sentido.
 
-### ETAPA 2 — Pack AD (valida o runner) · `[!]` bloqueado pela ETAPA 4
-**Tooling maduro que o Claude conhece: BloodHound / NetExec / Certipy.** É aqui que o runner interno é provado.
-- [ ] Runner que **puxa jobs** por túnel reusando Jobs + outbox (`jobs-worker.js`), claim atômico, resume-no-boot, watcher.
-- [ ] Pack `ad` com o tooling acima.
-- [ ] **Bloqueado** até resolver transporte de inferência (ETAPA 4a) — runner roda `spawn('claude')` dentro da rede do cliente.
+### ETAPA 2 — Pack AD on-premises · `[~]` conteúdo pronto, `[!]` runner é o bloqueio
+**Tooling maduro: BloodHound / NetExec / Certipy.** Posição de REDE — não alcança da VPS.
+- [x] Pack `ad` registrado (`requiresRunner: true`, per-action, credentialSpec) + metodologia (`src/packs/ad.md`): enum autenticado → BloodHound → Kerberoast/DACL/AD CS → prova sob checkpoint + deconfliction com SOC.
+- [x] Gate já recusa `ad` da VPS com mensagem clara (exige runner).
+- [ ] **Runner interno** que puxa jobs por túnel (reusa Jobs+outbox). **Bloqueado pela ETAPA 4a** (transporte de inferência).
 
-### ETAPA 3 — Pack SAP (por último) · `[!]`
-**Maior raio de explosão (ERP = quebra financeiro); Claude conhece menos (pysap/bizploit são nicho).**
-- [ ] Usar ambientes SAP próprios para **de-riscar o runner**, não como primeiro domínio de produção.
-- [ ] Labs + evals com ground-truth antes de qualquer SAP de produção (ponto cego #4).
+### ETAPA 3 — Pack SAP · `[~]` conteúdo pronto, `[!]` runner é o bloqueio
+**Maior raio de explosão (ERP).** Posição de REDE.
+- [x] Pack `sap` registrado (`requiresRunner: true`) + metodologia (`src/packs/sap.md`): enum → RFC/Gateway/autorizações → prova sob checkpoint rígido, preferir QA.
+- [ ] Mesmo runner da ETAPA 2 + labs/evals antes de produção (ponto cego #4).
+
+### ETAPA 3.5 — AWS / GCP (futuro, depois de Azure/AD/SAP) · `[~]` estrutura pronta
+- [x] Packs `aws`/`gcp` registrados (planned, external, cloud) + metodologias (`src/packs/{aws,gcp}.md`) + credentialSpec. Ficam `planned` até priorizar; GCP precisa resolver credencial baseada em arquivo (materialização em tmpfs no wire).
 
 ### ETAPA 4 — Bloqueadores que destravam "ir pra dentro" (paralelo, começar já) · `[ ]`
 **Nada interno toca produção antes disto.**
