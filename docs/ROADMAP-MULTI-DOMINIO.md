@@ -72,9 +72,9 @@ Mas o **sequenciamento** dele é suicida: empilha os dois maiores riscos (runner
 - [x] Pack `azure` registrado (`domain-packs.js`) como `planned` — external, per-action, cred=vault.
 - [x] **Checkpoint por-ação** (`loadCheckpointDirective`) — gate destrutivo por AÇÃO injetado no contexto; inerte p/ web (per-phase). Commit `972a90c`.
 - [x] **Vault de credenciais** — decisão do operador: **efêmero, in-memory, nada em repouso** (`cred-vault.js`). Credencial por-run, TTL 2h, `clear()` no fim; sem persistência ⇒ sem run agendado autenticado. Commit `9f273d8`.
-- [ ] Conteúdo do pack `azure` (systemPrompt): metodologia Graph/ARM read-only → análise RBAC → escalada. **Faço a seguir (texto, seguro).**
+- [x] Conteúdo do pack `azure` (`src/packs/azure.md`): read-only → análise RBAC → escalada sob checkpoint. Carregado por `promptFile`. Commit `79a41bd`.
 - [ ] Wire: endpoint/WS p/ operador submeter credencial → `cred-vault` → injeção no env do processo do run (in-memory); `clear` no onClose. **Precisa de alvo p/ verificar.**
-- [ ] **[bloqueio externo]** Tooling no VPS (`az` CLI, ScoutSuite/Prowler) — precisa de permissão p/ instalar.
+- [~] Tooling no VPS (`az` CLI, ScoutSuite/Prowler) — instalando via pipx (nível-usuário, sem sudo).
 - [ ] **[bloqueio externo]** Tenant Azure de teste + credenciais — o operador precisa prover.
 - [ ] Flip `azure` → `ready` + bloquear run agendado p/ packs autenticados. **Só após os itens acima.**
 
