@@ -1,4 +1,6 @@
 'use strict'
+const fs = require('fs')
+const path = require('path')
 // ── Domain Packs (ETAPA 0 do roadmap multi-domínio) ────────────────────────────
 // docs/ROADMAP-MULTI-DOMINIO.md — veredito do Conselho: "núcleo único + domain
 // packs", NÃO 4 orquestradores. O orquestrador (recon→enum→exploit→report) é o
@@ -45,6 +47,9 @@ const REGISTRY = [
     checkpointPolicy: 'per-action',
     credentialHandling: 'vault',
     toolManifest: ['az', 'scoutsuite', 'prowler', 'pacu'],
+    // Metodologia do domínio em arquivo (revisável). Carregada por loadDomainPrompt
+    // quando o pack for injetado (só quando 'ready'). Ver src/packs/azure.md.
+    promptFile: 'packs/azure.md',
     systemPrompt: '',
   },
   {
@@ -106,8 +111,15 @@ function resolvePack(pack) {
 }
 
 // Texto do domínio a injetar no system-context do agente (vazio p/ 'web' → no-op).
+// Prioriza systemPrompt inline; se vazio e houver promptFile, lê do disco (metodologia
+// versionada em src/packs/*.md). Falha de leitura → '' (nunca quebra o run).
 function loadDomainPrompt(pack) {
-  return resolvePack(pack).systemPrompt || ''
+  const p = resolvePack(pack)
+  if (p.systemPrompt) return p.systemPrompt
+  if (p.promptFile) {
+    try { return fs.readFileSync(path.join(__dirname, p.promptFile), 'utf8') } catch { return '' }
+  }
+  return ''
 }
 
 // ── Checkpoint por-ação (RBAC destrutivo) ──────────────────────────────────────

@@ -76,6 +76,17 @@ test('loadDomainPrompt aceita id ou objeto e nunca quebra', () => {
   assert.equal(dp.loadDomainPrompt(null), '')
 })
 
+test('azure: metodologia carrega do promptFile (src/packs/azure.md)', () => {
+  const prompt = dp.loadDomainPrompt('azure')
+  assert.ok(prompt.length > 500, 'metodologia azure deve ter conteúdo')
+  assert.match(prompt, /Entra ID/)
+  assert.match(prompt, /read-only/i)
+  assert.match(prompt, /aprovação/i)           // checkpoint por-ação embutido na metodologia
+  assert.match(prompt, /management\.azure\.com/) // alcance cloud (external)
+  // web continua sem prompt (no-op) mesmo com o mecanismo de promptFile ativo
+  assert.equal(dp.loadDomainPrompt('web'), '')
+})
+
 test('loadCheckpointDirective: per-action injeta gate destrutivo; web (per-phase) é no-op', () => {
   // web = per-phase → vazio (comportamento atual intacto)
   assert.equal(dp.loadCheckpointDirective('web'), '')
