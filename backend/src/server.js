@@ -487,8 +487,11 @@ async function handleMessage(msg, engId, sessionId, user) {
       // azure/ad/sap ficarem 'ready' (ETAPAs 1-3), o prompt do pack entra por aqui.
       const domainPack = getDomainPack(eng?.domainPackId)
       const domainPrompt = loadDomainPrompt(domainPack)
+      // 20000 (não 12000): o pack azure.md cresceu com endpoints Graph prescritivos +
+      // gate de cobertura + wiring da taxonomia — cortar em 12k truncava exatamente a
+      // seção de Findings/classificação (probable/false_positive) no fim do arquivo.
       const packBlock = domainPrompt
-        ? `\n[DOMAIN PACK "${domainPack.label}" — CONTEXTO DO DOMÍNIO]\n${domainPrompt.slice(0, 12000)}\n`
+        ? `\n[DOMAIN PACK "${domainPack.label}" — CONTEXTO DO DOMÍNIO]\n${domainPrompt.slice(0, 20000)}\n`
         : ''
       // Checkpoint por-ação p/ domínios destrutivos (azure/ad/sap). Vazio p/ web
       // (per-phase, black-box) → no-op. Prioridade #1 de segurança destrutiva do Conselho.
