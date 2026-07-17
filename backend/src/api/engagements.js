@@ -10,6 +10,7 @@ const findingsWatcher = require('../findings-watcher')
 const scheduler = require('../scheduler')
 const { writeEngagementScope } = require('../scope')
 const { isValidFrameworkId, getFrameworkPath } = require('../frameworks')
+const { isValidDomainPackId, isRunnableDomainPackId, getDomainPack } = require('../domain-packs')
 const jobs = require('../jobs')
 
 const router = Router()
@@ -102,6 +103,19 @@ router.patch('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Versão de agente inválida.' })
     }
     patch.frameworkId = req.body.frameworkId
+  }
+  // Domain pack (módulo de pentest, ETAPA 0). Só permite selecionar packs EXECUTÁVEIS
+  // (status 'ready'). azure/ad/sap existem no registro mas estão 'planned' → recusa com
+  // mensagem clara em vez de persistir um pack que não roda.
+  if (req.body.domainPackId !== undefined) {
+    if (!isValidDomainPackId(req.body.domainPackId)) {
+      return res.status(400).json({ error: 'Domain pack inválido.' })
+    }
+    if (!isRunnableDomainPackId(req.body.domainPackId)) {
+      const p = getDomainPack(req.body.domainPackId)
+      return res.status(400).json({ error: `O domain pack "${p.label}" ainda está em construção (roadmap multi-domínio).` })
+    }
+    patch.domainPackId = req.body.domainPackId
   }
   if (req.user?.role === 'admin') {
     for (const key of adminOnly) {

@@ -9,6 +9,7 @@ import { ScheduleSettings } from '@/components/engagement/ScheduleSettings'
 import { ExecutionPanel } from '@/components/engagement/ExecutionPanel'
 import { ModelSwitcher } from '@/components/engagement/ModelSwitcher'
 import { FrameworkSwitcher } from '@/components/engagement/FrameworkSwitcher'
+import { DomainPackSwitcher } from '@/components/engagement/DomainPackSwitcher'
 import { JobPipeline } from '@/components/engagement/JobPipeline'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -129,8 +130,12 @@ export default function EngagementPage() {
   // feed antes (evita flicker); o merge por _dbId com liveMessages dedup.
   useEffect(() => {
     if (reconnectNonce === 0) return
+    // Recarrega tb. o engagement → o runState persistido (concluído/parado) volta fresco
+    // mesmo que o evento run_state tenha passado durante a queda; sem isto o painel podia
+    // continuar "rodando" após uma reconexão e exigir F5.
+    loadEngagement().catch(() => {})
     loadHistory().catch(() => {})
-  }, [reconnectNonce, loadHistory])
+  }, [reconnectNonce, loadHistory, loadEngagement])
 
   // Carrega findings persistidos do banco (no mount, ao trocar de engagement e a
   // cada reconexão) → o painel de Execução reflete os Achados/Superfície reais mesmo
@@ -222,6 +227,7 @@ export default function EngagementPage() {
           <ContextMeter usage={contextUsage} onCompact={handleCompact} disabled={running || !connected} />
         )}
 
+        {tab === 'exec' && <DomainPackSwitcher engagement={engagement} onUpdated={setEngagement} disabled={running} />}
         {tab === 'exec' && <FrameworkSwitcher engagement={engagement} onUpdated={setEngagement} disabled={running} />}
         {tab === 'exec' && <ModelSwitcher disabled={running} />}
 

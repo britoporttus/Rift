@@ -22,9 +22,9 @@ test('isValidFrameworkId reconhece só ids do registro', () => {
   assert.equal(fw.isValidFrameworkId(123), false)
 })
 
-test('listFrameworks: 3 versões, shape JSON-safe (sem função findingsDirs)', () => {
+test('listFrameworks: 4 versões (v2/v2c/legacy/v3), shape JSON-safe (sem função findingsDirs)', () => {
   const list = fw.listFrameworks()
-  assert.equal(list.length, 3)
+  assert.equal(list.length, 4)   // v2c entrou na consolidação (977c916) — tronco padrão
   for (const f of list) {
     assert.ok(f.id && f.label)
     assert.equal(typeof f.available, 'boolean')

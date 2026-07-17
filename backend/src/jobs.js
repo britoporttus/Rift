@@ -8,6 +8,21 @@
 const { v4: uuid } = require('uuid')
 const Job = require('./models/Job')
 
+// Teto de tentativas de um job da fila (dispatch inicial + retomadas por crash).
+const DEFAULT_MAX_ATTEMPTS = Number(process.env.JOBS_MAX_ATTEMPTS) || 3
+
+// Notifier global de job_update (igual ao do findings-watcher). O server registra
+// `(engagementId, event) => broadcastEngagement(...)` uma vez; assim QUALQUER mudança de
+// job — inclusive de scans agendados/headless, que não têm subscriber próprio — anima o
+// painel ao vivo para quem estiver conectado no engagement.
+let notifier = null
+function setNotifier(fn) { notifier = fn }
+function emit(jobDoc) {
+  if (!notifier || !jobDoc) return
+  const job = toDto(jobDoc)
+  try { notifier(job.engagementId, { type: 'job_update', job }) } catch {}
+}
+
 // Etapas canônicas do fluxo. Ordem = progresso natural do pentest.
 const CANONICAL_STEPS = [
   { key: 'recon',   label: 'Reconhecimento' },
@@ -23,20 +38,21 @@ function freshSteps() {
   return CANONICAL_STEPS.map((s) => ({ key: s.key, label: s.label, status: 'pending', startedAt: null, endedAt: null }))
 }
 
-// Abre um Job para um run. Emite via onUpdate (WS) se fornecido.
-async function startJob({ engagementId, sessionId = 'default', frameworkId = 'v2' }, onUpdate) {
+// Abre um Job para um run (interativo). Broadcast ao vivo via notifier global.
+async function startJob({ engagementId, sessionId = 'default', frameworkId = 'v2', domainPackId = 'web' }) {
   const job = await Job.create({
     _id: uuid(),
     engagementId,
     sessionId,
     frameworkId,
+    domainPackId,
     status: 'running',
     steps: freshSteps(),
     currentStep: null,
     startedAt: new Date(),
     updatedAt: new Date(),
   })
-  if (onUpdate) onUpdate(toDto(job))
+  emit(job)
   return job._id
 }
 
@@ -44,7 +60,7 @@ async function startJob({ engagementId, sessionId = 'default', frameworkId = 'v2
 // 'active', fecha a anterior como 'done', e preenche etapas ANTERIORES puladas como
 // 'done' (o agente pode saltar direto para enum sem "terminar" recon formalmente).
 // PERMITE regressão (não rebaixa etapas já 'done'): reflete o que o agente faz AGORA.
-async function advanceStep(jobId, phaseKey, onUpdate) {
+async function advanceStep(jobId, phaseKey) {
   if (!jobId || !(phaseKey in STEP_INDEX)) return
   const job = await Job.findById(jobId)
   if (!job || job.status !== 'running') return
@@ -68,11 +84,11 @@ async function advanceStep(jobId, phaseKey, onUpdate) {
   job.currentStep = phaseKey
   job.updatedAt = now
   await job.save()
-  if (onUpdate) onUpdate(toDto(job))
+  emit(job)
 }
 
 // Fecha o Job no desfecho do run. `phasesReached` = fases efetivamente exercidas.
-async function closeJob(jobId, { status, reason = null, findingsCount, spentUsd, phasesReached = [] } = {}, onUpdate) {
+async function closeJob(jobId, { status, reason = null, findingsCount, spentUsd, phasesReached = [] } = {}) {
   if (!jobId) return
   const job = await Job.findById(jobId)
   if (!job) return
@@ -94,21 +110,126 @@ async function closeJob(jobId, { status, reason = null, findingsCount, spentUsd,
   job.endedAt = now
   job.updatedAt = now
   await job.save()
-  if (onUpdate) onUpdate(toDto(job))
+  emit(job)
 }
 
-// Reconciliação no boot: um Job 'running' persistido sem run vivo (o backend caiu no
-// meio) fica órfão. Marca como 'failed'/'interrupted' para o fluxo ter um fim registrado.
-async function reconcileStaleJobs() {
-  const res = await Job.updateMany(
-    { status: 'running' },
-    { $set: { status: 'failed', reason: 'interrupted', endedAt: new Date(), updatedAt: new Date(), currentStep: null } }
+// ── Fila durável (padrão "outbox") ─────────────────────────────────────────────
+// Enfileira um run: grava a INTENÇÃO como 'queued' antes de qualquer processo existir.
+// O worker (jobs-worker.js) é quem despacha. `payload` = snapshot p/ reconstruir o run.
+async function enqueueJob({ engagementId, sessionId = 'default', frameworkId = 'v2', domainPackId = 'web', kind = 'scheduled', payload = null, maxAttempts } = {}) {
+  const now = new Date()
+  const job = await Job.create({
+    _id: uuid(),
+    engagementId,
+    sessionId,
+    frameworkId,
+    domainPackId,
+    kind,
+    status: 'queued',
+    steps: freshSteps(),
+    currentStep: null,
+    payload,
+    attempts: 0,
+    maxAttempts: maxAttempts || DEFAULT_MAX_ATTEMPTS,
+    queuedAt: now,
+    startedAt: null,   // preenchido no claim
+    updatedAt: now,
+  })
+  emit(job)          // broadcast 'queued' → painel mostra "na fila" na hora
+  return job._id
+}
+
+// Já existe um job "ativo" (na fila OU rodando) para este engagement? Evita empilhar
+// runs duplicados do mesmo alvo (o tick do agendador roda a cada 5 min).
+async function hasActiveJob(engagementId, kinds = ['scheduled']) {
+  return !!(await Job.exists({ engagementId, kind: { $in: kinds }, status: { $in: ['queued', 'running'] } }))
+}
+
+// Claim ATÔMICO: pega o job 'queued' mais antigo (FIFO) de um kind cujo engagement não
+// esteja ocupado, e o vira 'running' na MESMA operação. O findOneAndUpdate é atômico no
+// documento → dois ticks nunca pegam o mesmo job (single-flight). Incrementa attempts.
+async function claimNextQueuedJob({ kinds = ['scheduled'], busyEngagementIds = [] } = {}) {
+  const now = new Date()
+  // returnDocument:'after' (não `new:true`, que está deprecado) — este claim roda a cada
+  // ~2s no worker; a forma deprecada floodaria o log com um aviso por tick.
+  const job = await Job.findOneAndUpdate(
+    { status: 'queued', kind: { $in: kinds }, engagementId: { $nin: busyEngagementIds } },
+    { $set: { status: 'running', startedAt: now, heartbeatAt: now, updatedAt: now }, $inc: { attempts: 1 } },
+    { sort: { queuedAt: 1 }, returnDocument: 'after' },
   )
-  return res.modifiedCount || 0
+  if (!job) return null
+  emit(job)          // broadcast 'queued' → 'running' → painel troca "na fila" por "em andamento"
+  return toDto(job)
+}
+
+// Quantos jobs de um kind estão 'running' agora (para o teto de concorrência do worker).
+async function countRunningJobs(kinds = ['scheduled']) {
+  return Job.countDocuments({ status: 'running', kind: { $in: kinds } })
+}
+
+// engagementIds com job 'running' (para o filtro single-flight do claim).
+async function runningEngagementIds(kinds = ['scheduled']) {
+  return Job.distinct('engagementId', { status: 'running', kind: { $in: kinds } })
+}
+
+// Persiste o session_id do CLI no próprio Job → habilita o resume mesmo após restart
+// (o mapa em memória do agent-runner morre; o Job sobrevive no banco).
+async function setClaudeSession(jobId, claudeSessionId) {
+  if (!jobId || !claudeSessionId) return
+  await Job.findByIdAndUpdate(jobId, { $set: { claudeSessionId, heartbeatAt: new Date() } }).catch(() => {})
+}
+
+// Sinal de vida periódico do run (o worker/dispatcher pode chamar). Não é obrigatório
+// para a recuperação no boot (lá, todo 'running' é órfão), mas ajuda diagnóstico.
+async function heartbeatJob(jobId) {
+  if (!jobId) return
+  await Job.findByIdAndUpdate(jobId, { $set: { heartbeatAt: new Date() } }).catch(() => {})
+}
+
+// Recuperação no boot ("forçar até o fim"). Nenhum processo do agente sobrevive a um
+// restart → todo Job 'running' é órfão. Retomáveis (kind:'scheduled' + tem
+// claudeSessionId + ainda tem tentativa) voltam pra 'queued' com resume:true e o worker
+// os re-despacha com `claude --resume`. O resto (interativos, sem sessão, sem tentativa)
+// é encerrado como 'failed'/interrupted para o fluxo ter um fim registrado.
+async function recoverInterruptedJobs() {
+  const orphans = await Job.find({ status: 'running' })
+  const now = new Date()
+  let requeued = 0, failed = 0
+  for (const job of orphans) {
+    const resumable = job.kind === 'scheduled' && job.claudeSessionId && job.attempts < job.maxAttempts
+    if (resumable) {
+      job.status = 'queued'
+      job.resume = true
+      job.currentStep = null
+      job.queuedAt = now
+      job.startedAt = null
+      job.heartbeatAt = null
+      job.updatedAt = now
+      await job.save().catch(() => {})
+      requeued++
+    } else {
+      job.status = 'failed'
+      job.reason = 'interrupted'
+      job.currentStep = null
+      job.endedAt = now
+      job.updatedAt = now
+      await job.save().catch(() => {})
+      failed++
+    }
+  }
+  return { requeued, failed }
+}
+
+// Compat: mantido para chamadas antigas. A recuperação real no boot é recoverInterruptedJobs.
+async function reconcileStaleJobs() {
+  const { requeued, failed } = await recoverInterruptedJobs()
+  return requeued + failed
 }
 
 async function listJobs(engagementId, limit = 25) {
-  const rows = await Job.find({ engagementId }).sort({ startedAt: -1 }).limit(limit).lean()
+  // Ordena por updatedAt (não startedAt): um job 'queued' tem startedAt=null e ficaria
+  // por último; updatedAt garante que o job mais recente (inclusive na fila) venha em [0].
+  const rows = await Job.find({ engagementId }).sort({ updatedAt: -1 }).limit(limit).lean()
   return rows.map(toDto)
 }
 
@@ -126,10 +247,20 @@ function toDto(job) {
 
 module.exports = {
   CANONICAL_STEPS,
+  setNotifier,
   startJob,
   advanceStep,
   closeJob,
   reconcileStaleJobs,
   listJobs,
   getActiveJob,
+  // Fila durável (worker):
+  enqueueJob,
+  hasActiveJob,
+  claimNextQueuedJob,
+  countRunningJobs,
+  runningEngagementIds,
+  setClaudeSession,
+  heartbeatJob,
+  recoverInterruptedJobs,
 }

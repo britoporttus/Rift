@@ -124,7 +124,228 @@ export const api = {
       req<{ current: string }>('/settings/model', { method: 'PUT', body: JSON.stringify({ model }) }),
     // Catálogo das versões do agente (seletor A/B/C). A escolha é por-engagement.
     getFrameworks: () => req<FrameworkInfo>('/settings/frameworks'),
+    // Catálogo dos domain packs do módulo de pentest (web/azure/ad/sap). Por-engagement.
+    getDomainPacks: () => req<DomainPackInfo>('/settings/domain-packs'),
   },
+  // Módulo ASM / Domínios (análise de superfície passiva + vazamento de credenciais).
+  domains: {
+    list: () => req<DomainSummary[]>('/domains'),
+    get: (id: string) => req<DomainDetail>(`/domains/${id}`),
+    create: (data: { domain: string; name?: string; kind?: string; notes?: string }) =>
+      req<DomainDetail>('/domains', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: { name?: string; kind?: string; notes?: string }) =>
+      req<DomainDetail>(`/domains/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) => req<void>(`/domains/${id}`, { method: 'DELETE' }),
+    scan: (id: string) =>
+      req<{ ok: boolean; message: string }>(`/domains/${id}/scan`, { method: 'POST' }),
+    setAuthorization: (id: string, authorized: boolean, note?: string) =>
+      req<DomainDetail>(`/domains/${id}/authorization`, { method: 'PATCH', body: JSON.stringify({ authorized, note }) }),
+    assets: (id: string, type?: string) =>
+      req<DomainAsset[]>(`/domains/${id}/assets${type ? `?type=${type}` : ''}`),
+  },
+  // Módulo Vazamentos — exposição de credenciais por domínio (estilo QuimeraX).
+  leaks: {
+    list: () => req<LeakDomainSummary[]>('/leaks'),
+    get: (domain: string) => req<LeakAssessment>(`/leaks/${encodeURIComponent(domain)}`),
+    search: (domain: string) =>
+      req<LeakSearchResult>('/leaks/search', { method: 'POST', body: JSON.stringify({ domain }) }),
+    // Ingestão browser-side: o navegador do operador coleta de uma fonte cujo IP
+    // do servidor é bloqueado (Hudson Rock) e envia o JSON pro backend normalizar.
+    ingest: (domain: string, source: string, raw: unknown) =>
+      req<{ domain: string; source: string; ingested: number }>('/leaks/ingest', { method: 'POST', body: JSON.stringify({ domain, source, raw }) }),
+    delete: (domain: string) => req<void>(`/leaks/${encodeURIComponent(domain)}`, { method: 'DELETE' }),
+    providers: () => req<LeakProvider[]>('/leaks/providers'),
+    setProviderKey: (id: string, data: { apiKey?: string; apiUser?: string }) =>
+      req<{ id: string; configured: boolean }>(`/leaks/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  },
+  // Mapa de Superfície — grafo que interliga os dados de ASM + Findings + Vazamentos.
+  graph: {
+    get: () => req<GraphResponse>('/graph'),
+    domain: (id: string) => req<GraphResponse>(`/graph/domain/${id}`),
+  },
+}
+
+// ── Mapa de Superfície (grafo) ────────────────────────────────────────────────
+export type GraphNodeType =
+  | 'domain' | 'subdomain' | 'ip' | 'tech' | 'webserver'
+  | 'exposure' | 'vuln' | 'stealer_family' | 'leaked_account' | 'breach'
+
+export interface GraphNode {
+  id: string
+  type: GraphNodeType
+  label: string
+  meta: Record<string, unknown>
+}
+export type GraphEdgeType =
+  | 'has_subdomain' | 'resolves_to' | 'runs' | 'served_by'
+  | 'exposes' | 'vulnerable_to' | 'leaked' | 'via' | 'appears_in'
+export interface GraphEdge {
+  source: string
+  target: string
+  type: GraphEdgeType
+}
+export interface GraphStats {
+  domains: number
+  subdomains: number
+  ips: number
+  techs: number
+  exposures: number
+  vulns: number
+  leaks: number
+  families: number
+  nodes: number
+  edges: number
+  truncated: number
+}
+export interface GraphResponse {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  stats: GraphStats
+}
+
+// ── Módulo ASM / Domínios ─────────────────────────────────────────────────────
+export type DomainKind = 'vendor' | 'partner' | 'internal' | 'other'
+export type ScanState = 'idle' | 'scanning' | 'done' | 'failed'
+
+export interface DomainSummary {
+  id: string
+  domain: string
+  name: string | null
+  kind: DomainKind
+  authorized: boolean
+  scanState: ScanState
+  scanStep?: string | null
+  scanError?: string | null
+  lastScanAt?: string | null
+  assetCount: number
+  aliveCount: number
+  leakCount: number
+  exposureCount: number
+  riskScore: number
+  riskLevel: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  riskReasons?: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DomainDetail extends DomainSummary {
+  notes?: string | null
+  authorizedBy?: string | null
+  authorizedAt?: string | null
+  authorizationNote?: string | null
+}
+
+export interface DomainAsset {
+  id: string
+  domainId: string
+  type: 'subdomain' | 'web' | 'url' | 'exposure'
+  value: string
+  ips: string[]
+  cname?: string | null
+  alive: boolean
+  statusCode?: number | null
+  title?: string | null
+  webServer?: string | null
+  tech: string[]
+  scheme?: string | null
+  tlsIssuer?: string | null
+  tlsExpiry?: string | null
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  label?: string | null
+  source?: string | null
+  firstSeen?: string | null
+  lastSeen?: string | null
+}
+
+export type LeakCategory = 'malware' | 'breach' | 'combolist'
+
+export interface LeakedCredential {
+  id: string
+  domain: string
+  domainId?: string | null
+  category: LeakCategory
+  account?: string | null
+  provider?: string | null
+  breachName?: string | null
+  breachTitle?: string | null
+  breachDate?: string | null
+  addedDate?: string | null
+  pwnCount?: number | null
+  dataClasses: string[]
+  hasPassword: boolean
+  sourceUrl?: string | null
+  stealerFamily?: string | null
+  seenDate?: string | null
+  description?: string | null
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  firstSeen?: string | null
+}
+
+export interface LeakProvider {
+  id: string
+  label: string
+  needsKey: boolean
+  configured: boolean
+  real?: boolean
+}
+
+export interface LeakProviderReport {
+  id: string
+  ran: boolean
+  available?: boolean
+  reason?: string | null
+  count?: number
+}
+
+// Métricas + gráficos do assessment de exposição (estilo QuimeraX).
+export interface ExposureAssessment {
+  riskScore: number
+  riskLevel: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  riskReasons: string[]
+  metrics: {
+    malwareCompromises: number
+    leakedPasswords: number
+    employeesAtRisk: number
+    affectedUsers: number
+    breachCount: number
+  }
+  timeline: Array<{ month: string; count: number }>
+  stealerFamilies: Array<{ name: string; count: number; pct: number }>
+}
+
+// Linha do histórico de buscas (lista do módulo Vazamentos).
+export interface LeakDomainSummary {
+  id: string
+  domain: string
+  searchState: 'idle' | 'searching' | 'done' | 'failed'
+  searchError?: string | null
+  lastSearchAt?: string | null
+  providersRan: string[]
+  riskScore: number
+  riskLevel: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  malwareCompromises: number
+  leakedPasswords: number
+  employeesAtRisk: number
+  affectedUsers: number
+  breachCount: number
+  logo?: string | null
+  thirdPartyDomains?: Array<{ domain: string; occurrence: number }>
+}
+
+// Detalhe completo (GET /leaks/:domain).
+export interface LeakAssessment {
+  domain: string
+  summary: LeakDomainSummary | null
+  assessment: ExposureAssessment
+  credentials: LeakedCredential[]
+}
+
+// Resultado imediato de uma busca (POST /leaks/search).
+export interface LeakSearchResult {
+  domain: string
+  authorized: boolean
+  providers: LeakProviderReport[]
+  assessment: ExposureAssessment
 }
 
 export interface FrameworkOption {
@@ -137,6 +358,23 @@ export interface FrameworkOption {
 export interface FrameworkInfo {
   default: string
   available: FrameworkOption[]
+}
+
+// Domain pack do módulo de pentest (ETAPA 0 multi-domínio). `available` = executável
+// hoje (status 'ready'); 'planned' = azure/ad/sap em construção (seletor desabilita).
+export interface DomainPackOption {
+  id: string
+  label: string
+  note: string
+  status: 'ready' | 'planned'
+  available: boolean
+  position: 'external' | 'network'
+  checkpointPolicy: 'per-phase' | 'per-action'
+  credentialHandling: 'none' | 'vault'
+}
+export interface DomainPackInfo {
+  default: string
+  available: DomainPackOption[]
 }
 
 export interface AgentModelOption {
@@ -191,6 +429,8 @@ export interface Engagement {
   date: string
   // Versão do agente (seletor A/B/C). Ausente em engagements antigos → tratar como 'v2'.
   frameworkId?: string
+  // Domain pack do módulo de pentest. Ausente em engagements antigos → tratar como 'web'.
+  domainPackId?: string
   schedule?: EngagementSchedule
   // Custo acumulado (soma de Usage no backend). Persiste entre reloads — o painel
   // usa isto como baseline e soma os cost_update ao vivo por cima.
@@ -212,13 +452,19 @@ export interface Job {
   engagementId: string
   sessionId: string
   frameworkId: string
-  status: 'running' | 'completed' | 'stopped' | 'failed'
+  domainPackId?: string
+  kind?: 'interactive' | 'scheduled'
+  status: 'queued' | 'running' | 'completed' | 'stopped' | 'failed'
   reason?: string | null
   steps: JobStep[]
   currentStep?: string | null
   findingsCount: number
   spentUsd: number
-  startedAt: string
+  attempts?: number
+  maxAttempts?: number
+  resume?: boolean
+  queuedAt?: string | null
+  startedAt?: string | null
   endedAt?: string | null
 }
 

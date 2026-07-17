@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { requireAuth } = require('../auth')
 const { getAgentModel, setAgentModel, isValidModel, AVAILABLE_MODELS, DEFAULT_MODEL } = require('../settings')
 const { listFrameworks, DEFAULT_FRAMEWORK_ID } = require('../frameworks')
+const { listDomainPacks, DEFAULT_DOMAIN_PACK_ID } = require('../domain-packs')
 
 const router = Router()
 router.use(requireAuth())   // qualquer operador autenticado
@@ -16,6 +17,13 @@ router.get('/model', (_req, res) => {
 // (persistida em Engagement.frameworkId via PATCH /engagements/:id).
 router.get('/frameworks', (_req, res) => {
   res.json({ default: DEFAULT_FRAMEWORK_ID, available: listFrameworks() })
+})
+
+// Catálogo dos DOMAIN PACKS do módulo de pentest (ETAPA 0 multi-domínio). `available`
+// = pack executável hoje (status 'ready'); planned (azure/ad/sap) vêm no catálogo mas
+// desabilitados no seletor. Escolha por-engagement (Engagement.domainPackId via PATCH).
+router.get('/domain-packs', (_req, res) => {
+  res.json({ default: DEFAULT_DOMAIN_PACK_ID, available: listDomainPacks() })
 })
 
 // Troca o modelo do agente (vale para o PRÓXIMO run de qualquer engagement).

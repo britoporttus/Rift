@@ -27,6 +27,10 @@ const engagementSchema = new mongoose.Schema({
   // Versão do agente de pentest usada por ESTE engagement (seletor A/B/C). Validado
   // contra src/frameworks.js. Default 'v2' → engagements antigos rodam idênticos.
   frameworkId:  { type: String, default: 'v2' },
+  // Domain pack do módulo de pentest (ETAPA 0 do roadmap multi-domínio). Validado
+  // contra src/domain-packs.js. Default 'web' → engagements antigos rodam idênticos
+  // (pack #0 = comportamento atual). Ortogonal ao frameworkId (versão do tronco).
+  domainPackId: { type: String, default: 'web' },
 
   // Agendamento de scans recorrentes (monitoramento contínuo da superfície de ataque)
   schedule: {

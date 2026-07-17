@@ -21,13 +21,19 @@ const reportsRouter = require('./api/reports')
 const adminRouter = require('./api/admin')
 const usersRouter = require('./api/users')
 const settingsRouter = require('./api/settings')
+const domainsRouter = require('./api/domains')
+const leaksRouter = require('./api/leaks')
+const graphRouter = require('./api/graph')
+const asmScanner = require('./asm/scanner')
 const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
 const scheduler = require('./scheduler')
+const jobsWorker = require('./jobs-worker')
 const { getEngagement, updateEngagement, appendUsage, sumUsageUsd, countFindings } = require('./store')
 const { deriveRunOutcome } = require('./run-outcome')
 const { resetEngagementState } = require('./scope')
 const { getFramework, loadRules } = require('./frameworks')
+const { getDomainPack, loadDomainPrompt } = require('./domain-packs')
 const jobs = require('./jobs')
 const ChatSession = require('./models/ChatSession')
 const Engagement = require('./models/Engagement')
@@ -118,6 +124,9 @@ const stopRequested = new Set()
 // BUG-3: registra o notifier global do watcher (broadcast ao vivo). Feito 1x —
 // o watcher passa a transmitir findings a QUALQUER conexão, não só à primeira.
 findingsWatcher.setNotifier((engagementId, event) => broadcastEngagement(engagementId, event))
+// Mesmo padrão para jobs: qualquer mudança de job (inclusive de scan agendado/headless,
+// sem subscriber próprio) anima o painel ao vivo para quem estiver no engagement.
+jobs.setNotifier((engagementId, event) => broadcastEngagement(engagementId, event))
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(s => s.trim())
 app.use(cors({
@@ -140,6 +149,9 @@ app.use('/api/reports', reportsRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/users', usersRouter)
 app.use('/api/settings', settingsRouter)
+app.use('/api/domains', domainsRouter)
+app.use('/api/leaks', leaksRouter)
+app.use('/api/graph', graphRouter)
 
 // REL-1: 404 de API + middleware de erro global (DEPOIS das rotas). Sem o error
 // handler, a rejeição async capturada por express-async-errors não teria destino.
@@ -234,6 +246,15 @@ wss.on('connection', async (ws) => {
     }
     ws.send(JSON.stringify({ type: 'run_state', state: effectiveRun, reason }))
   }
+
+  // Reidrata o "Fluxo do run" (Jobs): manda o job mais recente a quem (re)conectou.
+  // Sem isto, após uma queda de WS o pipeline de etapas congela — não há job_update no
+  // ar quando nada muda de fase. listJobs ordena por updatedAt → [0] é o mais recente.
+  jobs.listJobs(engId, 1).then((list) => {
+    if (list && list[0] && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'job_update', job: list[0] }))
+    }
+  }).catch(() => {})
 
   // Reidrata o medidor de contexto com o último valor conhecido desta sessão.
   if (sessionId !== 'default') {
@@ -457,6 +478,15 @@ ${aggressiveRule}
         ? `\n[REGRAS DO FRAMEWORK "${framework.label}" — SIGA-AS COMO METODOLOGIA]\n${fwRules.slice(0, 12000)}\n`
         : ''
 
+      // Domain pack (ETAPA 0 multi-domínio): injeta o CONTEÚDO do domínio no contexto.
+      // Pack #0 'web' tem systemPrompt vazio → packBlock '' → nada muda (no-op). Quando
+      // azure/ad/sap ficarem 'ready' (ETAPAs 1-3), o prompt do pack entra por aqui.
+      const domainPack = getDomainPack(eng?.domainPackId)
+      const domainPrompt = loadDomainPrompt(domainPack)
+      const packBlock = domainPrompt
+        ? `\n[DOMAIN PACK "${domainPack.label}" — CONTEXTO DO DOMÍNIO]\n${domainPrompt.slice(0, 12000)}\n`
+        : ''
+
       const ctx = eng
         ? `[CONTEXTO DO SISTEMA — NÃO IGNORAR]
 Engagement ativo: "${eng.name}"
@@ -478,7 +508,7 @@ ${fwGuidance}
 - Para SALVAR ARQUIVOS: use SEMPRE a ferramenta Write ou Edit, NUNCA "cat >" ou "tee" via Bash (esses comandos são bloqueados pelo safety hook)
 - CADA finding deve ser salvo como um arquivo YAML em ${canonicalFindingsDir}{id}.yaml (um por finding), com ao menos: id, title, severity (critical|high|medium|low|info), type, location, description, evidence, recommendation. É assim que o painel do Rift captura os findings em tempo real. Sempre que capturar valores reais (IDs, e-mails, tokens, tenant/client_id, paths expostos), COLOQUE-OS na evidência — o relatório os destaca.
 - Cloudflare Email Protection: se encontrar "[email protected]" ou \`data-cfemail="HEX"\` / \`/cdn-cgi/l/email-protection\`, o e-mail real está no HEX — decodifique (1º byte = chave; XOR cada byte seguinte com ela) e registre o e-mail real, não o placeholder. Ex.: \`python3 -c "h='HEX';b=bytes.fromhex(h);print(''.join(chr(x^b[0]) for x in b[1:]))"\`
-- Se existir context/${engId2}/session-summary.md, leia-o no início para retomar o contexto compactado${historyCtx}${fwRulesBlock}
+- Se existir context/${engId2}/session-summary.md, leia-o no início para retomar o contexto compactado${historyCtx}${fwRulesBlock}${packBlock}
 [OPERADOR — MENSAGEM ATUAL]
 `
         : ''
@@ -546,10 +576,8 @@ ${fwGuidance}
       // a partir da atividade real (phase_update) e o fecha no desfecho (onClose).
       let jobId = null
       try {
-        jobId = await jobs.startJob(
-          { engagementId: engId, sessionId, frameworkId: framework.id },
-          (job) => broadcastSession(engId, sessionId, { type: 'job_update', job }),
-        )
+        // job_update é transmitido pelo notifier global (jobs.setNotifier no boot).
+        jobId = await jobs.startJob({ engagementId: engId, sessionId, frameworkId: framework.id, domainPackId: domainPack.id })
       } catch (e) { console.warn('[jobs] start falhou:', e.message) }
 
       // Broadcaster VIVO: re-resolve os clientes atuais da sessão a cada evento
@@ -575,9 +603,9 @@ ${fwGuidance}
               ChatSession.findByIdAndUpdate(sessionId, { contextTokens: event.tokens }).catch(() => {})
             }
           }
-          // Jobs: a fase derivada da atividade real avança a etapa do fluxo.
+          // Jobs: a fase derivada da atividade real avança a etapa do fluxo (broadcast via notifier).
           if (event.type === 'phase_update' && jobId) {
-            jobs.advanceStep(jobId, event.phase, (job) => broadcastSession(engId, sessionId, { type: 'job_update', job })).catch(() => {})
+            jobs.advanceStep(jobId, event.phase).catch(() => {})
           }
         },
         eng,
@@ -626,7 +654,6 @@ ${fwGuidance}
               jobs.closeJob(
                 jobId,
                 { status: jobStatus, reason: stopReason, findingsCount: fc, spentUsd: spent, phasesReached: info?.phasesReached || [] },
-                (job) => broadcastSession(engId, sessionId, { type: 'job_update', job }),
               ).catch((e) => console.warn('[jobs] close falhou:', e.message))
             }
             // Compactação: /rift-compact escreve o resumo em disco e, ao terminar,
@@ -688,17 +715,28 @@ connect()
     } catch (err) {
       console.warn('[rift] reconcile de runState falhou:', err?.message)
     }
-    // Jobs órfãos ('running' sem run vivo após restart) → fecham como 'failed'/interrupted.
+    // Jobs órfãos ('running' sem run vivo após restart): os agendados retomáveis voltam
+    // pra fila (resume:true → o worker os re-despacha com `claude --resume`, "forçando
+    // até o fim"); o resto (interativos/sem sessão/sem tentativa) → 'failed'/interrupted.
     try {
-      const n = await jobs.reconcileStaleJobs()
-      if (n) console.log(`[rift] reconciliados ${n} job(s) órfão(s) no boot`)
+      const { requeued, failed } = await jobs.recoverInterruptedJobs()
+      if (requeued || failed) console.log(`[rift] recuperação de jobs no boot: ${requeued} re-enfileirado(s) p/ resume, ${failed} encerrado(s)`)
     } catch (err) {
-      console.warn('[rift] reconcile de jobs falhou:', err?.message)
+      console.warn('[rift] recuperação de jobs falhou:', err?.message)
+    }
+    // ASM: scans in-process não sobrevivem a restart → reconcilia 'scanning' órfão.
+    try {
+      const n = await asmScanner.recoverInterruptedScans()
+      if (n) console.log(`[rift] reconciliados ${n} scan(s) ASM 'scanning' → 'failed' no boot`)
+    } catch (err) {
+      console.warn('[rift] recuperação de scans ASM falhou:', err?.message)
     }
     httpServer.listen(PORT, () => {
       console.log(`[rift] backend em http://localhost:${PORT}`)
     })
     scheduler.start()
+    // Worker de Jobs: o único a despachar runs agendados/headless (lê a fila a cada ~2s).
+    jobsWorker.start()
   })
   .catch((err) => {
     console.error('[db] falha ao conectar MongoDB:', err.message)
@@ -716,6 +754,7 @@ function shutdown(signal) {
   try { agentRunner.stopAll() } catch {}
   try { findingsWatcher.closeAll() } catch {}
   try { scheduler.stop() } catch {}
+  try { jobsWorker.stop() } catch {}
   clearInterval(wsHeartbeat)
   for (const ws of wss.clients) { try { ws.terminate() } catch {} }
   httpServer.close(() => {
