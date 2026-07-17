@@ -9,6 +9,7 @@ import {
   AlertTriangle, HelpCircle, ChevronDown, ChevronRight, DollarSign, Terminal,
   Square, RotateCcw, PlayCircle, Globe, Network, Cpu, Shield, Link2, Server, Flag,
   BookOpen, Search, FileText, Crosshair, Bug, FolderSearch, RefreshCw, Clock,
+  KeyRound, Cloud,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -38,12 +39,36 @@ const SEV_COLOR: Record<string, string> = {
 }
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
-// Fases do Agente 1 (black-box). A timeline deriva o estado dos eventos phase_update.
-const PHASES = [
-  { key: 'recon', label: 'Recon',            icon: Radar,       hint: 'Mapeamento externo' },
-  { key: 'enum',  label: 'Enumeração',       icon: ScanSearch,  hint: 'Superfície + assets' },
-  { key: 'vuln',  label: 'Vulnerabilidades', icon: ShieldAlert, hint: 'Exploit-to-confirm' },
-]
+// Fases por DOMÍNIO. As keys (recon/enum/vuln) são as mesmas do Job/phase_update — só
+// os rótulos/ícones mudam por domain pack, então cada tipo tem sua "tela" de execução
+// sem reescrever o modelo de fases. Autenticado (cloud/AD/SAP) não é "mapeamento externo".
+const PHASE_SETS: Record<string, { key: string; label: string; icon: typeof Radar; hint: string }[]> = {
+  web: [
+    { key: 'recon', label: 'Recon',            icon: Radar,       hint: 'Mapeamento externo' },
+    { key: 'enum',  label: 'Enumeração',       icon: ScanSearch,  hint: 'Superfície + assets' },
+    { key: 'vuln',  label: 'Vulnerabilidades', icon: ShieldAlert, hint: 'Exploit-to-confirm' },
+  ],
+  cloud: [ // azure / aws / gcp (autenticado, via API)
+    { key: 'recon', label: 'Autenticação', icon: KeyRound,    hint: 'Login + identidade' },
+    { key: 'enum',  label: 'Enumeração',   icon: Cloud,       hint: 'Recursos + RBAC + diretório' },
+    { key: 'vuln',  label: 'Escalada',     icon: ShieldAlert, hint: 'Caminhos + PoC (checkpoint)' },
+  ],
+  ad: [
+    { key: 'recon', label: 'Autenticação', icon: KeyRound,    hint: 'Bind + validação' },
+    { key: 'enum',  label: 'Coleta',       icon: Network,     hint: 'BloodHound / LDAP / SMB' },
+    { key: 'vuln',  label: 'Escalada',     icon: ShieldAlert, hint: 'Kerberos / DACL / AD CS' },
+  ],
+  sap: [
+    { key: 'recon', label: 'Autenticação', icon: KeyRound,    hint: 'Logon + client' },
+    { key: 'enum',  label: 'Enumeração',   icon: ScanSearch,  hint: 'RFC / Gateway / perfis' },
+    { key: 'vuln',  label: 'Escalada',     icon: ShieldAlert, hint: 'SoD / RFC / autorizações' },
+  ],
+}
+function phasesFor(packId: string) {
+  if (packId === 'ad' || packId === 'sap') return PHASE_SETS[packId]
+  if (packId && packId !== 'web') return PHASE_SETS.cloud // azure/aws/gcp
+  return PHASE_SETS.web
+}
 
 function normalizePhase(p: string): string {
   const s = p.toLowerCase()
@@ -166,6 +191,11 @@ export function ExecutionPanel({
   const [feedOpen, setFeedOpen] = useState(false)
   // A-LIVE-2: qual marco está expandido (mostra o que foi encontrado).
   const [expandedMs, setExpandedMs] = useState<string | null>(null)
+
+  // Domain pack deste engagement → fases e CTAs próprios (web vs autenticado).
+  const packId = engagement.domainPackId || 'web'
+  const isAuthPack = packId !== 'web'
+  const PHASES = phasesFor(packId)
 
   // ── Findings (dedup por id, ordenado por severidade) ──────────────────────
   const findingMsgs = messages.filter((m) => m.type === 'finding')
@@ -373,11 +403,12 @@ export function ExecutionPanel({
           padding: '2rem', textAlign: 'center', marginBottom: 16,
         }}>
           <div style={{ color: 'var(--text)', fontSize: 15, fontWeight: 600, marginBottom: 6 }}>
-            Pronto para mapear {engagement.target}
+            {isAuthPack ? `Pronto para avaliar o tenant ${engagement.target}` : `Pronto para mapear ${engagement.target}`}
           </div>
           <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
-            O Agente 1 roda recon → enumeração → análise de vulnerabilidades (prova sem
-            credencial + mapa de superfície rico) automaticamente, e mostra os achados aqui em tempo real.
+            {isAuthPack
+              ? 'O agente autentica com a credencial (pré-voo), confirma a identidade, e então enumera o ambiente (recursos, RBAC, diretório) → analisa caminhos de escalada. Ações que alteram estado param em checkpoint. Os achados aparecem aqui em tempo real.'
+              : 'O Agente 1 roda recon → enumeração → análise de vulnerabilidades (prova sem credencial + mapa de superfície rico) automaticamente, e mostra os achados aqui em tempo real.'}
           </div>
           <button onClick={onStart} disabled={!connected} style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -432,7 +463,9 @@ export function ExecutionPanel({
                 <FileText size={14} /> Gerar relatório
               </button>
             )}
-            {runState === 'completed' && (
+            {/* Handoff black-box → autenticado só faz sentido no web. Packs autenticados
+                (azure/…) já recebem a credencial pelo painel de Credenciais. */}
+            {runState === 'completed' && !isAuthPack && (
               <button onClick={onProvideCredentials} disabled={!connected} title="Handoff para teste autenticado (Agente 2)" style={{
                 display: 'inline-flex', alignItems: 'center', gap: 7,
                 background: 'transparent', border: '1px solid var(--border-mid)', borderRadius: 8,
