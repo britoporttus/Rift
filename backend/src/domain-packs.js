@@ -96,10 +96,39 @@ function isRunnableDomainPackId(id) {
   return isValidDomainPackId(id) && isRunnable(BY_ID.get(id))
 }
 
+// Normaliza a entrada (id string | objeto pack | inválido) para um pack resolvido.
+// Um objeto já-resolvido (tem os campos) é usado direto; string/parcial/ausente
+// cai no getDomainPack (com fallback p/ o default 'web').
+function resolvePack(pack) {
+  if (typeof pack === 'string') return getDomainPack(pack)
+  if (pack && (typeof pack.systemPrompt === 'string' || pack.checkpointPolicy)) return pack
+  return getDomainPack(pack?.id)
+}
+
 // Texto do domínio a injetar no system-context do agente (vazio p/ 'web' → no-op).
 function loadDomainPrompt(pack) {
-  const p = pack && typeof pack.systemPrompt === 'string' ? pack : getDomainPack(pack?.id)
-  return p.systemPrompt || ''
+  return resolvePack(pack).systemPrompt || ''
+}
+
+// ── Checkpoint por-ação (RBAC destrutivo) ──────────────────────────────────────
+// Prioridade #1 de segurança destrutiva do Conselho: em domínios autenticados que
+// alteram estado (cloud/AD/SAP), o gate NÃO é por fase — é por AÇÃO. Este bloco é
+// injetado no contexto quando o pack tem checkpointPolicy 'per-action'. Para 'web'
+// (per-phase, black-box read-only) retorna '' → nada muda no comportamento atual.
+const PER_ACTION_CHECKPOINT = `
+[CHECKPOINT POR AÇÃO — POLÍTICA DESTRUTIVA DESTE DOMÍNIO]
+Este domínio opera com credenciais e pode ALTERAR O ESTADO do alvo. REGRA DURA:
+- Antes de CADA ação que crie, modifique ou remova recursos, altere permissões/RBAC,
+  reinicie serviços ou escreva em qualquer sistema do alvo: PARE e peça aprovação
+  EXPLÍCITA do operador — descreva a ação, o recurso EXATO e o raio de impacto (blast
+  radius). NÃO encadeie ações destrutivas sem aprovação individual.
+- Ações somente-leitura (enumeração, listagem, coleta de configuração/RBAC) seguem
+  normalmente, sem aprovação por ação.
+- Em dúvida sobre o impacto, trate como destrutiva e peça aprovação.`
+
+// Bloco de checkpoint a injetar para este pack ('' quando per-phase → no-op p/ web).
+function loadCheckpointDirective(pack) {
+  return resolvePack(pack).checkpointPolicy === 'per-action' ? PER_ACTION_CHECKPOINT : ''
 }
 
 // Shape JSON-safe para a API/seletor.
@@ -126,5 +155,6 @@ module.exports = {
   isValidDomainPackId,
   isRunnableDomainPackId,
   loadDomainPrompt,
+  loadCheckpointDirective,
   listDomainPacks,
 }

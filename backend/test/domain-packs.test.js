@@ -75,3 +75,19 @@ test('loadDomainPrompt aceita id ou objeto e nunca quebra', () => {
   assert.equal(dp.loadDomainPrompt(undefined), '')
   assert.equal(dp.loadDomainPrompt(null), '')
 })
+
+test('loadCheckpointDirective: per-action injeta gate destrutivo; web (per-phase) é no-op', () => {
+  // web = per-phase → vazio (comportamento atual intacto)
+  assert.equal(dp.loadCheckpointDirective('web'), '')
+  assert.equal(dp.loadCheckpointDirective(dp.getDomainPack('web')), '')
+  // azure/ad/sap = per-action → bloco de checkpoint por ação presente
+  for (const id of ['azure', 'ad', 'sap']) {
+    const block = dp.loadCheckpointDirective(id)
+    assert.match(block, /CHECKPOINT POR AÇÃO/)
+    assert.match(block, /aprovação/i)
+    assert.match(block, /blast/i)   // "blast radius" (raio de impacto)
+  }
+  // resolve por id ou por objeto, e nunca quebra
+  assert.equal(dp.loadCheckpointDirective(undefined), '')  // default web
+  assert.equal(dp.loadCheckpointDirective(null), '')
+})

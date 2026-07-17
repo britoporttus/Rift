@@ -33,7 +33,7 @@ const { getEngagement, updateEngagement, appendUsage, sumUsageUsd, countFindings
 const { deriveRunOutcome } = require('./run-outcome')
 const { resetEngagementState } = require('./scope')
 const { getFramework, loadRules } = require('./frameworks')
-const { getDomainPack, loadDomainPrompt } = require('./domain-packs')
+const { getDomainPack, loadDomainPrompt, loadCheckpointDirective } = require('./domain-packs')
 const jobs = require('./jobs')
 const ChatSession = require('./models/ChatSession')
 const Engagement = require('./models/Engagement')
@@ -486,6 +486,9 @@ ${aggressiveRule}
       const packBlock = domainPrompt
         ? `\n[DOMAIN PACK "${domainPack.label}" — CONTEXTO DO DOMÍNIO]\n${domainPrompt.slice(0, 12000)}\n`
         : ''
+      // Checkpoint por-ação p/ domínios destrutivos (azure/ad/sap). Vazio p/ web
+      // (per-phase, black-box) → no-op. Prioridade #1 de segurança destrutiva do Conselho.
+      const checkpointBlock = loadCheckpointDirective(domainPack)
 
       const ctx = eng
         ? `[CONTEXTO DO SISTEMA — NÃO IGNORAR]
@@ -508,7 +511,7 @@ ${fwGuidance}
 - Para SALVAR ARQUIVOS: use SEMPRE a ferramenta Write ou Edit, NUNCA "cat >" ou "tee" via Bash (esses comandos são bloqueados pelo safety hook)
 - CADA finding deve ser salvo como um arquivo YAML em ${canonicalFindingsDir}{id}.yaml (um por finding), com ao menos: id, title, severity (critical|high|medium|low|info), type, location, description, evidence, recommendation. É assim que o painel do Rift captura os findings em tempo real. Sempre que capturar valores reais (IDs, e-mails, tokens, tenant/client_id, paths expostos), COLOQUE-OS na evidência — o relatório os destaca.
 - Cloudflare Email Protection: se encontrar "[email protected]" ou \`data-cfemail="HEX"\` / \`/cdn-cgi/l/email-protection\`, o e-mail real está no HEX — decodifique (1º byte = chave; XOR cada byte seguinte com ela) e registre o e-mail real, não o placeholder. Ex.: \`python3 -c "h='HEX';b=bytes.fromhex(h);print(''.join(chr(x^b[0]) for x in b[1:]))"\`
-- Se existir context/${engId2}/session-summary.md, leia-o no início para retomar o contexto compactado${historyCtx}${fwRulesBlock}${packBlock}
+- Se existir context/${engId2}/session-summary.md, leia-o no início para retomar o contexto compactado${historyCtx}${fwRulesBlock}${packBlock}${checkpointBlock}
 [OPERADOR — MENSAGEM ATUAL]
 `
         : ''
