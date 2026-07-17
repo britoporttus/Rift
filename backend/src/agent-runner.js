@@ -363,14 +363,20 @@ const ENV_ALLOWLIST = [
 // client"), que NÃO entende `-l subs.txt` → a enumeração de hosts vivos falhava e o
 // pipeline recon→enum→vuln morria de fome (resultado raso). Prependemos go/bin ao PATH.
 const AGENT_TOOL_PATH = process.env.AGENT_TOOL_PATH || '/home/digitalbath/go/bin'
+// ~/.local/bin: onde o pipx instala az/scout/prowler (packs autenticados). Sem isto
+// no PATH do agente, o `az` etc. não é encontrado no run do pack Azure.
+const LOCAL_BIN = require('path').join(require('os').homedir(), '.local', 'bin')
 function buildAgentEnv(extra) {
   const env = {}
   for (const key of ENV_ALLOWLIST) {
     if (process.env[key] !== undefined) env[key] = process.env[key]
   }
   const merged = { ...env, ...extra }
-  if (AGENT_TOOL_PATH && !(merged.PATH || '').split(':').includes(AGENT_TOOL_PATH)) {
-    merged.PATH = `${AGENT_TOOL_PATH}:${merged.PATH || ''}`
+  // Prepend dos dirs de tooling (precedência sobre homônimos do sistema).
+  for (const dir of [LOCAL_BIN, AGENT_TOOL_PATH]) {
+    if (dir && !(merged.PATH || '').split(':').includes(dir)) {
+      merged.PATH = `${dir}:${merged.PATH || ''}`
+    }
   }
   return merged
 }
@@ -560,6 +566,12 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
       detached: true,
       // SEC-1: env mínima, sem segredos do backend (ver ENV_ALLOWLIST/buildAgentEnv).
       env: buildAgentEnv({
+        // Credenciais EFÊMERAS do pack autenticado (Azure/AWS/…), fornecidas pelo
+        // operador para este engagement autorizado e injetadas SÓ neste run (cofre
+        // in-memory). Espalhadas primeiro para que as vars de CONTROLE do Rift abaixo
+        // (RIFT_*, FRAMEWORK_ROOT…) sempre prevaleçam sobre um objeto de credencial.
+        // NÃO são segredos do backend (esses seguem barrados pelo ENV_ALLOWLIST).
+        ...(opts.credentialEnv || {}),
         ENGAGEMENT_ID:       engagementId,
         // T1: raiz REAL do framework escolhido → os phase-files do v3 usam
         // `${FRAMEWORK_ROOT:-...}`, então o valor certo do Rift vence o hardcode

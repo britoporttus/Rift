@@ -33,6 +33,7 @@ const REGISTRY = [
     position: 'external',
     checkpointPolicy: 'per-phase',
     credentialHandling: 'none',
+    requiresRunner: false,
     toolManifest: ['subfinder', 'httpx', 'naabu', 'nuclei', 'ffuf', 'katana', 'gobuster'],
     // Vazio de propósito: o comportamento nativo do framework JÁ é o pentest web.
     // Nada é injetado → ETAPA 0 é no-op em runtime (risco zero).
@@ -40,39 +41,127 @@ const REGISTRY = [
   },
   {
     id: 'azure',
-    label: 'Azure / Cloud (autenticado)',
-    note: 'ETAPA 1 — autenticado via API (Graph/ARM), roda da VPS sem runner. Valida credencial + RBAC destrutivo + vault. Em construção.',
-    status: 'planned',
+    label: 'Azure / Entra ID (autenticado)',
+    note: 'Cloud, autenticado via API (Graph/ARM) — roda da VPS sem runner. Requer credencial (SP) no início do run e tooling (az/ScoutSuite/Prowler).',
+    status: 'ready',
     position: 'external',
     checkpointPolicy: 'per-action',
     credentialHandling: 'vault',
-    toolManifest: ['az', 'scoutsuite', 'prowler', 'pacu'],
-    // Metodologia do domínio em arquivo (revisável). Carregada por loadDomainPrompt
-    // quando o pack for injetado (só quando 'ready'). Ver src/packs/azure.md.
+    requiresRunner: false,
+    toolManifest: ['az', 'scout', 'prowler'],
     promptFile: 'packs/azure.md',
     systemPrompt: '',
+    // Campos que o operador informa por-run (efêmero) → env do processo do run.
+    credentialSpec: {
+      fields: [
+        { name: 'tenantId',       label: 'Tenant ID',            secret: false },
+        { name: 'clientId',       label: 'Client ID (App/SP)',   secret: false },
+        { name: 'clientSecret',   label: 'Client Secret',        secret: true },
+        { name: 'subscriptionId', label: 'Subscription ID',      secret: false, optional: true },
+      ],
+      env: {
+        tenantId:       'AZURE_TENANT_ID',
+        clientId:       'AZURE_CLIENT_ID',
+        clientSecret:   'AZURE_CLIENT_SECRET',
+        subscriptionId: 'AZURE_SUBSCRIPTION_ID',
+      },
+    },
   },
   {
     id: 'ad',
-    label: 'Active Directory (interno)',
-    note: 'ETAPA 2 — exige runner dentro da rede. Tooling maduro (BloodHound/NetExec/Certipy). Bloqueado por transporte de inferência. Em construção.',
+    label: 'Active Directory (on-premises)',
+    note: 'AD interno — exige RUNNER dentro da rede (posição de rede, não alcança da VPS). Tooling: BloodHound/NetExec/Certipy. Conteúdo pronto; runner é o bloqueio.',
     status: 'planned',
     position: 'network',
     checkpointPolicy: 'per-action',
     credentialHandling: 'vault',
-    toolManifest: ['bloodhound', 'netexec', 'certipy', 'impacket'],
+    requiresRunner: true,
+    toolManifest: ['nxc', 'bloodhound-python', 'certipy', 'impacket'],
+    promptFile: 'packs/ad.md',
     systemPrompt: '',
+    credentialSpec: {
+      fields: [
+        { name: 'domain',   label: 'Domínio AD (FQDN)',           secret: false },
+        { name: 'dcIp',     label: 'IP/host do Domain Controller', secret: false },
+        { name: 'username', label: 'Usuário',                     secret: false },
+        { name: 'password', label: 'Senha',                       secret: true, optional: true },
+        { name: 'ntHash',   label: 'NT hash (pass-the-hash)',     secret: true, optional: true },
+      ],
+      // Consumidas pelo RUNNER interno (não pela VPS).
+      env: { domain: 'AD_DOMAIN', dcIp: 'AD_DC_IP', username: 'AD_USER', password: 'AD_PASSWORD', ntHash: 'AD_NT_HASH' },
+    },
   },
   {
     id: 'sap',
     label: 'SAP (interno)',
-    note: 'ETAPA 3 — maior raio de explosão (ERP). Por último; ambientes próprios de-riscam o runner. Em construção.',
+    note: 'ERP SAP — maior raio de explosão. Exige RUNNER interno. Tooling: pysap/bizploit. Conteúdo pronto; runner é o bloqueio.',
     status: 'planned',
     position: 'network',
     checkpointPolicy: 'per-action',
     credentialHandling: 'vault',
+    requiresRunner: true,
     toolManifest: ['pysap', 'bizploit'],
+    promptFile: 'packs/sap.md',
     systemPrompt: '',
+    credentialSpec: {
+      fields: [
+        { name: 'host',     label: 'Host (ASHOST)',      secret: false },
+        { name: 'sysnr',    label: 'System Number',      secret: false, optional: true },
+        { name: 'client',   label: 'Client (MANDT)',     secret: false },
+        { name: 'username', label: 'Usuário SAP',        secret: false },
+        { name: 'password', label: 'Senha',              secret: true },
+      ],
+      env: { host: 'SAP_HOST', sysnr: 'SAP_SYSNR', client: 'SAP_CLIENT', username: 'SAP_USER', password: 'SAP_PASSWORD' },
+    },
+  },
+  {
+    id: 'aws',
+    label: 'AWS (autenticado)',
+    note: 'Cloud, autenticado via API — roda da VPS sem runner. FUTURO (depois de Azure/AD/SAP). Tooling: aws CLI/ScoutSuite/Prowler/Pacu.',
+    status: 'planned',
+    position: 'external',
+    checkpointPolicy: 'per-action',
+    credentialHandling: 'vault',
+    requiresRunner: false,
+    toolManifest: ['aws', 'scout', 'prowler', 'pacu'],
+    promptFile: 'packs/aws.md',
+    systemPrompt: '',
+    credentialSpec: {
+      fields: [
+        { name: 'accessKeyId',     label: 'Access Key ID',     secret: false },
+        { name: 'secretAccessKey', label: 'Secret Access Key', secret: true },
+        { name: 'sessionToken',    label: 'Session Token',     secret: true, optional: true },
+        { name: 'region',          label: 'Região padrão',     secret: false, optional: true },
+      ],
+      env: {
+        accessKeyId:     'AWS_ACCESS_KEY_ID',
+        secretAccessKey: 'AWS_SECRET_ACCESS_KEY',
+        sessionToken:    'AWS_SESSION_TOKEN',
+        region:          'AWS_DEFAULT_REGION',
+      },
+    },
+  },
+  {
+    id: 'gcp',
+    label: 'Google Cloud (autenticado)',
+    note: 'Cloud, autenticado via SA JSON — roda da VPS sem runner. FUTURO. Credencial baseada em arquivo (materialização em memória a resolver no wire).',
+    status: 'planned',
+    position: 'external',
+    checkpointPolicy: 'per-action',
+    credentialHandling: 'vault',
+    requiresRunner: false,
+    toolManifest: ['gcloud', 'scout', 'prowler'],
+    promptFile: 'packs/gcp.md',
+    systemPrompt: '',
+    credentialSpec: {
+      fields: [
+        { name: 'serviceAccountJson', label: 'Service Account JSON', secret: true },
+        { name: 'project',            label: 'Project ID',           secret: false, optional: true },
+      ],
+      // GCP quer um FILE (GOOGLE_APPLICATION_CREDENTIALS). Sem persistência, o wire
+      // materializa o JSON num path em tmpfs só durante o run. Env resolvido no wire.
+      env: { project: 'GOOGLE_CLOUD_PROJECT' },
+    },
   },
 ]
 
@@ -144,6 +233,56 @@ function loadCheckpointDirective(pack) {
 }
 
 // Shape JSON-safe para a API/seletor.
+// ── Credenciais / tooling / runner (para o gate do run) ────────────────────────
+// Pack precisa de credencial do operador? (autenticado, credentialHandling 'vault')
+function needsCredentials(pack) {
+  return resolvePack(pack).credentialHandling === 'vault'
+}
+
+// Pack exige runner interno (posição de rede — não alcança da VPS)? (AD/SAP)
+function requiresRunner(pack) {
+  const p = resolvePack(pack)
+  return !!p.requiresRunner || p.position === 'network'
+}
+
+// Campos de credencial que o operador deve informar (metadados p/ UI/validação —
+// NUNCA contém valores). [] se o pack não usa credencial.
+function credentialFields(pack) {
+  const p = resolvePack(pack)
+  return (p.credentialSpec && p.credentialSpec.fields) || []
+}
+
+// Ferramentas esperadas no host/runner p/ este pack.
+function requiredTools(pack) {
+  return resolvePack(pack).toolManifest || []
+}
+
+// Mapeia as credenciais efêmeras (do cred-vault) para variáveis de ambiente do
+// processo do run, conforme o credentialSpec.env do pack. Só inclui campos presentes.
+// É ISTO que server.js passa em opts.credentialEnv → buildAgentEnv do agent-runner.
+function buildCredentialEnv(pack, creds) {
+  const p = resolvePack(pack)
+  const map = (p.credentialSpec && p.credentialSpec.env) || {}
+  const out = {}
+  if (!creds || typeof creds !== 'object') return out
+  for (const [field, envVar] of Object.entries(map)) {
+    const v = creds[field]
+    if (v != null && v !== '') out[envVar] = String(v)
+  }
+  return out
+}
+
+// Valida um objeto de credenciais submetido contra o spec do pack: todos os campos
+// obrigatórios presentes. Retorna { ok, missing: [nomes] }.
+function validateCredentials(pack, creds) {
+  const fields = credentialFields(pack)
+  const missing = fields
+    .filter((f) => !f.optional)
+    .filter((f) => !creds || creds[f.name] == null || creds[f.name] === '')
+    .map((f) => f.name)
+  return { ok: missing.length === 0, missing }
+}
+
 function toPublic(entry) {
   return {
     id: entry.id,
@@ -154,6 +293,9 @@ function toPublic(entry) {
     position: entry.position,
     checkpointPolicy: entry.checkpointPolicy,
     credentialHandling: entry.credentialHandling,
+    requiresRunner: !!entry.requiresRunner || entry.position === 'network',
+    // Metadados dos campos de credencial (labels/secret/optional) — sem valores.
+    credentialFields: (entry.credentialSpec && entry.credentialSpec.fields) || [],
   }
 }
 
@@ -169,4 +311,10 @@ module.exports = {
   loadDomainPrompt,
   loadCheckpointDirective,
   listDomainPacks,
+  needsCredentials,
+  requiresRunner,
+  credentialFields,
+  requiredTools,
+  buildCredentialEnv,
+  validateCredentials,
 }

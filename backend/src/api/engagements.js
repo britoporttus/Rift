@@ -10,7 +10,8 @@ const findingsWatcher = require('../findings-watcher')
 const scheduler = require('../scheduler')
 const { writeEngagementScope } = require('../scope')
 const { isValidFrameworkId, getFrameworkPath } = require('../frameworks')
-const { isValidDomainPackId, isRunnableDomainPackId, getDomainPack } = require('../domain-packs')
+const { isValidDomainPackId, isRunnableDomainPackId, getDomainPack, needsCredentials, validateCredentials } = require('../domain-packs')
+const credVault = require('../cred-vault')
 const jobs = require('../jobs')
 
 const router = Router()
@@ -182,6 +183,40 @@ router.post('/:id/run-now', requireAuth(['admin']), async (req, res) => {
   const sched = e.schedule && e.schedule.phases ? e.schedule : { phases: 'full', autoExploit: false, costCeilingUsd: 5 }
   scheduler.triggerRun({ ...e, schedule: sched }).catch((err) => console.error('[run-now]', err.message))
   res.status(202).json({ ok: true, message: 'Scan iniciado em background.' })
+})
+
+// ── Credenciais efêmeras de pack autenticado (Azure/AD/SAP) ─────────────────────
+// Cofre in-memory por-run (src/cred-vault.js): a credencial NÃO é persistida — vive
+// só na memória do backend, chaveada por `${engagementId}:${sessionId}`, e é limpa no
+// fim do run. Submeter/limpar é ação de admin (dado sensível). Nunca retornamos os
+// VALORES — só metadados (describe). Ver docs/ROADMAP-MULTI-DOMINIO.md (ETAPA 1).
+function vaultKey(id, sessionId) { return `${id}:${sessionId || 'default'}` }
+
+router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
+  const e = await getEngagement(req.params.id)
+  if (!e) return res.status(404).json({ error: 'not found' })
+  const pack = getDomainPack(e.domainPackId)
+  if (!needsCredentials(pack)) {
+    return res.status(400).json({ error: `O domínio "${pack.label}" não usa credenciais.` })
+  }
+  const creds = req.body?.credentials
+  if (!creds || typeof creds !== 'object') return res.status(400).json({ error: 'credentials (objeto) obrigatório' })
+  const { ok, missing } = validateCredentials(pack, creds)
+  if (!ok) return res.status(400).json({ error: `Campos obrigatórios ausentes: ${missing.join(', ')}` })
+  const key = vaultKey(req.params.id, req.body?.sessionId)
+  credVault.set(key, creds)
+  res.status(201).json({ ok: true, ...credVault.describe(key) })   // só metadados
+})
+
+router.get('/:id/credentials', async (req, res) => {
+  const key = vaultKey(req.params.id, req.query.sessionId)
+  const meta = credVault.describe(key)
+  res.json(meta ? { set: true, ...meta } : { set: false })
+})
+
+router.delete('/:id/credentials', requireAuth(['admin']), async (req, res) => {
+  credVault.clear(vaultKey(req.params.id, req.query.sessionId))
+  res.status(204).end()
 })
 
 // ── Messages (filtered by session) ────────────────────────────────────────────

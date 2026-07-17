@@ -34,6 +34,9 @@ const { deriveRunOutcome } = require('./run-outcome')
 const { resetEngagementState } = require('./scope')
 const { getFramework, loadRules } = require('./frameworks')
 const { getDomainPack, loadDomainPrompt, loadCheckpointDirective } = require('./domain-packs')
+const domainPacks = require('./domain-packs')
+const credVault = require('./cred-vault')
+const toolCheck = require('./tool-check')
 const jobs = require('./jobs')
 const ChatSession = require('./models/ChatSession')
 const Engagement = require('./models/Engagement')
@@ -490,6 +493,31 @@ ${aggressiveRule}
       // (per-phase, black-box) → no-op. Prioridade #1 de segurança destrutiva do Conselho.
       const checkpointBlock = loadCheckpointDirective(domainPack)
 
+      // ── Gate de pack AUTENTICADO (Azure/AD/SAP/…) ────────────────────────────────
+      // Web (credentialHandling 'none') passa direto. Packs autenticados exigem, ANTES
+      // de gastar um turno: (1) não depender de runner interno inexistente; (2) credencial
+      // efêmera no cofre (in-memory, por-run); (3) tooling presente no servidor. A
+      // credencial vira env SÓ deste processo (opts.credentialEnv) e é limpa no onClose.
+      let credentialEnv = {}
+      const packVaultKey = `${engId}:${sessionId}`
+      if (domainPacks.needsCredentials(domainPack)) {
+        if (domainPacks.requiresRunner(domainPack)) {
+          broadcastSession(engId, sessionId, { type: 'agent_message', text: `⚠️ O domínio "${domainPack.label}" exige um runner interno na rede do alvo (ainda não disponível). Azure/nuvem rodam da VPS; AD/SAP dependem do runner.` })
+          setRunState(engId, 'stopped', 'error'); return
+        }
+        const creds = credVault.get(packVaultKey)
+        if (!creds) {
+          broadcastSession(engId, sessionId, { type: 'agent_message', text: `🔑 O domínio "${domainPack.label}" é autenticado. Forneça as credenciais antes de iniciar — elas ficam só em memória, por este run.` })
+          setRunState(engId, 'stopped', 'error'); return
+        }
+        const missing = toolCheck.missingTools(domainPacks.requiredTools(domainPack))
+        if (missing.length) {
+          broadcastSession(engId, sessionId, { type: 'agent_message', text: `🛠️ Ferramentas ausentes no servidor para "${domainPack.label}": ${missing.join(', ')}. Instale-as e tente novamente.` })
+          setRunState(engId, 'stopped', 'error'); return
+        }
+        credentialEnv = domainPacks.buildCredentialEnv(domainPack, creds)
+      }
+
       const ctx = eng
         ? `[CONTEXTO DO SISTEMA — NÃO IGNORAR]
 Engagement ativo: "${eng.name}"
@@ -628,9 +656,11 @@ ${fwGuidance}
           costCeiling: (Number(eng?.scope?.spendingUsd) > 0 ? Number(eng.scope.spendingUsd) : null) || INTERACTIVE_COST_CEILING || undefined,
           // SEC-3: só admin libera fases agressivas neste run.
           allowAggressive: isAdminUser,
-          // Fase 2: todo run é o Agente 1 (black-box). O Agente 2 (authenticated)
-          // será disparado pelo handoff quando o operador fornecer credenciais.
-          agentRole: 'blackbox',
+          // Papel do agente: pack autenticado (Azure/…) roda como Agente 2
+          // (authenticated); os demais como Agente 1 (black-box).
+          agentRole: domainPacks.needsCredentials(domainPack) ? 'authenticated' : 'blackbox',
+          // Credenciais efêmeras do pack autenticado → env SÓ deste run ({} p/ web).
+          credentialEnv,
           resumeSessionId,
           onClaudeSession: persistClaudeSession,
           onClose: async (code, info) => {
@@ -638,6 +668,8 @@ ${fwGuidance}
             // (ver src/run-outcome.js). Falha técnica (safeguard/timeout/erro) e
             // run que parou antes de Vulnerabilidades NUNCA viram "concluído".
             const operatorStopped = stopRequested.delete(runnerKey)
+            // Credencial efêmera: descarta ao fim do run (nada em repouso).
+            try { credVault.clear(packVaultKey) } catch {}
             const { runState, stopReason } = deriveRunOutcome({
               code,
               operatorStopped,

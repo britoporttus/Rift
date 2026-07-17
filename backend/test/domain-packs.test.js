@@ -23,11 +23,13 @@ test('isValidDomainPackId reconhece só ids do registro (inclui planned)', () =>
   assert.equal(dp.isValidDomainPackId(123), false)
 })
 
-test('isRunnableDomainPackId: só web roda hoje; azure/ad/sap são planned', () => {
+test('isRunnableDomainPackId: web e azure rodam; ad/sap/aws/gcp são planned', () => {
   assert.equal(dp.isRunnableDomainPackId('web'), true)
-  assert.equal(dp.isRunnableDomainPackId('azure'), false)
-  assert.equal(dp.isRunnableDomainPackId('ad'), false)
-  assert.equal(dp.isRunnableDomainPackId('sap'), false)
+  assert.equal(dp.isRunnableDomainPackId('azure'), true)   // ETAPA 1: azure ficou ready
+  assert.equal(dp.isRunnableDomainPackId('ad'), false)     // exige runner
+  assert.equal(dp.isRunnableDomainPackId('sap'), false)    // exige runner
+  assert.equal(dp.isRunnableDomainPackId('aws'), false)    // futuro
+  assert.equal(dp.isRunnableDomainPackId('gcp'), false)    // futuro
   assert.equal(dp.isRunnableDomainPackId('nope'), false)
 })
 
@@ -53,20 +55,23 @@ test('packs internos (ad/sap) exigem posição de rede e checkpoint por-ação',
   assert.equal(dp.getDomainPack('azure').position, 'external')
 })
 
-test('listDomainPacks: 4 packs, shape JSON-safe (sem systemPrompt/toolManifest cru)', () => {
+test('listDomainPacks: 6 packs, shape JSON-safe (sem systemPrompt/toolManifest cru)', () => {
   const list = dp.listDomainPacks()
-  assert.equal(list.length, 4)
+  assert.equal(list.length, 6)
   const ids = list.map((p) => p.id)
-  assert.deepEqual(ids, ['web', 'azure', 'ad', 'sap'])   // ordem = sequência do roadmap
+  assert.deepEqual(ids, ['web', 'azure', 'ad', 'sap', 'aws', 'gcp'])   // ordem = sequência do roadmap
   for (const p of list) {
     assert.ok(p.id && p.label && p.note)
     assert.equal(typeof p.available, 'boolean')
     assert.ok(['ready', 'planned'].includes(p.status))
     assert.equal(typeof p.systemPrompt, 'undefined')   // não vaza o prompt cru
     assert.equal(typeof p.toolManifest, 'undefined')
+    assert.equal(typeof p.credentialSpec, 'undefined') // spec cru não vaza (só credentialFields)
+    assert.equal(typeof p.requiresRunner, 'boolean')
+    assert.ok(Array.isArray(p.credentialFields))
   }
-  // exatamente um pack executável hoje (web)
-  assert.equal(list.filter((p) => p.available).length, 1)
+  // executáveis hoje: web + azure
+  assert.equal(list.filter((p) => p.available).length, 2)
 })
 
 test('loadDomainPrompt aceita id ou objeto e nunca quebra', () => {
@@ -101,4 +106,51 @@ test('loadCheckpointDirective: per-action injeta gate destrutivo; web (per-phase
   // resolve por id ou por objeto, e nunca quebra
   assert.equal(dp.loadCheckpointDirective(undefined), '')  // default web
   assert.equal(dp.loadCheckpointDirective(null), '')
+})
+
+test('needsCredentials / requiresRunner: web livre; azure cred+VPS; ad/sap cred+runner', () => {
+  assert.equal(dp.needsCredentials('web'), false)
+  assert.equal(dp.requiresRunner('web'), false)
+  // azure: autenticado, mas roda da VPS (sem runner)
+  assert.equal(dp.needsCredentials('azure'), true)
+  assert.equal(dp.requiresRunner('azure'), false)
+  // ad/sap: autenticado E exige runner interno (posição de rede)
+  for (const id of ['ad', 'sap']) {
+    assert.equal(dp.needsCredentials(id), true)
+    assert.equal(dp.requiresRunner(id), true)
+  }
+  // aws/gcp: cloud autenticado, da VPS (futuro)
+  assert.equal(dp.requiresRunner('aws'), false)
+  assert.equal(dp.requiresRunner('gcp'), false)
+})
+
+test('buildCredentialEnv: mapeia campos → env vars via credentialSpec (só presentes)', () => {
+  const env = dp.buildCredentialEnv('azure', {
+    tenantId: 'T', clientId: 'C', clientSecret: 'S', subscriptionId: 'SUB',
+  })
+  assert.deepEqual(env, {
+    AZURE_TENANT_ID: 'T', AZURE_CLIENT_ID: 'C', AZURE_CLIENT_SECRET: 'S', AZURE_SUBSCRIPTION_ID: 'SUB',
+  })
+  // campos opcionais ausentes não entram no env
+  const env2 = dp.buildCredentialEnv('azure', { tenantId: 'T', clientId: 'C', clientSecret: 'S' })
+  assert.equal(env2.AZURE_SUBSCRIPTION_ID, undefined)
+  assert.equal(env2.AZURE_TENANT_ID, 'T')
+  // web não tem spec → {}
+  assert.deepEqual(dp.buildCredentialEnv('web', { x: 1 }), {})
+})
+
+test('validateCredentials: exige campos obrigatórios; ignora opcionais', () => {
+  assert.deepEqual(dp.validateCredentials('azure', { tenantId: 'T', clientId: 'C', clientSecret: 'S' }), { ok: true, missing: [] })
+  const r = dp.validateCredentials('azure', { tenantId: 'T' })
+  assert.equal(r.ok, false)
+  assert.deepEqual(r.missing.sort(), ['clientId', 'clientSecret'])
+  // subscriptionId é opcional → não entra em missing
+  assert.equal(dp.validateCredentials('azure', { tenantId: 'T', clientId: 'C', clientSecret: 'S' }).missing.includes('subscriptionId'), false)
+})
+
+test('credentialFields expõe metadados (labels/secret), requiredTools lista o manifest', () => {
+  const fields = dp.credentialFields('azure')
+  assert.ok(fields.find((f) => f.name === 'clientSecret' && f.secret === true))
+  assert.equal(dp.credentialFields('web').length, 0)
+  assert.ok(dp.requiredTools('azure').includes('az'))
 })
