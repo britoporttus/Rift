@@ -94,6 +94,13 @@ async function persistFinding(engagementId, engagementName, finding, sourceFile)
   try {
     const state = deriveState(finding)
     const fingerprint = computeFingerprint(finding)
+    // Coerção defensiva: domain packs (ex.: Azure) gravam campos ricos como OBJETO/array
+    // (location: {tenant_id, app_id,…}, evidence: {...}), mas o schema Finding tipa esses
+    // campos como String → Mongoose dava "Cast to string failed" e DESCARTAVA o finding
+    // inteiro. Serializa objeto/array para string; string/número passam direto.
+    const str = (v) => v == null ? null
+      : (typeof v === 'string' ? v
+      : (typeof v === 'object' ? JSON.stringify(v) : String(v)))
     // Upsert by sourceFile so re-running the watcher doesn't create duplicates
     await Finding.findOneAndUpdate(
       { engagementId, sourceFile },
@@ -102,15 +109,15 @@ async function persistFinding(engagementId, engagementName, finding, sourceFile)
           engagementId,
           engagementName: engagementName || engagementId,
           severity:       (finding.severity || 'info').toLowerCase(),
-          title:          finding.title || 'Finding sem título',
-          type:           finding.type || null,
-          location:       finding.location || finding.endpoint || null,
-          parameter:      finding.parameter || null,
-          payload:        finding.payload || null,
-          description:    finding.description || null,
-          evidence:       finding.evidence || null,
-          impact:         finding.impact || null,
-          recommendation: finding.recommendation || finding.remediation || null,
+          title:          str(finding.title) || 'Finding sem título',
+          type:           str(finding.type),
+          location:       str(finding.location || finding.endpoint),
+          parameter:      str(finding.parameter),
+          payload:        str(finding.payload),
+          description:    str(finding.description),
+          evidence:       str(finding.evidence),
+          impact:         str(finding.impact),
+          recommendation: str(finding.recommendation || finding.remediation),
           cvss:           finding.cvss ? parseFloat(finding.cvss) : null,
           // `confirmed` agora deriva do state — só é true para vulnerabilidade de fato
           confirmed:      state === 'confirmed',
@@ -120,15 +127,15 @@ async function persistFinding(engagementId, engagementName, finding, sourceFile)
           state,
           confidence:     (finding.confidence || 'medium').toLowerCase(),
           reproducible:   finding.reproducible !== undefined ? Boolean(finding.reproducible) : null,
-          poc:            finding.poc || null,
-          needsToConfirm: finding.needs_to_confirm || null,
-          ruledOutReason: finding.ruled_out_reason || null,
-          cvssVector:     finding.cvss_vector || null,
-          owasp:          finding.owasp || null,
-          owaspApi:       finding.owasp_api || null,
-          cwe:            finding.cwe || null,
-          mitre:          finding.mitre || null,
-          discoveredBy:   finding.discovered_by || null,
+          poc:            str(finding.poc),
+          needsToConfirm: str(finding.needs_to_confirm),
+          ruledOutReason: str(finding.ruled_out_reason),
+          cvssVector:     str(finding.cvss_vector),
+          owasp:          str(finding.owasp),
+          owaspApi:       str(finding.owasp_api),
+          cwe:            str(finding.cwe),
+          mitre:          str(finding.mitre),
+          discoveredBy:   str(finding.discovered_by),
 
           // Regressão
           fingerprint,
