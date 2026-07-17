@@ -448,8 +448,11 @@ async function handleMessage(msg, engId, sessionId, user) {
         try { findingsWatcher.watch(engId, eng.slug, eng.date, eng.name, framework, eng.target) } catch {}
       }
 
-      // Load recent history for THIS session so the agent has conversational continuity
-      const recentMsgs = await loadRecentHistory(engId, sessionId, 8)
+      // Load recent history for THIS session so the agent has conversational continuity.
+      // "Começar do zero" (resetSession): NÃO reinjeta o histórico — senão turnos antigos
+      // contraditórios (ex.: kickoff black-box antes de virar pack autenticado) voltam ao
+      // contexto e o agente fica reconciliando conflito em vez de rodar. Slate limpo.
+      const recentMsgs = msg.resetSession === true ? [] : await loadRecentHistory(engId, sessionId, 8)
       const historyCtx = formatHistory(recentMsgs)
 
       // SEC-3: regra dura de permissão por papel, injetada no contexto do agente.

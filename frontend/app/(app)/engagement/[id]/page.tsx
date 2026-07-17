@@ -29,7 +29,7 @@ const AUTO_RUN_PROMPT =
 // Prompt do run AUTENTICADO (Azure/cloud): usa a credencial do ambiente e segue a
 // metodologia do domain pack. NÃO é recon web black-box.
 const AUTH_RUN_PROMPT =
-  'Inicie a avaliação AUTENTICADA seguindo ESTRITAMENTE a metodologia do domain pack deste engagement. A credencial já está no AMBIENTE deste run (variáveis de ambiente) — autentique com ela primeiro (ex.: `az login --service-principal ...`); NÃO peça credenciais e NÃO faça recon web black-box. Faça a enumeração READ-ONLY do ambiente em sequência (identidade e quem sou eu, subscriptions/escopo, RBAC atribuído, inventário de recursos, e o diretório/Entra se acessível), depois a ANÁLISE de caminhos de escalada — sem me pedir confirmação entre as fases de leitura. Registre com generosidade como informational tudo que enumerar (recursos, roles, apps, service principals, misconfigs) e como confirmed o que tiver evidência clara (com o valor real: tenant/subscription id, role assignment, permissão). Antes de QUALQUER ação que altere estado, PARE e peça aprovação (checkpoint por-ação). Mostre os achados conforme surgirem.'
+  'Inicie a avaliação AUTENTICADA seguindo ESTRITAMENTE a metodologia do domain pack deste engagement. NÃO faça recon web black-box; NÃO reconcilie instruções de turnos anteriores — a autorização válida é o config/scope.yaml ATUAL (agent_role: authenticated). PASSO 1 (pré-voo, obrigatório): autentique com a credencial do ambiente (ex.: `az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"`), confirme com `az account show` e `az account list`, e ME REPORTE numa mensagem clara se autenticou (quem sou eu, tenant, subscriptions) ou o ERRO EXATO. Se a autenticação FALHAR, PARE e me avise (não tente outra coisa). Só DEPOIS de confirmar a autenticação, prossiga para a enumeração READ-ONLY (identidade, subscriptions, RBAC atribuído, inventário de recursos, diretório/Entra) e a análise de caminhos de escalada, em sequência, sem me pedir confirmação entre as fases de leitura. Registre como informational tudo que enumerar e como confirmed o que tiver evidência clara (com o valor real: tenant/subscription id, role assignment, permissão). Antes de QUALQUER ação que altere estado, PARE e peça aprovação (checkpoint por-ação). Mostre os achados conforme surgirem.'
 
 export default function EngagementPage() {
   const { id } = useParams<{ id: string }>()
@@ -200,7 +200,7 @@ export default function EngagementPage() {
   // antes de iniciar (o estado do engagement em disco permanece).
   function handleRestartAuto() {
     if (!confirm('Começar do zero: descarta a memória do agente E reseta as fases do framework (recon/enum/vuln voltam a ser executados do início). O escopo e os findings já salvos são mantidos. Continuar?')) return
-    handleSend(AUTO_RUN_PROMPT, { resetSession: true })
+    handleSend(isAuthPack ? AUTH_RUN_PROMPT : AUTO_RUN_PROMPT, { resetSession: true })
   }
 
   if (!engagement) {
