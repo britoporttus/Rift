@@ -176,14 +176,15 @@ export default function EngagementPage() {
   // Web = black-box; qualquer outro pack (azure/…) = autenticado (usa credencial).
   const isAuthPack = (engagement?.domainPackId || 'web') !== 'web'
   function handleStartAuto() {
-    handleSend(isAuthPack ? AUTH_RUN_PROMPT : AUTO_RUN_PROMPT)
+    handleSend(isAuthPack ? AUTH_RUN_PROMPT : AUTO_RUN_PROMPT, { autoReport: true })
   }
   // A-STATE-5: retoma via --resume (o claude session_id persistido) — o agente
   // continua de onde parou, sem re-rodar recon.
   function handleContinueAuto() {
     handleSend(isAuthPack
       ? 'Continue a avaliação autenticada de onde parou, seguindo a metodologia do domain pack (enumeração read-only → análise de caminhos de escalada), usando a credencial do ambiente. Em sequência, sem me pedir confirmação entre as fases de leitura. Pare só em checkpoint (antes de qualquer ação que altere estado).'
-      : 'Continue o mapeamento automático do alvo de onde parou, seguindo o mesmo plano (recon → enumeração → análise de vulnerabilidades não-autenticada, exploit-to-confirm), cobrindo a superfície descoberta (não só uma amostra). Candidato testado mas não fechado → probable (a confirmar), não descarte. Em sequência, sem me pedir confirmação entre as fases. Pare só em checkpoint real.')
+      : 'Continue o mapeamento automático do alvo de onde parou, seguindo o mesmo plano (recon → enumeração → análise de vulnerabilidades não-autenticada, exploit-to-confirm), cobrindo a superfície descoberta (não só uma amostra). Candidato testado mas não fechado → probable (a confirmar), não descarte. Em sequência, sem me pedir confirmação entre as fases. Pare só em checkpoint real.',
+      { autoReport: true })
   }
   // 1.3: CTAs pós-fase. O relatório do Rift é gerado a partir dos findings no banco
   // (sempre funciona, em qualquer framework) e vive na aba Relatório — então o botão
@@ -200,7 +201,7 @@ export default function EngagementPage() {
   // antes de iniciar (o estado do engagement em disco permanece).
   function handleRestartAuto() {
     if (!confirm('Começar do zero: descarta a memória do agente E reseta as fases do framework (recon/enum/vuln voltam a ser executados do início). O escopo e os findings já salvos são mantidos. Continuar?')) return
-    handleSend(isAuthPack ? AUTH_RUN_PROMPT : AUTO_RUN_PROMPT, { resetSession: true })
+    handleSend(isAuthPack ? AUTH_RUN_PROMPT : AUTO_RUN_PROMPT, { resetSession: true, autoReport: true })
   }
 
   if (!engagement) {

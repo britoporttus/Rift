@@ -396,6 +396,11 @@ async function handleMessage(msg, engId, sessionId, user) {
     const text = msg.text || msg.option || ''
     if (!text) return
 
+    // Relatório automático: os disparos automáticos (Iniciar/Continuar/Começar do zero)
+    // pedem que, ao concluir o run com sucesso, o backend gere o relatório final se o
+    // agente ainda não gerou. Mensagens de chat comuns NÃO têm a flag → nada muda.
+    const autoReport = msg.autoReport === true
+
     // SEC-3: bloqueia fases agressivas para não-admin no servidor (fast-path).
     // O gate real por-run é o env RIFT_ALLOW_AGGRESSIVE=false + a regra dura
     // injetada no contexto abaixo (o agente recusa mesmo se pedido em texto livre).
@@ -625,6 +630,33 @@ ${fwGuidance}
         jobId = await jobs.startJob({ engagementId: engId, sessionId, frameworkId: framework.id, domainPackId: domainPack.id })
       } catch (e) { console.warn('[jobs] start falhou:', e.message) }
 
+      // AUTO-REPORT: dispara um turno EXTRA de geração de relatório ao fim de um run
+      // automático concluído com sucesso (chamado do onClose). Retoma a sessão se ela
+      // ainda existir (tem todo o contexto); se foi compactada, o prompt é auto-contido
+      // (aponta os dirs de findings/reports) e o comando de relatório lê os YAML do disco.
+      // NÃO passa pela porta de orçamento (relatório é sempre permitido) nem re-arma o
+      // auto-report (o onClose deste turno só ajusta o runState) → sem loop.
+      function triggerAutoReport() {
+        const reportPrompt = `Gere agora o RELATÓRIO FINAL deste engagement (resumo executivo + relatório técnico) a partir dos findings já salvos em clients/${slug}/${date}/findings/. Salve os arquivos do relatório em clients/${slug}/${date}/reports/. Use a rotina de relatório do framework/pack (ex.: /pentest-report). NÃO execute novos testes nem re-scan — apenas consolide os findings existentes. Responda em pt-BR e informe os caminhos gerados ao terminar.`
+        broadcastSession(engId, sessionId, { type: 'agent_message', text: '📝 Run concluído — gerando o relatório final automaticamente…' })
+        setRunState(engId, 'running')
+        agentRunner.run(
+          runnerKey, engId2, reportPrompt,
+          (event) => broadcastSession(engId, sessionId, event),
+          (usd, tokens) => appendUsage({ usd, tokens, engagementId: engId, engagementName: eng?.name, userId: user.id, userName: user.name, userEmail: user.email, ts: new Date() }).catch(() => {}),
+          (event) => saveMsg(engId, sessionId, event),
+          eng, user,
+          {
+            frameworkPath: framework.path,
+            systemContext: '',
+            allowAggressive: isAdminUser,
+            agentRole: domainPacks.needsCredentials(domainPack) ? 'authenticated' : 'blackbox',
+            onClaudeSession: persistClaudeSession,
+            onClose: (c) => setRunState(engId, c === 0 ? 'completed' : 'stopped'),
+          },
+        )
+      }
+
       // Broadcaster VIVO: re-resolve os clientes atuais da sessão a cada evento
       // (via broadcastSession) → reconexão de WS não quebra o feed ao vivo. Antes
       // passávamos um Set capturado no início, que morria na 1ª reconexão.
@@ -732,6 +764,25 @@ ${fwGuidance}
                 type: 'agent_message',
                 text: `🧹 Contexto atingiu ${lastContextPercent}% — compactado automaticamente para conter custo. O estado (findings/fase/escopo) está salvo; a próxima mensagem inicia uma sessão enxuta.`,
               })
+            }
+
+            // AUTO-REPORT: run automático concluído com SUCESSO e sem relatório em disco
+            // → gera o relatório final num turno extra. Só para runs marcados autoReport
+            // (Iniciar/Continuar/Começar do zero); nunca para /pentest-report (evita loop)
+            // nem para /rift-compact. Se o agente já gerou um relatório, apenas avisa.
+            if (autoReport && runState === 'completed' && !isReport && !isCompact && slug && date) {
+              const reportsDir = require('path').join(framework.path, 'clients', slug, date, 'reports')
+              let hasReport = false
+              try {
+                const fsm = require('fs')
+                hasReport = fsm.existsSync(reportsDir) && fsm.readdirSync(reportsDir).some((f) => /\.(md|html|pdf|json)$/i.test(f))
+              } catch {}
+              if (hasReport) {
+                broadcastSession(engId, sessionId, { type: 'agent_message', text: '📄 Relatório disponível na aba Relatório.' })
+              } else {
+                // fora do stack do onClose atual (a sessão já foi liberada no agent-runner).
+                setTimeout(() => { try { triggerAutoReport() } catch (e) { console.warn('[auto-report]', e.message) } }, 800)
+              }
             }
           },
         },
