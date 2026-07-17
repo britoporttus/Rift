@@ -9,6 +9,7 @@ const fs = require('fs')
 const path = require('path')
 const yaml = require('js-yaml')
 const { getFrameworkPath } = require('./frameworks')
+const { getDomainPack } = require('./domain-packs')
 
 // Path da versão DEFAULT (v2) resolvido pelo registro — casa com o cwd usado nos
 // runs. As funções aceitam um frameworkPath explícito quando a versão é conhecida.
@@ -39,28 +40,38 @@ function isCredsProvided(scope) {
 }
 
 // Constrói o doc de scope (mesma forma do pentest-intake.md) do engagement + intake.
-function buildScopeDoc(eng) {
+// Ciente do DOMAIN PACK: packs autenticados (azure/…) geram uma autorização de
+// ambiente/tenant (agent_role authenticated), não um scope web black-box — senão a
+// autorização em disco contradiz a instrução autenticada e o agente (corretamente) recusa.
+function buildScopeDoc(eng, domainPackId) {
   const s      = eng.scope || {}
   const target = eng.target
   const id     = deriveEngId(eng)
   const now    = new Date().toISOString()
+  const pack   = getDomainPack(domainPackId || eng.domainPackId)
+  const authed = pack.credentialHandling === 'vault'
 
   const environment = ENVIRONMENTS.includes(s.environment) ? s.environment : 'production'
-  const appType     = APP_TYPES.includes(s.appType)        ? s.appType     : 'web+api'
+  const appType     = authed ? pack.id : (APP_TYPES.includes(s.appType) ? s.appType : 'web+api')
   const intensity   = INTENSITIES.includes(s.intensity)    ? s.intensity   : 'medium'
   const wafPresent  = WAF_PRESENT.includes(s.wafPresent)   ? s.wafPresent  : 'unknown'
   const spending    = typeof s.spendingUsd === 'number' && s.spendingUsd > 0
     ? s.spendingUsd
     : (environment === 'lab' ? 20 : 5)
 
-  return {
+  const doc = {
     engagement: {
       id,
       target,
       created: eng.createdAt ? new Date(eng.createdAt).toISOString() : now,
     },
+    // Papel do agente: autenticado (usa credencial) vs black-box. É o campo que o
+    // framework cruza com a instrução do run — precisa casar com o domain pack.
+    agent_role: authed ? 'authenticated' : 'blackbox',
+    domain_pack: pack.id,
     scope: {
-      domains:      [target, `*.${target}`],
+      // Autenticado: o "domínio" é o tenant/conta, não um site com wildcard web.
+      domains:      authed ? [target] : [target, `*.${target}`],
       ip_ranges:    asArray(s.ipRanges),
       out_of_scope: asArray(s.outOfScope),
       environment,
@@ -86,14 +97,34 @@ function buildScopeDoc(eng) {
       notifications: 'checkpoint',
     },
   }
+
+  // Bloco de autorização de nuvem/ambiente para packs autenticados: deixa explícito
+  // que o assessment AUTENTICADO do tenant está autorizado, com credencial no run.
+  if (authed) {
+    doc.cloud = {
+      provider:   pack.id,           // azure | aws | gcp
+      tenant:     target,
+      credential: 'service_principal (efêmero, fornecido pelo operador no run)',
+      access:     'read-only por padrão; ações que alteram estado exigem checkpoint por-ação',
+    }
+    doc.authorization = `Assessment AUTENTICADO do ambiente ${pack.label} do tenant "${target}" está AUTORIZADO. A credencial (efêmera) é fornecida no ambiente do run. Opere via API/CLI do provedor — não é um pentest web.`
+  }
+
+  return doc
 }
 
-function buildStateDoc(eng) {
-  const id  = deriveEngId(eng)
-  const now = new Date().toISOString()
+function buildStateDoc(eng, domainPackId) {
+  const id   = deriveEngId(eng)
+  const now  = new Date().toISOString()
+  const pack = getDomainPack(domainPackId || eng.domainPackId)
+  const authed = pack.credentialHandling === 'vault'
   return {
     engagement_id:      id,
-    credential_state:   isCredsProvided(eng.scope || {}) ? 'user_level' : 'none',
+    // Autenticado: credencial de service principal fornecida (efêmera). Black-box:
+    // deriva do intake (user_level/none).
+    credential_state:   authed ? 'service_principal' : (isCredsProvided(eng.scope || {}) ? 'user_level' : 'none'),
+    agent_role:         authed ? 'authenticated' : 'blackbox',
+    domain_pack:        pack.id,
     current_phase:      'idle',
     checkpoint_reached: false,
     started_at:         now,
@@ -105,19 +136,31 @@ function buildStateDoc(eng) {
 
 // Escreve context/{id}/scope.yaml (+ dirs) e engagement-state.yaml (só se ainda
 // não existir — não sobrescreve estado de um run em andamento). Retorna o id.
-function writeEngagementScope(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH) {
+function writeEngagementScope(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH, domainPackId) {
   const id     = deriveEngId(eng)
+  const pack   = getDomainPack(domainPackId || eng.domainPackId)
   const ctxDir = path.join(frameworkPath, 'context', id)
   fs.mkdirSync(path.join(ctxDir, 'parsed'), { recursive: true })
   fs.mkdirSync(path.join(ctxDir, 'raw'), { recursive: true })
 
   // yaml.dump serializa target/foco/etc (input do usuário) com segurança — nunca
   // interpolamos string crua em YAML (injeção quebraria o escopo de autorização).
-  fs.writeFileSync(path.join(ctxDir, 'scope.yaml'), yaml.dump(buildScopeDoc(eng), { lineWidth: -1 }), 'utf8')
+  fs.writeFileSync(path.join(ctxDir, 'scope.yaml'), yaml.dump(buildScopeDoc(eng, pack.id), { lineWidth: -1 }), 'utf8')
 
+  // Estado: escreve se ausente OU se o domain_pack em disco DIVERGE do atual — cobre a
+  // colisão de dir por slug (dois engagements de mesmo nome caem no mesmo context/{id}),
+  // que senão herdaria o agent_role/estado do engagement anterior. Não clobbera um run
+  // do MESMO pack em andamento.
   const stateFile = path.join(ctxDir, 'engagement-state.yaml')
-  if (!fs.existsSync(stateFile)) {
-    fs.writeFileSync(stateFile, yaml.dump(buildStateDoc(eng), { lineWidth: -1 }), 'utf8')
+  let staleState = false
+  try {
+    if (fs.existsSync(stateFile)) {
+      const cur = yaml.load(fs.readFileSync(stateFile, 'utf8')) || {}
+      staleState = cur.domain_pack !== pack.id
+    }
+  } catch { staleState = true }
+  if (!fs.existsSync(stateFile) || staleState) {
+    fs.writeFileSync(stateFile, yaml.dump(buildStateDoc(eng, pack.id), { lineWidth: -1 }), 'utf8')
   }
 
   // Adianta os dirs de findings/reports do cliente (o watcher também cria).
@@ -135,16 +178,17 @@ function writeEngagementScope(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH) {
 // de re-execução do framework (skills/phase-state.md) vê recon/enum/vuln "concluídos"
 // e o agente PULA as fases — por isso cada re-run rendia MENOS. O scope.yaml
 // (autorização) e os findings em disco são preservados. Retorna o id ou null.
-function resetEngagementState(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH) {
+function resetEngagementState(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH, domainPackId) {
   const id = deriveEngId(eng)
+  const pack = getDomainPack(domainPackId || eng.domainPackId)
   const ctxDir = path.join(frameworkPath, 'context', id)
   try {
     fs.mkdirSync(ctxDir, { recursive: true })
-    fs.writeFileSync(
-      path.join(ctxDir, 'engagement-state.yaml'),
-      yaml.dump(buildStateDoc(eng), { lineWidth: -1 }),
-      'utf8'
-    )
+    // Reautoriza do zero: reescreve scope.yaml E engagement-state.yaml cientes do pack.
+    // Assim "Começar do zero" corrige um dir que ficou com autorização de outro pack
+    // (ex.: um run black-box anterior no mesmo slug). Findings em disco são preservados.
+    fs.writeFileSync(path.join(ctxDir, 'scope.yaml'), yaml.dump(buildScopeDoc(eng, pack.id), { lineWidth: -1 }), 'utf8')
+    fs.writeFileSync(path.join(ctxDir, 'engagement-state.yaml'), yaml.dump(buildStateDoc(eng, pack.id), { lineWidth: -1 }), 'utf8')
     return id
   } catch {
     return null

@@ -86,7 +86,7 @@ router.post('/', async (req, res) => {
 
   // A-INTAKE-3: materializa scope.yaml + engagement-state.yaml (idle) no framework.
   // Best-effort: uma falha de FS não deve impedir a criação do engagement no Mongo.
-  try { writeEngagementScope(engagement, getFrameworkPath(engagement.frameworkId)) } catch (err) {
+  try { writeEngagementScope(engagement, getFrameworkPath(engagement.frameworkId), pack) } catch (err) {
     console.warn('[engagements] falha ao escrever scope do intake:', err?.message)
   }
 

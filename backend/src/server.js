@@ -567,7 +567,7 @@ ${fwGuidance}
         // CRÍTICO: resetar também o engagement-state.yaml do framework. Sem isto, a
         // guarda de re-execução (skills/phase-state.md) vê recon/enum/vuln "concluídos"
         // e o agente PULA as fases → cada re-run rendia MENOS. scope + findings ficam.
-        if (eng) { try { resetEngagementState(eng, framework.path) } catch (e) { console.warn('[reset] state:', e.message) } }
+        if (eng) { try { resetEngagementState(eng, framework.path, domainPack.id) } catch (e) { console.warn('[reset] state:', e.message) } }
         broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
         broadcastSession(engId, sessionId, { type: 'phase_update', phase: 'recon', progress: 0 })
       }
