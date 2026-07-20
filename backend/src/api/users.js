@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const bcrypt = require('bcryptjs')
-const { requireAuth } = require('../auth')
+const { requireAuth, bumpTokenVersion } = require('../auth')
 const { isLastAdmin } = require('../rbac')
 const User = require('../models/User')
 
@@ -51,6 +51,11 @@ router.post('/', async (req, res) => {
 })
 
 // PATCH /api/users/:id — atualiza role ou nome
+// P2-31 (auditoria 2026-07-20): pra uma conta provider:'microsoft' (SSO), a role
+// setada aqui é SOBRESCRITA no próximo login pelo grupo AAD (ver api/auth-microsoft.js)
+// — comportamento intencional (SSO é a fonte da verdade), mas surpreende quem não
+// souber disso. Se precisar de uma promoção/rebaixamento que sobreviva ao próximo
+// login de uma conta SSO, ajuste a associação de grupo no Azure AD, não aqui.
 router.patch('/:id', async (req, res) => {
   const { role, name } = req.body ?? {}
   const patch = {}
@@ -68,6 +73,9 @@ router.patch('/:id', async (req, res) => {
   const user = await User.findByIdAndUpdate(req.params.id, patch, { new: true })
     .select('-passwordHash')
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' })
+  // P1-11: mudou a role → revoga qualquer JWT já emitido pra essa conta (não
+  // espera as até 12h de janela do token expirarem sozinhas).
+  if (patch.role) await bumpTokenVersion(req.params.id)
   res.json(toDto(user))
 })
 
@@ -100,6 +108,8 @@ router.patch('/:id/reset-password', async (req, res) => {
 
   const passwordHash = await bcrypt.hash(password, 10)
   await User.findByIdAndUpdate(req.params.id, { passwordHash })
+  // P1-11: reset de senha também revoga sessões existentes dessa conta.
+  await bumpTokenVersion(req.params.id)
   res.json({ ok: true })
 })
 

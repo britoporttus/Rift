@@ -331,6 +331,14 @@ const CLAUDE_BIN = process.env.CLAUDE_PATH || findClaude()
 // sessionId -> { proc, subscribers: Set<WebSocket> }
 const runningSessions = new Map()
 
+// P1-10 (auditoria 2026-07-20): só o worker de jobs AGENDADOS tinha teto de
+// concorrência (JOBS_MAX_CONCURRENT). O caminho de chat interativo não tinha
+// nenhum — qualquer role podia abrir sessões `claude --dangerously-skip-permissions`
+// (cada uma rodando nmap/nuclei/ffuf/etc) sem limite, saturando CPU/RAM/disco da
+// VPS única. Teto GLOBAL (todas as sessões, todos os engagements), não por-usuário
+// — simples o bastante pro modelo atual (1 VPS) sem precisar rastrear usuário aqui.
+const MAX_CONCURRENT_SESSIONS = Number(process.env.AGENT_MAX_CONCURRENT_SESSIONS) || 4
+
 // Sequência monotônica de runs — compõe o `runId` de cada marco (identificador da
 // execução), para o painel distinguir/agrupar marcos de execuções diferentes.
 let runSeq = 0
@@ -392,6 +400,60 @@ function killTreeEscalated(proc) {
   killTree(proc, 'SIGTERM')
   const t = setTimeout(() => killTree(proc, 'SIGKILL'), KILL_GRACE_MS)
   if (t.unref) t.unref()
+}
+
+// ── P1-14 (auditoria 2026-07-20): sobrevivência a crash duro do backend ────────
+// `runningSessions` é só em memória — some num OOM-kill/`kill -9`/crash. Sem
+// persistir o PID em disco, o grupo de processos do claude (+ nmap/ffuf/etc que
+// ele disparou) fica órfão, reparentado à init, sem enforcement de timeout.
+// Persistimos {sessionId -> {engagementId, pid}} num JSON simples (mesmo
+// espírito de settings.js) e, no boot, matamos qualquer grupo que ainda esteja
+// vivo. Kill-tree gracioso normal (stop/timeout/shutdown) já remove a entrada,
+// então só sobra algo aqui se o processo PAI morreu sem chance de limpar.
+const PID_FILE = path.join(__dirname, '..', 'data', 'running-pids.json')
+
+function readPidFile(file = PID_FILE) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return {} }
+}
+function writePidFile(data, file = PID_FILE) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(data))
+  } catch (err) { console.warn('[agent-runner] falha ao persistir PID em disco:', err?.message) }
+}
+function persistPid(sessionId, engagementId, pid, file = PID_FILE) {
+  const data = readPidFile(file)
+  data[sessionId] = { engagementId, pid, startedAt: Date.now() }
+  writePidFile(data, file)
+}
+function removePid(sessionId, file = PID_FILE) {
+  const data = readPidFile(file)
+  if (data[sessionId]) { delete data[sessionId]; writePidFile(data, file) }
+}
+// `kill(-pid, 0)` não envia sinal — só testa se o GRUPO ainda existe (ESRCH se não).
+function isGroupAlive(pid) {
+  try { process.kill(-pid, 0); return true } catch { return false }
+}
+function killPidTreeEscalated(pid) {
+  try { process.kill(-pid, 'SIGTERM') } catch {}
+  const t = setTimeout(() => { try { process.kill(-pid, 'SIGKILL') } catch {} }, KILL_GRACE_MS)
+  if (t.unref) t.unref()
+}
+// Chamado 1x no boot do backend (ver server.js). Mata qualquer grupo de
+// processo ainda vivo cujo PID foi persistido antes de um crash duro, e limpa
+// o arquivo (o resto das entradas já não corresponde a processo nenhum).
+function reconcileOrphanedProcesses(file = PID_FILE) {
+  const data = readPidFile(file)
+  let killed = 0
+  for (const [sessionId, rec] of Object.entries(data)) {
+    if (rec && rec.pid && isGroupAlive(rec.pid)) {
+      console.warn(`[agent-runner] processo órfão de crash anterior (sessão ${sessionId}, pid ${rec.pid}) — matando árvore.`)
+      killPidTreeEscalated(rec.pid)
+      killed++
+    }
+  }
+  writePidFile({}, file)
+  return killed
 }
 
 // `target` pode ser uma FUNÇÃO (event)=>void OU um Set de sockets.
@@ -507,6 +569,26 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
     broadcast(subscribers, { type: 'agent_message', text: '⚠️ Agente já ativo nesta sessão.' })
     return
   }
+  // P1-20 (auditoria 2026-07-20): um scan AGENDADO (scheduler.js, sessionId
+  // `scheduled-{engId}`) escreve nos MESMOS arquivos (scope.yaml/engagement-state.yaml/
+  // findings/) que uma sessão interativa do mesmo engagement — os dois processos
+  // `claude` rodando ao mesmo tempo corrompem esse estado compartilhado em silêncio.
+  // Convenção de nome compartilhada com scheduler.js#schedSessionId (não importamos
+  // scheduler.js aqui pra evitar dependência circular — scheduler.js já requer este módulo).
+  if (runningSessions.has(`scheduled-${engagementId}`)) {
+    broadcast(subscribers, {
+      type: 'agent_message',
+      text: '⚠️ Há um scan agendado rodando para este engagement agora. Aguarde ele terminar antes de iniciar uma sessão interativa.',
+    })
+    return
+  }
+  if (runningSessions.size >= MAX_CONCURRENT_SESSIONS) {
+    broadcast(subscribers, {
+      type: 'agent_message',
+      text: `⚠️ Limite de ${MAX_CONCURRENT_SESSIONS} sessões simultâneas do agente atingido. Aguarde uma sessão existente terminar antes de iniciar outra.`,
+    })
+    return
+  }
 
   const costCeiling = typeof opts.costCeiling === 'number' && opts.costCeiling > 0 ? opts.costCeiling : null
   let budgetExceeded = false
@@ -602,7 +684,8 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
   }, RUN_TIMEOUT_MS)
   if (timeoutTimer.unref) timeoutTimer.unref()
 
-  runningSessions.set(sessionId, { proc, subscribers, timeoutTimer })
+  runningSessions.set(sessionId, { proc, subscribers, timeoutTimer, engagementId })
+  persistPid(sessionId, engagementId, proc.pid)
   // Sinais de ciclo de vida explícitos: o front trava o input enquanto
   // 'running' e libera em 'idle' (não depende mais de heurística de streaming).
   broadcast(subscribers, { type: 'agent_status', state: 'running' })
@@ -748,6 +831,7 @@ function run(sessionId, engagementId, prompt, subscribers, onCostUpdate, onEvent
       emitFrom(parsed, buf)
     }
     runningSessions.delete(sessionId)
+    removePid(sessionId)
     // Precedência: teto de custo é o motivo REAL de parada quando bateu (já emitiu
     // a msg própria em emit()). Só então consideramos safeguard, e por último erro.
     if (budgetExceeded) {
@@ -784,15 +868,17 @@ function stop(sessionId) {
     if (s.timeoutTimer) clearTimeout(s.timeoutTimer)
     killTreeEscalated(s.proc)
     runningSessions.delete(sessionId)
+    removePid(sessionId)
   }
 }
 
 // Encerra todas as sessões ativas — usado no shutdown gracioso do backend
 // para não deixar processos claude (e as ferramentas que eles spawnaram) órfãos.
 function stopAll() {
-  for (const [, s] of runningSessions) {
+  for (const [sessionId, s] of runningSessions) {
     if (s.timeoutTimer) clearTimeout(s.timeoutTimer)
     killTreeEscalated(s.proc)
+    removePid(sessionId)
   }
   runningSessions.clear()
 }
@@ -812,14 +898,25 @@ function isRunning(sessionId) {
   // isRunning "mente" que roda, o reconcile por conexão do WS é pulado, e o painel
   // trava eternamente em "rodando" com o input bloqueado. Confirma liveness real:
   //   exitCode preenchido → já encerrou; ou PID não existe mais no OS (kill -0).
-  if (s.proc && s.proc.exitCode !== null) { runningSessions.delete(sessionId); return false }
+  if (s.proc && s.proc.exitCode !== null) { runningSessions.delete(sessionId); removePid(sessionId); return false }
   try {
     if (s.proc?.pid) process.kill(s.proc.pid, 0)
   } catch {
     runningSessions.delete(sessionId)
+    removePid(sessionId)
     return false
   }
   return true
+}
+
+// P1-20: existe QUALQUER sessão viva (interativa ou agendada) para este
+// engagement? Usado pelo scheduler antes de despachar um job agendado, pra não
+// pisar numa sessão interativa que já está rodando (e vice-versa, ver `run()`).
+function isEngagementRunning(engagementId) {
+  for (const [sessionId, s] of runningSessions) {
+    if (s.engagementId === engagementId && isRunning(sessionId)) return true
+  }
+  return false
 }
 
 // Esquece o claude session_id desta sessão → o próximo turno começa uma
@@ -829,4 +926,4 @@ function clearSession(sessionId) {
   claudeSessions.delete(sessionId)
 }
 
-module.exports = { run, stop, stopAll, sendInput, isRunning, clearSession, buildAgentEnv, ENV_ALLOWLIST, inferPhaseFromEvent, PHASE_ORDER, extractMilestones, buildToolUseEvent, toWsEvent, CLAUDE_BIN }
+module.exports = { run, stop, stopAll, sendInput, isRunning, isEngagementRunning, clearSession, buildAgentEnv, ENV_ALLOWLIST, inferPhaseFromEvent, PHASE_ORDER, extractMilestones, buildToolUseEvent, toWsEvent, CLAUDE_BIN, MAX_CONCURRENT_SESSIONS, runningSessions, reconcileOrphanedProcesses, persistPid, removePid, readPidFile, isGroupAlive, PID_FILE }

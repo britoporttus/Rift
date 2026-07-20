@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { api, Engagement, Finding } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { SEV_COLOR, SEV_ORDER } from '@/lib/severity'
+import { clickableDivProps } from '@/lib/a11y'
 import {
   Plus, Trash2, Target, ShieldAlert, AlertTriangle, Bug, Radar,
 } from 'lucide-react'
@@ -248,7 +249,7 @@ export default function DashboardPage() {
                 <div key={e.id} style={{ position: 'relative' }}
                   onMouseEnter={() => setHovered(e.id)} onMouseLeave={() => setHovered(null)}>
                   <div
-                    onClick={() => { if (confirmDelete !== e.id) router.push(`/engagement/${e.id}`) }}
+                    {...clickableDivProps(() => { if (confirmDelete !== e.id) router.push(`/engagement/${e.id}`) })}
                     style={{
                       background: 'var(--surface)',
                       border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`,

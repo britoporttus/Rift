@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { api, SystemMetrics, UsageEntry, UserUsage, SkuUsage } from '@/lib/api'
+import { SI } from '@/components/ui/SI'
 
 function fmtBytes(b: number) {
   if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
@@ -10,16 +11,6 @@ function fmtBytes(b: number) {
 function fmtUptime(s: number) {
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60)
   return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`
-}
-
-function SI({ s = 15, c = 'currentColor', sw = 1.75, children }: { s?: number; c?: string; sw?: number; children: React.ReactNode }) {
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
-      strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, display: 'block' }}>
-      {children}
-    </svg>
-  )
 }
 
 const CpuIco      = (s?: number, c?: string) => <SI s={s || 14} c={c || '#A78BFA'}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></SI>

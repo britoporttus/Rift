@@ -216,6 +216,14 @@ router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
   res.status(201).json({ ok: true, ...credVault.describe(key) })   // só metadados
 })
 
+// P2-30 (auditoria 2026-07-20) — AVALIADO, NÃO restrito a admin: o achado original
+// sugeria admin-only por "consistência" com POST/DELETE (que mutam/limpam estado
+// sensível, corretamente admin-only). Mas o frontend depende de leitura NÃO-admin
+// aqui — CredentialPanel.tsx chama isto pra qualquer role decidir o que renderizar
+// no painel de execução (credenciais já configuradas vs formulário pra configurar).
+// Restringir quebraria essa leitura de status pra role 'user' sem ganho real de
+// segurança: describe() só devolve metadados (nunca valores), e a MUTAÇÃO
+// (submeter/limpar credencial) já é corretamente bloqueada pro `user` no POST/DELETE.
 router.get('/:id/credentials', async (req, res) => {
   const meta = credVault.describe(vaultKey(req.params.id))
   res.json(meta ? { set: true, ...meta } : { set: false })

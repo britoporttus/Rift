@@ -13,6 +13,7 @@ import { DomainPackSwitcher } from '@/components/engagement/DomainPackSwitcher'
 import { CredentialPanel } from '@/components/engagement/CredentialPanel'
 import { JobPipeline } from '@/components/engagement/JobPipeline'
 import { useAuth } from '@/hooks/useAuth'
+import { useEscapeClose } from '@/hooks/useEscapeClose'
 import {
   ArrowLeft, Wifi, WifiOff, Shield, FileText,
   Eye, Download, X, Clock, Wand2, Radar, Printer, ExternalLink,
@@ -445,6 +446,17 @@ function ReportTab({ engagementId, engagementName, isAdmin }: { engagementId: st
     setPreview(null)
   }
 
+  // P2-41 (auditoria 2026-07-20): closePreview só revogava a blob URL em
+  // fechamento EXPLÍCITO — navegar pra outra rota (SPA) com o modal aberto
+  // nunca chamava closePreview, retendo o Blob na memória da aba pelo resto
+  // da sessão. Cleanup no unmount/troca de preview cobre esse caso.
+  useEffect(() => {
+    return () => { if (preview) URL.revokeObjectURL(preview.blobUrl) }
+  }, [preview])
+
+  // P2-39: Esc fecha o modal + foco vai pro container ao abrir.
+  const previewModalRef = useEscapeClose(!!preview, closePreview)
+
   const segBtn = (val: 'technical' | 'executive', label: string) => (
     <button onClick={() => setType(val)} style={{
       padding: '5px 14px', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
@@ -563,10 +575,18 @@ function ReportTab({ engagementId, engagementName, isAdmin }: { engagementId: st
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
           zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem',
         }}>
-          <div onClick={(ev) => ev.stopPropagation()} style={{
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-            width: '100%', maxWidth: 1000, height: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          }}>
+          <div
+            ref={previewModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={preview.name}
+            tabIndex={-1}
+            onClick={(ev) => ev.stopPropagation()}
+            style={{
+              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+              width: '100%', maxWidth: 1000, height: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            }}
+          >
             <div style={{
               padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)',
               display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,

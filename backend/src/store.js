@@ -6,12 +6,6 @@ async function readEngagements() {
   return Engagement.find().sort({ createdAt: -1 }).lean()
 }
 
-async function writeEngagements(data) {
-  // Used only during migration — bulk replace
-  await Engagement.deleteMany({})
-  if (data.length) await Engagement.insertMany(data)
-}
-
 async function getEngagement(id) {
   return Engagement.findById(id).lean()
 }
@@ -59,7 +53,6 @@ async function countFindings(engagementId) {
 
 module.exports = {
   readEngagements,
-  writeEngagements,
   getEngagement,
   createEngagement,
   updateEngagement,

@@ -251,15 +251,28 @@ function watch(engagementId, slug, dateStr, engagementName, framework, target) {
   console.log(`[watcher] observando (${fw.id}): ${dirs.join(' | ')}`)
 }
 
+// P1-26 (auditoria 2026-07-20): remove do Set `broadcasted` toda chave deste
+// engagement (`${engagementId}::${filePath}`) — sem isto, o Set cresce pra
+// sempre em um processo de longa duração (nunca é limpo, nem no unwatch nem na
+// exclusão do engagement), um memory leak lento.
+function clearBroadcasted(engagementId) {
+  const prefix = `${engagementId}::`
+  for (const key of broadcasted) {
+    if (key.startsWith(prefix)) broadcasted.delete(key)
+  }
+}
+
 function unwatch(engagementId) {
   const w = watchers.get(engagementId)
   if (w) { try { w.watcher.close() } catch {}; watchers.delete(engagementId) }
+  clearBroadcasted(engagementId)
 }
 
 // REL-2: fecha todos os watchers no shutdown gracioso.
 function closeAll() {
   for (const [, w] of watchers) { try { w.watcher.close() } catch {} }
   watchers.clear()
+  broadcasted.clear()
 }
 
-module.exports = { watch, unwatch, closeAll, setNotifier, deriveState, computeFingerprint, parseMarkdownFinding }
+module.exports = { watch, unwatch, closeAll, setNotifier, deriveState, computeFingerprint, parseMarkdownFinding, broadcasted, clearBroadcasted }

@@ -1,16 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { api, UserFull } from '@/lib/api'
-
-function SI({ s = 15, c = 'currentColor', sw = 1.75, children }: { s?: number; c?: string; sw?: number; children: React.ReactNode }) {
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
-      strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, display: 'block' }}>
-      {children}
-    </svg>
-  )
-}
+import { useEscapeClose } from '@/hooks/useEscapeClose'
+import { SI } from '@/components/ui/SI'
 
 const UserIco     = (s?: number, c?: string) => <SI s={s || 12} c={c || '#94A3B8'}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></SI>
 const CircleIco   = (s?: number, c?: string) => <SI s={s || 12} c={c || '#94A3B8'}><circle cx="12" cy="12" r="10" /></SI>
@@ -351,8 +343,9 @@ export default function UsersPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
-                <label style={{ fontSize: 10, color: '#3A3A58', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Nova senha</label>
+                <label htmlFor="reset-pwd" style={{ fontSize: 10, color: '#3A3A58', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Nova senha</label>
                 <input
+                  id="reset-pwd"
                   style={inputStyle}
                   type="password"
                   placeholder="••••••••"
@@ -399,14 +392,15 @@ export default function UsersPage() {
               const label = { nome: 'Nome', email: 'Email', senha: 'Senha', role: 'Role' }[field]
               return (
                 <div key={field}>
-                  <label style={{ fontSize: 10, color: '#3A3A58', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</label>
+                  <label htmlFor={`add-user-${field}`} style={{ fontSize: 10, color: '#3A3A58', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</label>
                   {field === 'role' ? (
-                    <select style={inputStyle} value={addForm.role} onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as 'admin' | 'user' }))}>
+                    <select id={`add-user-${field}`} style={inputStyle} value={addForm.role} onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as 'admin' | 'user' }))}>
                       <option value="user">user</option>
                       <option value="admin">admin</option>
                     </select>
                   ) : (
                     <input
+                      id={`add-user-${field}`}
                       style={inputStyle}
                       type={field === 'senha' ? 'password' : field === 'email' ? 'email' : 'text'}
                       placeholder={field === 'nome' ? 'João Silva' : field === 'email' ? 'joao@empresa.com' : '••••••••'}
@@ -444,7 +438,10 @@ export default function UsersPage() {
   )
 }
 
+// P2-39 (auditoria 2026-07-20): fechava só por clique no overlay — sem Esc,
+// sem role="dialog"/aria-modal, sem foco movido pro modal ao abrir.
 function Modal({ children, onClose, width = 360 }: { children: React.ReactNode; onClose: () => void; width?: number }) {
+  const modalRef = useEscapeClose(true, onClose)
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(2,2,8,0.88)',
@@ -453,10 +450,15 @@ function Modal({ children, onClose, width = 360 }: { children: React.ReactNode; 
     }}
       onClick={onClose}
     >
-      <div style={{
-        background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.2)',
-        borderRadius: 8, padding: '1.5rem', width,
-      }}
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        style={{
+          background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.2)',
+          borderRadius: 8, padding: '1.5rem', width,
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         {children}

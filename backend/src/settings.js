@@ -3,6 +3,7 @@
 // a cada run e a API ler/gravar. Default vem do env AGENT_MODEL (retrocompat).
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 
 const DATA_DIR = path.join(__dirname, '..', 'data')
 const FILE = path.join(DATA_DIR, 'settings.json')
@@ -61,4 +62,104 @@ function setAgentModel(m) {
   return cache.agentModel
 }
 
-module.exports = { getAgentModel, setAgentModel, isValidModel, AVAILABLE_MODELS, DEFAULT_MODEL }
+// ── Chaves de API dos providers de vazamento (módulo ASM) ─────────────────────
+// Guardadas no mesmo settings.json. Fallback para env (HIBP_API_KEY etc.) para
+// retrocompat/12-factor. A chave crua NUNCA é exposta num GET — só o status
+// "configurado" (ver isLeakProviderConfigured / listLeakProviderStatus).
+//
+// P2-35 (auditoria 2026-07-20): `backend/data/` é gitignored (sem risco via
+// git), mas as chaves viviam em texto claro no filesystem da VPS — qualquer
+// processo/usuário com acesso de leitura ao diretório de dados as lia direto.
+// Cifradas com AES-256-GCM quando SETTINGS_ENCRYPTION_KEY está definida (ver
+// .env.example). Sem a env var: comportamento INALTERADO (texto claro, com
+// aviso no log) — não quebra deploys existentes que ainda não a configuraram.
+// Dado legado em texto claro (`cache.leakProviders`) continua legível e é
+// migrado pra cifrado automaticamente na próxima escrita (setLeakProviderCreds).
+const ENC_ALGO = 'aes-256-gcm'
+
+function getEncKey() {
+  const raw = process.env.SETTINGS_ENCRYPTION_KEY
+  if (!raw) return null
+  // Aceita hex de 32 bytes (64 chars) direto, ou deriva de qualquer string.
+  return /^[0-9a-f]{64}$/i.test(raw) ? Buffer.from(raw, 'hex') : crypto.createHash('sha256').update(raw).digest()
+}
+
+function encryptLeakProviders(obj) {
+  const key = getEncKey()
+  if (!key) return null
+  const iv = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv(ENC_ALGO, key, iv)
+  const data = Buffer.concat([cipher.update(JSON.stringify(obj), 'utf8'), cipher.final()])
+  return { iv: iv.toString('hex'), tag: cipher.getAuthTag().toString('hex'), data: data.toString('hex') }
+}
+
+function decryptLeakProviders(enc) {
+  const key = getEncKey()
+  if (!key || !enc) return null
+  try {
+    const decipher = crypto.createDecipheriv(ENC_ALGO, key, Buffer.from(enc.iv, 'hex'))
+    decipher.setAuthTag(Buffer.from(enc.tag, 'hex'))
+    const out = Buffer.concat([decipher.update(Buffer.from(enc.data, 'hex')), decipher.final()])
+    return JSON.parse(out.toString('utf8'))
+  } catch { return null }
+}
+
+// Devolve o mapa {providerId -> {apiKey, apiUser}} de dentro do settings.json,
+// descriptografando se cifrado, ou lendo o legado em texto claro.
+function readLeakProvidersStore(s) {
+  if (s.leakProvidersEnc) return decryptLeakProviders(s.leakProvidersEnc) || {}
+  return s.leakProviders || {}
+}
+
+function getLeakProviderCreds(id) {
+  const s = load()
+  const stored = readLeakProvidersStore(s)[id] || {}
+  if (id === 'hibp') return { apiKey: stored.apiKey || process.env.HIBP_API_KEY || null }
+  if (id === 'leakcheck') return { apiKey: stored.apiKey || process.env.LEAKCHECK_API_KEY || null }
+  if (id === 'dehashed') return {
+    apiKey:  stored.apiKey  || process.env.DEHASHED_API_KEY  || null,
+    apiUser: stored.apiUser || process.env.DEHASHED_API_USER || null,
+  }
+  return {}
+}
+
+function isLeakProviderConfigured(id) {
+  const c = getLeakProviderCreds(id)
+  if (id === 'dehashed') return !!(c.apiKey && c.apiUser)
+  if (id === 'mock') return true   // demo não precisa de chave
+  return !!c.apiKey
+}
+
+let warnedNoEncKey = false
+
+// Grava/limpa credenciais. Passar string vazia LIMPA a credencial (volta ao env,
+// se houver). apiUser só se aplica ao dehashed. Migra automaticamente qualquer
+// dado legado em texto claro pra cifrado nesta escrita (se a chave estiver setada).
+function setLeakProviderCreds(id, { apiKey, apiUser } = {}) {
+  cache = load()
+  const stored = readLeakProvidersStore(cache)
+  const cur = stored[id] || {}
+  if (apiKey !== undefined)  cur.apiKey  = apiKey  ? String(apiKey).trim()  : undefined
+  if (apiUser !== undefined) cur.apiUser = apiUser ? String(apiUser).trim() : undefined
+  stored[id] = cur
+
+  const enc = encryptLeakProviders(stored)
+  if (enc) {
+    cache.leakProvidersEnc = enc
+    delete cache.leakProviders // não deixa resquício em texto claro após migrar
+  } else {
+    cache.leakProviders = stored
+    if (!warnedNoEncKey) {
+      console.warn('[settings] SETTINGS_ENCRYPTION_KEY não definida — chaves de leak provider salvas em texto claro em disco (ver .env.example).')
+      warnedNoEncKey = true
+    }
+  }
+  persist()
+  return isLeakProviderConfigured(id)
+}
+
+module.exports = {
+  getAgentModel, setAgentModel, isValidModel, AVAILABLE_MODELS, DEFAULT_MODEL,
+  getLeakProviderCreds, isLeakProviderConfigured, setLeakProviderCreds,
+  encryptLeakProviders, decryptLeakProviders, readLeakProvidersStore,
+}

@@ -9,9 +9,28 @@ const path = require('path')
 
 const CHROMIUM = process.env.CHROMIUM_PATH || '/usr/bin/chromium'
 const PDF_TIMEOUT_MS = Number(process.env.PDF_TIMEOUT_MS) || 60000
+// P2-33 (auditoria 2026-07-20): cada chamada a ?format=pdf spawna um Chromium
+// completo, sem teto de instâncias simultâneas — qualquer usuário autenticado
+// (relatório técnico também gera PDF, não só admin) podia disparar várias em
+// paralelo e esgotar CPU/RAM da VPS única.
+const MAX_CONCURRENT_PDF = Number(process.env.MAX_CONCURRENT_PDF) || 3
+let activePdfCount = 0
+
+class PdfConcurrencyLimitError extends Error {
+  constructor() {
+    super(`Muitas gerações de PDF em andamento (máx ${MAX_CONCURRENT_PDF} simultâneas) — tente novamente em instantes.`)
+    this.code = 'PDF_CONCURRENCY_LIMIT'
+  }
+}
 
 function htmlToPdf(html) {
-  return new Promise((resolve, reject) => {
+  if (activePdfCount >= MAX_CONCURRENT_PDF) {
+    return Promise.reject(new PdfConcurrencyLimitError())
+  }
+  activePdfCount++
+  return new Promise((resolveP, rejectP) => {
+    const resolve = (v) => { activePdfCount--; resolveP(v) }
+    const reject = (e) => { activePdfCount--; rejectP(e) }
     const base = path.join(os.tmpdir(), `rift-report-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`)
     const htmlPath = `${base}.html`
     const pdfPath = `${base}.pdf`
@@ -47,4 +66,4 @@ function htmlToPdf(html) {
   })
 }
 
-module.exports = { htmlToPdf }
+module.exports = { htmlToPdf, PdfConcurrencyLimitError, MAX_CONCURRENT_PDF }

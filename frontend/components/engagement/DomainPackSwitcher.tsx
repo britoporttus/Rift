@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Boxes, ChevronDown, Check, Loader2, Clock, Globe, Network } from 'lucide-react'
 import { api, Engagement, DomainPackInfo } from '@/lib/api'
 
@@ -21,8 +21,6 @@ export function DomainPackSwitcher({
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-
   useEffect(() => {
     api.settings.getDomainPacks().then(setInfo).catch(() => setInfo(null))
   }, [])
@@ -49,7 +47,7 @@ export function DomainPackSwitcher({
   }
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div style={{ position: 'relative' }}>
       <button
         onClick={() => !disabled && setOpen((v) => !v)}
         title="Domínio do teste (web/cloud/AD/SAP) para este engagement — vale para o próximo run"

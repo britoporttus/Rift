@@ -186,6 +186,27 @@ async function heartbeatJob(jobId) {
   await Job.findByIdAndUpdate(jobId, { $set: { heartbeatAt: new Date() } }).catch(() => {})
 }
 
+// P1-21 (auditoria 2026-07-20): jobs 'running' cujo heartbeatAt não é
+// atualizado há mais de `staleMs` — o processo pode ter travado (rede lenta,
+// loop) sem crashar, o que nunca dispararia a recuperação de boot
+// (recoverInterruptedJobs só roda no restart). Usado pelo watchdog do
+// jobs-worker pra liberar a vaga de concorrência em runtime.
+async function findStaleRunningJobs(kinds = ['scheduled'], staleMs) {
+  const cutoff = new Date(Date.now() - staleMs)
+  const rows = await Job.find({ status: 'running', kind: { $in: kinds }, heartbeatAt: { $lt: cutoff } }).lean()
+  return rows.map(toDto)
+}
+
+// P1-20 (auditoria 2026-07-20): devolve um job CLAIMADO ('running') pra fila
+// ('queued') sem contar como tentativa nem como falha — usado quando o
+// dispatch decide ADIAR (não falhar) porque uma sessão interativa do mesmo
+// engagement já está ativa. Mantém `queuedAt` original (não perde a posição
+// no FIFO); o worker tenta de novo no próximo tick.
+async function deferJob(jobId) {
+  const now = new Date()
+  await Job.findByIdAndUpdate(jobId, { $set: { status: 'queued', startedAt: null, heartbeatAt: null, updatedAt: now } }).catch(() => {})
+}
+
 // Recuperação no boot ("forçar até o fim"). Nenhum processo do agente sobrevive a um
 // restart → todo Job 'running' é órfão. Retomáveis (kind:'scheduled' + tem
 // claudeSessionId + ainda tem tentativa) voltam pra 'queued' com resume:true e o worker
@@ -263,4 +284,6 @@ module.exports = {
   setClaudeSession,
   heartbeatJob,
   recoverInterruptedJobs,
+  deferJob,
+  findStaleRunningJobs,
 }

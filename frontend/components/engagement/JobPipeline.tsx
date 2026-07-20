@@ -34,23 +34,35 @@ export function JobPipeline({ engagementId, liveJob }: { engagementId: string; l
   const job = liveJob ?? fetched
   if (!job || !job.steps?.length) return null
 
-  const statusLabel = job.status === 'running' ? 'em andamento'
-    : job.status === 'completed' ? 'concluído'
-    : job.status === 'failed' ? 'falhou'
-    : 'parado'
+  // O strip só agrega o que os cards de fase (ExecutionPanel) NÃO mostram: o estado de
+  // FILA/RETOMADA (scan agendado esperando o worker, ou run retomado após queda). Durante
+  // um run normal ou após terminar, some — a timeline de fases já vive nos cards abaixo.
+  if (job.status !== 'queued') return null
+
+  // Aqui status é sempre 'queued'. 'resume' = o backend caiu no meio e o worker vai
+  // continuar de onde parou (`claude --resume`); senão é a 1ª execução na fila.
+  const attempt     = job.attempts ?? 0
+  const maxAttempts = job.maxAttempts ?? 3
+  const statusLabel = job.resume ? `retomando · tentativa ${attempt + 1}/${maxAttempts}` : 'na fila'
 
   return (
     <div style={{
-      background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+      background: 'var(--surface)', border: '1px solid var(--purple)', borderRadius: 10,
       padding: '10px 14px', margin: '0 0 12px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--purple-light)' }}>
+          <Loader2 size={11} color="var(--purple-light)" style={{ animation: 'spin 1s linear infinite' }} />
           Fluxo do run · {statusLabel}
         </span>
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>
           {job.findingsCount ?? 0} findings{job.spentUsd ? ` · US$ ${job.spentUsd.toFixed(2)}` : ''}
         </span>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+        {job.resume
+          ? 'Aguardando o worker retomar a execução interrompida…'
+          : 'Aguardando o worker iniciar a execução…'}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexWrap: 'wrap' }}>
         {job.steps.map((s, i) => (

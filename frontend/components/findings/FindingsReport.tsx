@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { api, Finding, RemediationStatus } from '@/lib/api'
 import { SEV_COLOR, SEV_ORDER, safeHref } from '@/lib/severity'
+import { clickableDivProps } from '@/lib/a11y'
 import { findingType, findingConfirmation, findingExploitation, cvssKind } from '@/lib/findingClassify'
 
 // Status de remediação — fecha o ciclo "achei → corrigi → confirmei"
@@ -107,7 +108,7 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
       onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
     >
       {/* header */}
-      <div onClick={() => setOpen(o => !o)} style={{
+      <div {...clickableDivProps(() => setOpen(o => !o))} style={{
         display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', cursor: 'pointer',
       }}>
         {/* severity bar */}

@@ -13,6 +13,7 @@ const { getFramework } = require('./frameworks')
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000 // varre a cada 5 min
 const FREQUENCY_MS = { daily: 24 * 60 * 60 * 1000, weekly: 7 * 24 * 60 * 60 * 1000 }
+const HEARTBEAT_INTERVAL_MS = Number(process.env.JOB_HEARTBEAT_INTERVAL_MS) || 60 * 1000
 
 let timer = null
 
@@ -121,6 +122,16 @@ async function dispatchScheduledJob(job) {
     await jobs.closeJob(job.id, { status: 'failed', reason: 'already-running' }).catch(() => {})
     return
   }
+  // P1-20 (auditoria 2026-07-20): uma sessão INTERATIVA do mesmo engagement
+  // escreve nos mesmos arquivos (scope.yaml/engagement-state.yaml/findings/)
+  // que este run agendado escreveria — rodar os dois ao mesmo tempo corrompe
+  // esse estado compartilhado em silêncio. Adia o dispatch em vez de falhar
+  // (o worker tenta de novo no próximo tick — não é um erro permanente).
+  if (agentRunner.isEngagementRunning(engId)) {
+    console.warn(`[scheduler] sessão interativa ativa para ${engId} — job ${job.id} adiado`)
+    await jobs.deferJob(job.id)
+    return
+  }
 
   const framework = getFramework(eng.frameworkId)
   if (!framework.available) {
@@ -138,6 +149,14 @@ async function dispatchScheduledJob(job) {
 
   // Watcher de findings (sem WS): persiste no Mongo e atualiza a contagem internamente.
   findingsWatcher.watch(engId, eng.slug, eng.date, eng.name, framework, eng.target)
+
+  // P1-21 (auditoria 2026-07-20): `heartbeatAt` era gravado no claim e nunca mais
+  // atualizado — um job travado (processo vivo, mas preso/sem progresso) nunca
+  // era detectado em runtime, só reconciliado no próximo BOOT do backend.
+  // Batimento periódico enquanto o run está de fato ativo; o watchdog em
+  // jobs-worker.js usa isso pra liberar a vaga de concorrência sem esperar um restart.
+  const heartbeatTimer = setInterval(() => { jobs.heartbeatJob(job.id).catch(() => {}) }, HEARTBEAT_INTERVAL_MS)
+  if (heartbeatTimer.unref) heartbeatTimer.unref()
 
   const prompt = buildPipelinePrompt(eng, engId2, schedule)
   // Usuário sintético do sistema; role reflete a permissão de exploração autônoma.
@@ -177,6 +196,7 @@ async function dispatchScheduledJob(job) {
         await updateEngagement(engId, { schedule: { ...(cur?.schedule || schedule), lastRunStatus: 'budget_exceeded' } })
       },
       onClose: async (code, info) => {
+        clearInterval(heartbeatTimer)
         // Desfecho real do run (mesma derivação do chat interativo).
         const { runState, stopReason } = deriveRunOutcome({
           code,

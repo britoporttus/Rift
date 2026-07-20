@@ -26,8 +26,10 @@ router.get('/domain-packs', (_req, res) => {
   res.json({ default: DEFAULT_DOMAIN_PACK_ID, available: listDomainPacks() })
 })
 
-// Troca o modelo do agente (vale para o PRÓXIMO run de qualquer engagement).
-router.put('/model', (req, res) => {
+// Troca o modelo do agente (vale para o PRÓXIMO run de QUALQUER engagement) —
+// P1-13: mutação global de config, restrita a admin (mesmo padrão de
+// PUT /api/leaks/providers/:id, que já era admin-only).
+router.put('/model', requireAuth(['admin']), (req, res) => {
   const model = req.body?.model
   if (!isValidModel(model)) {
     return res.status(400).json({ error: 'Modelo inválido. Use um id claude-* válido.' })

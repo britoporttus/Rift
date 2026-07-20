@@ -240,15 +240,15 @@ export default function NovoEngagementPage() {
 
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <label style={labelStyle}>{targetLabel}</label>
+                <label style={labelStyle} htmlFor="eng-target">{targetLabel}</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Target size={15} color="var(--purple-light)" style={{ flexShrink: 0 }} />
-                  <input autoFocus value={target} onChange={(e) => setTarget(e.target.value)} placeholder={targetPlaceholder} style={inputStyle} />
+                  <input id="eng-target" autoFocus value={target} onChange={(e) => setTarget(e.target.value)} placeholder={targetPlaceholder} style={inputStyle} />
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <label style={labelStyle}>Nome do engagement</label>
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder={target.trim() || 'Cliente XYZ'} style={inputStyle} />
+                <label style={labelStyle} htmlFor="eng-name">Nome do engagement</label>
+                <input id="eng-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={target.trim() || 'Cliente XYZ'} style={inputStyle} />
               </div>
             </div>
 
@@ -265,8 +265,9 @@ export default function NovoEngagementPage() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                   {(pack?.credentialFields || []).map((f) => (
                     <div key={f.name} style={{ flex: '1 1 220px', minWidth: 200 }}>
-                      <label style={labelStyle}>{f.label}{f.optional ? ' (opcional)' : ''}</label>
+                      <label style={labelStyle} htmlFor={`cred-${f.name}`}>{f.label}{f.optional ? ' (opcional)' : ''}</label>
                       <input
+                        id={`cred-${f.name}`}
                         type={f.secret ? 'password' : 'text'}
                         autoComplete="off"
                         value={creds[f.name] || ''}
@@ -282,8 +283,8 @@ export default function NovoEngagementPage() {
                   <Chips options={ENVIRONMENTS} value={environment} onChange={setEnv} />
                 </div>
                 <div style={{ width: 200 }}>
-                  <label style={labelStyle}>Gasto máximo (US$)</label>
-                  <input type="number" min="0" step="0.5" value={spending} onChange={(e) => setSpending(e.target.value)} placeholder="5" style={inputStyle} />
+                  <label style={labelStyle} htmlFor="eng-spending">Gasto máximo (US$)</label>
+                  <input id="eng-spending" type="number" min="0" step="0.5" value={spending} onChange={(e) => setSpending(e.target.value)} placeholder="5" style={inputStyle} />
                 </div>
               </>
             ) : (
@@ -315,27 +316,27 @@ export default function NovoEngagementPage() {
               )}
             </div>
             <div>
-              <label style={labelStyle}>Foco (áreas prioritárias)</label>
-              <input value={focusAreas} onChange={(e) => setFocus(e.target.value)} placeholder="ex.: autenticação, upload de arquivos, API de pagamento" style={inputStyle} />
+              <label style={labelStyle} htmlFor="eng-focus">Foco (áreas prioritárias)</label>
+              <input id="eng-focus" value={focusAreas} onChange={(e) => setFocus(e.target.value)} placeholder="ex.: autenticação, upload de arquivos, API de pagamento" style={inputStyle} />
             </div>
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <label style={labelStyle}>Fora de escopo</label>
-                <input value={outOfScope} onChange={(e) => setOutOfScope(e.target.value)} placeholder="ex.: admin.exemplo.com, /logout" style={inputStyle} />
+                <label style={labelStyle} htmlFor="eng-out-of-scope">Fora de escopo</label>
+                <input id="eng-out-of-scope" value={outOfScope} onChange={(e) => setOutOfScope(e.target.value)} placeholder="ex.: admin.exemplo.com, /logout" style={inputStyle} />
               </div>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <label style={labelStyle}>Faixas de IP (opcional)</label>
-                <input value={ipRanges} onChange={(e) => setIpRanges(e.target.value)} placeholder="ex.: 203.0.113.0/24" style={inputStyle} />
+                <label style={labelStyle} htmlFor="eng-ip-ranges">Faixas de IP (opcional)</label>
+                <input id="eng-ip-ranges" value={ipRanges} onChange={(e) => setIpRanges(e.target.value)} placeholder="ex.: 203.0.113.0/24" style={inputStyle} />
               </div>
             </div>
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ width: 180 }}>
-                <label style={labelStyle}>Gasto máximo (US$)</label>
-                <input type="number" min="0" step="0.5" value={spending} onChange={(e) => setSpending(e.target.value)} placeholder={environment === 'lab' ? '20' : '5'} style={inputStyle} />
+                <label style={labelStyle} htmlFor="eng-spending">Gasto máximo (US$)</label>
+                <input id="eng-spending" type="number" min="0" step="0.5" value={spending} onChange={(e) => setSpending(e.target.value)} placeholder={environment === 'lab' ? '20' : '5'} style={inputStyle} />
               </div>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <label style={labelStyle}>Observações</label>
-                <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ex.: janela de teste, cuidado com rate limit" style={inputStyle} />
+                <label style={labelStyle} htmlFor="eng-notes">Observações</label>
+                <input id="eng-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ex.: janela de teste, cuidado com rate limit" style={inputStyle} />
               </div>
             </div>
           </>

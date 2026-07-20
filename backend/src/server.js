@@ -8,12 +8,13 @@ const { WebSocketServer } = require('ws')
 const { URL } = require('url')
 const cors = require('cors')
 const cookieParser = require('cookie-parser')
-const cookie = require('cookie')
 const jwt = require('jsonwebtoken')
 
 const { connect } = require('./db')
 const ChatMessage = require('./models/ChatMessage')
-const { router: authRouter, JWT_SECRET, COOKIE_NAME } = require('./auth')
+const { router: authRouter, JWT_SECRET, COOKIE_NAME, checkTokenVersion } = require('./auth')
+const { isAllowedOrigin } = require('./cors-policy')
+const { resolveWsToken } = require('./ws-auth')
 const authMicrosoftRouter = require('./api/auth-microsoft')
 const engagementsRouter = require('./api/engagements')
 const findingsRouter = require('./api/findings')
@@ -132,10 +133,11 @@ findingsWatcher.setNotifier((engagementId, event) => broadcastEngagement(engagem
 jobs.setNotifier((engagementId, event) => broadcastEngagement(engagementId, event))
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(s => s.trim())
+// P1-12: wildcard de túnel Cloudflare atrás de opt-in explícito (ver cors-policy.js).
+const ALLOW_CLOUDFLARE_WILDCARD = process.env.ALLOW_CLOUDFLARE_WILDCARD === '1'
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true)
-    if (/\.trycloudflare\.com$/.test(origin) || /\.cloudflareaccess\.com$/.test(origin)) return cb(null, true)
+    if (isAllowedOrigin(origin, { origins: allowedOrigins, allowCfWildcard: ALLOW_CLOUDFLARE_WILDCARD })) return cb(null, true)
     cb(new Error('Not allowed by CORS'))
   },
   credentials: true,
@@ -166,17 +168,30 @@ app.use((err, _req, res, _next) => {
 })
 
 // WebSocket upgrade — autentica via cookie HttpOnly (o browser a envia sozinho no
-// handshake, same-origin); fallback: subprotocolo 'rift-jwt' ou query token (clientes
-// não-browser / transição).
-httpServer.on('upgrade', (req, socket, head) => {
+// handshake, same-origin); fallback: subprotocolo 'rift-jwt' (clientes não-browser).
+// P1-19 (auditoria 2026-07-20): o fallback de `?token=` na query string foi
+// REMOVIDO — o frontend não usa mais nenhum dos dois fallbacks (só cookie
+// same-origin), e um JWT na query string fica gravado em log de acesso de
+// proxy/CDN (exatamente o vetor que o subprotocolo dedicado deveria eliminar).
+httpServer.on('upgrade', async (req, socket, head) => {
+  // P2-29 (auditoria 2026-07-20): ao contrário do middleware CORS (que valida
+  // Origin pra fetch/XHR), o upgrade do WS não checava Origin explicitamente —
+  // dependia implicitamente do cookie ser SameSite=Lax (navegadores não deveriam
+  // anexá-lo a um handshake WS cross-site iniciado por script), um comportamento
+  // que varia por navegador/proxy e não deveria ser a única linha de defesa.
+  // Mesma política de origem do CORS HTTP (isAllowedOrigin) — ausência de Origin
+  // (clientes não-browser via subprotocolo) continua permitida, igual ao CORS.
+  if (!isAllowedOrigin(req.headers.origin, { origins: allowedOrigins, allowCfWildcard: ALLOW_CLOUDFLARE_WILDCARD })) {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
+    socket.destroy()
+    return
+  }
+
   const urlObj = new URL(req.url, 'http://localhost')
   const engagementId = urlObj.searchParams.get('engagementId')
   const sessionId    = urlObj.searchParams.get('sessionId') || 'default'
 
-  const cookies    = cookie.parse(req.headers.cookie || '')
-  const protoHeader = req.headers['sec-websocket-protocol'] || ''
-  const protoToken  = protoHeader.split(',').map((s) => s.trim()).find((p) => p && p !== 'rift-jwt')
-  const token       = cookies[COOKIE_NAME] || protoToken || urlObj.searchParams.get('token')
+  const token = resolveWsToken(req.headers.cookie, req.headers['sec-websocket-protocol'], COOKIE_NAME)
 
   if (!token || !engagementId) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
@@ -186,6 +201,15 @@ httpServer.on('upgrade', (req, socket, head) => {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET)
+    // P1-11: mesmo gate de revogação do requireAuth() HTTP — um WS não deveria
+    // sobreviver a um rebaixamento/reset de senha só porque o handshake já foi
+    // feito antes da mudança.
+    const stillValid = await checkTokenVersion(payload)
+    if (!stillValid) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      socket.destroy()
+      return
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws._user         = payload
       ws._engagementId = engagementId
@@ -833,6 +857,15 @@ connect()
       if (n) console.log(`[rift] reconciliados ${n} scan(s) ASM 'scanning' → 'failed' no boot`)
     } catch (err) {
       console.warn('[rift] recuperação de scans ASM falhou:', err?.message)
+    }
+    // P1-14: mata qualquer processo (+ grupo) do agente que sobreviveu a um
+    // crash duro do backend anterior (OOM/kill -9 — não passou pelo shutdown
+    // gracioso, que já mata a árvore sozinho).
+    try {
+      const n = agentRunner.reconcileOrphanedProcesses()
+      if (n) console.log(`[rift] ${n} processo(s) órfão(s) de crash anterior encerrado(s) no boot`)
+    } catch (err) {
+      console.warn('[rift] reconciliação de processos órfãos falhou:', err?.message)
     }
     httpServer.listen(PORT, () => {
       console.log(`[rift] backend em http://localhost:${PORT}`)

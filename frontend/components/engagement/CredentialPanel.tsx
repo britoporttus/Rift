@@ -110,10 +110,11 @@ export function CredentialPanel({
         <>
           {pack.credentialFields.map((f: CredentialField) => (
             <div key={f.name}>
-              <label style={labelStyle}>
+              <label style={labelStyle} htmlFor={`cred-panel-${f.name}`}>
                 {f.label}{f.optional ? ' (opcional)' : ''}
               </label>
               <input
+                id={`cred-panel-${f.name}`}
                 type={f.secret ? 'password' : 'text'}
                 autoComplete="off"
                 value={values[f.name] || ''}

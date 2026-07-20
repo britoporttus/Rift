@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Layers, ChevronDown, Check, Loader2, AlertTriangle } from 'lucide-react'
 import { api, Engagement, FrameworkInfo } from '@/lib/api'
 
@@ -19,8 +19,6 @@ export function FrameworkSwitcher({
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-
   useEffect(() => {
     api.settings.getFrameworks().then(setInfo).catch(() => setInfo(null))
   }, [])
@@ -47,7 +45,7 @@ export function FrameworkSwitcher({
   }
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div style={{ position: 'relative' }}>
       <button
         onClick={() => !disabled && setOpen((v) => !v)}
         title="Trocar a versão do agente de pentest para este engagement (vale para o próximo run)"

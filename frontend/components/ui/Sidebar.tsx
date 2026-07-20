@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { User } from '@/lib/api'
+import { SI } from '@/components/ui/SI'
 
 const C = {
   bg: '#080810',
@@ -19,19 +20,12 @@ const C = {
   red: '#EF4444',
 }
 
-function SI({ s = 15, c = 'currentColor', sw = 1.75, children }: { s?: number; c?: string; sw?: number; children: React.ReactNode }) {
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
-      strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, display: 'block' }}>
-      {children}
-    </svg>
-  )
-}
-
 const Ico = {
   crosshair: (s?: number, c?: string) => <SI s={s || 20} c={c || C.purple}><circle cx="12" cy="12" r="10" /><line x1="22" y1="12" x2="18" y2="12" /><line x1="6" y1="12" x2="2" y2="12" /><line x1="12" y1="6" x2="12" y2="2" /><line x1="12" y1="22" x2="12" y2="18" /></SI>,
   grid:      (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></SI>,
+  globe:     (s?: number, c?: string) => <SI s={s || 14} c={c}><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" /></SI>,
+  database:  (s?: number, c?: string) => <SI s={s || 14} c={c}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></SI>,
+  share2:    (s?: number, c?: string) => <SI s={s || 14} c={c}><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></SI>,
   alert:     (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></SI>,
   file:      (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></SI>,
   users:     (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></SI>,
@@ -43,6 +37,9 @@ const Ico = {
 
 const NAV_ALL = [
   { href: '/dashboard',   icon: 'grid'     as const, label: 'Dashboard',  adminOnly: false },
+  { href: '/dominios',    icon: 'globe'    as const, label: 'Domínios',   adminOnly: false },
+  { href: '/vazamentos',  icon: 'database' as const, label: 'Vazamentos', adminOnly: false },
+  { href: '/mapa',        icon: 'share2'   as const, label: 'Mapa',       adminOnly: false },
   { href: '/findings',    icon: 'alert'    as const, label: 'Findings',   adminOnly: false },
   { href: '/reports',     icon: 'file'     as const, label: 'Relatórios', adminOnly: false },
   { href: '/admin/users', icon: 'users'    as const, label: 'Usuários',   adminOnly: true  },
@@ -149,19 +146,6 @@ export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
                 </span>
                 {!collapsed && (
                   <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{label}</span>
-                )}
-                {/* Findings badge — only when expanded and on findings nav */}
-                {!collapsed && icon === 'alert' && (
-                  <span style={{
-                    background: C.red,
-                    color: 'white',
-                    fontSize: 8, fontWeight: 700,
-                    borderRadius: 99,
-                    padding: '1px 5px',
-                    lineHeight: 1.4,
-                  }}>
-                    {/* badge count managed elsewhere */}
-                  </span>
                 )}
               </div>
             </Link>

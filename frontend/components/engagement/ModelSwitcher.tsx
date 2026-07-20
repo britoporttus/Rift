@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Cpu, ChevronDown, Check, Loader2 } from 'lucide-react'
 import { api, AgentModelInfo } from '@/lib/api'
 
@@ -11,8 +11,6 @@ export function ModelSwitcher({ disabled }: { disabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-
   useEffect(() => {
     api.settings.getModel().then(setInfo).catch(() => setInfo(null))
   }, [])
@@ -37,7 +35,7 @@ export function ModelSwitcher({ disabled }: { disabled?: boolean }) {
   if (!info) return null
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div style={{ position: 'relative' }}>
       <button
         onClick={() => !disabled && setOpen((v) => !v)}
         title="Trocar o modelo de IA do agente (vale para o próximo run)"

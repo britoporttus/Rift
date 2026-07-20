@@ -1,21 +1,13 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { api, Engagement, ReportFile } from '@/lib/api'
+import { useEscapeClose } from '@/hooks/useEscapeClose'
+import { SI } from '@/components/ui/SI'
 
 function fmtSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function SI({ s = 15, c = 'currentColor', sw = 1.75, children }: { s?: number; c?: string; sw?: number; children: React.ReactNode }) {
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
-      strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, display: 'block' }}>
-      {children}
-    </svg>
-  )
 }
 
 const ChevDown  = (s?: number, c?: string) => <SI s={s || 13} c={c || '#7C3AED'} sw={2}><polyline points="6 9 12 15 18 9" /></SI>
@@ -84,6 +76,17 @@ export default function ReportsPage() {
     if (preview) URL.revokeObjectURL(preview.blobUrl)
     setPreview(null)
   }
+
+  // P2-41 (auditoria 2026-07-20): closePreview só revogava a blob URL em
+  // fechamento EXPLÍCITO — navegar pra outra rota (SPA) com o modal aberto
+  // nunca chamava closePreview, retendo o Blob na memória da aba pelo resto
+  // da sessão. Cleanup no unmount/troca de preview cobre esse caso.
+  useEffect(() => {
+    return () => { if (preview) URL.revokeObjectURL(preview.blobUrl) }
+  }, [preview])
+
+  // P2-39: Esc fecha o modal + foco vai pro container ao abrir.
+  const modalRef = useEscapeClose(!!preview, closePreview)
 
   // Abre o relatório GERADO pelo Rift (a partir dos findings) no modal de preview.
   const openGenerated = useCallback(async (e: Engagement, type: 'technical' | 'executive') => {
@@ -194,6 +197,11 @@ export default function ReportsPage() {
           }}
         >
           <div
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={preview.name}
+            tabIndex={-1}
             onClick={(ev) => ev.stopPropagation()}
             style={{
               width: '90%', maxWidth: 1180, height: '92vh',

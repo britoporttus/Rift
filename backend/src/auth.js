@@ -59,7 +59,11 @@ if (loginCleanup.unref) loginCleanup.unref()
 
 function signToken(user) {
   return jwt.sign(
-    { sub: user._id || user.id, email: user.email, role: user.role, name: user.name },
+    // tv (tokenVersion): P1-11 — permite revogar o token tecnicamente em mudança
+    // de role/reset de senha, sem esperar a expiração de 12h. `|| 0` cobre users
+    // criados antes do campo existir (default do schema já é 0, mas o objeto
+    // passado aqui pode ser um .lean()/toObject() de um doc antigo em cache).
+    { sub: user._id || user.id, email: user.email, role: user.role, name: user.name, tv: user.tokenVersion || 0 },
     JWT_SECRET,
     { expiresIn: '12h' }
   )
@@ -96,15 +100,32 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true })
 })
 
+// P1-11: valida o JWT E confere que `tv` (tokenVersion) do token ainda bate com
+// o do usuário no banco — se um admin rebaixar role ou resetar senha de outra
+// conta, `bumpTokenVersion` incrementa o contador e QUALQUER token emitido antes
+// disso passa a ser rejeitado aqui, mesmo dentro da janela de 12h. Usuário
+// excluído (findById retorna null) também cai neste 401.
+async function checkTokenVersion(payload) {
+  const user = await User.findById(payload.sub).select('tokenVersion').lean()
+  if (!user) return false
+  return (payload.tv || 0) === (user.tokenVersion || 0)
+}
+
 function requireAuth(roles = []) {
-  return (req, res, next) => {
-    const header = req.headers.authorization ?? ''
-    const headerToken = header.startsWith('Bearer ') ? header.slice(7) : null
-    const token = req.cookies?.[COOKIE_NAME] || headerToken
+  return async (req, res, next) => {
+    // P2-34 (auditoria 2026-07-20): o fallback `Authorization: Bearer` reabria
+    // a superfície que o cookie HttpOnly existe pra fechar (roubo de token via
+    // XSS/log/extensão de browser). Confirmado sem uso real: nenhum client
+    // deste repo (frontend/lib/api.ts, CI, scripts) manda esse header pro
+    // próprio backend do Rift — removido.
+    const token = req.cookies?.[COOKIE_NAME]
     if (!token) return res.status(401).json({ error: 'Token ausente' })
 
     try {
       const payload = jwt.verify(token, JWT_SECRET)
+      const stillValid = await checkTokenVersion(payload)
+      if (!stillValid) return res.status(401).json({ error: 'Sessão revogada — faça login novamente.' })
+
       req.user = payload.user
         ? payload.user
         : { id: payload.sub, email: payload.email, role: payload.role, name: payload.name }
@@ -119,4 +140,10 @@ function requireAuth(roles = []) {
   }
 }
 
-module.exports = { router, requireAuth, signToken, JWT_SECRET, COOKIE_NAME, cookieOptions }
+// Incrementa tokenVersion — chame sempre que a role ou a senha de um usuário
+// mudar (ver api/users.js). Idempotente/seguro mesmo se chamado em duplicidade.
+async function bumpTokenVersion(userId) {
+  await User.findByIdAndUpdate(userId, { $inc: { tokenVersion: 1 } }).catch(() => {})
+}
+
+module.exports = { router, requireAuth, signToken, checkTokenVersion, bumpTokenVersion, JWT_SECRET, COOKIE_NAME, cookieOptions }

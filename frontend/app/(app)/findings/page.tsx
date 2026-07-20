@@ -1,25 +1,12 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { api, Finding, Engagement } from '@/lib/api'
-
-const SEV_COLOR: Record<string, string> = {
-  critical: '#EF4444',
-  high:     '#F59E0B',
-  medium:   '#EAB308',
-  low:      '#22C55E',
-  info:     '#3B82F6',
-}
-const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info']
-
-function SI({ s = 15, c = 'currentColor', sw = 1.75, children }: { s?: number; c?: string; sw?: number; children: React.ReactNode }) {
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c}
-      strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, display: 'block' }}>
-      {children}
-    </svg>
-  )
-}
+import { SI } from '@/components/ui/SI'
+// P1-27 (auditoria 2026-07-20): cor local divergia da fonte única (high
+// #F59E0B aqui vs #F97316 em lib/severity.ts) — um finding "high" aparecia com
+// cor diferente aqui do que em Dashboard/Domínios/Vazamentos/Mapa/FindingsReport.
+import { SEV_COLOR, SEV_ORDER as SEVERITIES } from '@/lib/severity'
+import { clickableDivProps } from '@/lib/a11y'
 
 const ChevDown  = (s?: number, c?: string) => <SI s={s || 12} c={c || '#3A3A58'} sw={2}><polyline points="6 9 12 15 18 9" /></SI>
 const ChevRight = (s?: number, c?: string) => <SI s={s || 12} c={c || '#3A3A58'} sw={2}><polyline points="9 18 15 12 9 6" /></SI>
@@ -147,7 +134,7 @@ export default function FindingsPage() {
             const isExpanded = expanded === f.id
             return (
               <div key={`${f.engagement_id}-${f.id}`}
-                onClick={() => setExpanded(isExpanded ? null : f.id)}
+                {...clickableDivProps(() => setExpanded(isExpanded ? null : f.id))}
                 style={{
                   background: 'rgba(4,4,12,0.97)',
                   border: `1px solid ${isExpanded ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.13)'}`,

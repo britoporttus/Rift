@@ -49,29 +49,47 @@ function getMsalClient() {
   return _msalClient
 }
 
-// Busca grupos via Graph API — mais confiável que claims do token
-// (token claims podem omitir grupos se o usuário tiver muitos)
-async function getUserGroups(accessToken) {
+// Uma página do Graph API. `pathOrUrl` aceita tanto um path relativo (1ª
+// página) quanto a URL absoluta de `@odata.nextLink` (páginas seguintes).
+function graphRequestPage(pathOrUrl, accessToken) {
   return new Promise((resolve) => {
-    const options = {
-      hostname: 'graph.microsoft.com',
-      path: '/v1.0/me/memberOf?$select=id&$top=100',
-      method: 'GET',
-      headers: { Authorization: `Bearer ${accessToken}` },
+    let hostname = 'graph.microsoft.com', path = pathOrUrl
+    if (/^https?:\/\//.test(pathOrUrl)) {
+      const u = new URL(pathOrUrl)
+      hostname = u.hostname
+      path = u.pathname + u.search
     }
+    const options = { hostname, path, method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } }
     const req = https.request(options, (res) => {
       let data = ''
       res.on('data', chunk => { data += chunk })
       res.on('end', () => {
-        try {
-          const json = JSON.parse(data)
-          resolve((json.value || []).map(g => g.id))
-        } catch { resolve([]) }
+        try { resolve(JSON.parse(data)) } catch { resolve({}) }
       })
     })
-    req.on('error', () => resolve([]))
+    req.on('error', () => resolve({}))
     req.end()
   })
+}
+
+// P2-32 (auditoria 2026-07-20): sem paginação, um admin legítimo membro de
+// >100 grupos AAD com o grupo-admin além da primeira página não recebia a
+// role — falha para o lado seguro (sem escalação indevida), mas afeta
+// disponibilidade (admin de verdade sem acesso admin). Segue `@odata.nextLink`
+// até esgotar ou até o teto de segurança (nunca faz loop sem fim).
+const MAX_GROUP_PAGES = 20
+
+// Busca grupos via Graph API — mais confiável que claims do token
+// (token claims podem omitir grupos se o usuário tiver muitos)
+async function getUserGroups(accessToken) {
+  const ids = []
+  let next = '/v1.0/me/memberOf?$select=id&$top=100'
+  for (let page = 0; page < MAX_GROUP_PAGES && next; page++) {
+    const json = await graphRequestPage(next, accessToken)
+    ids.push(...(json.value || []).map(g => g.id))
+    next = json['@odata.nextLink'] || null
+  }
+  return ids
 }
 
 const router = Router()
@@ -142,7 +160,13 @@ router.get('/callback', async (req, res) => {
     }
   }
 
-  // Upsert usuário no MongoDB
+  // Upsert usuário no MongoDB — `role` é SEMPRE recalculado a partir do grupo AAD
+  // e SOBRESCREVE qualquer valor setado manualmente via PATCH /api/users/:id.
+  // P2-31 (auditoria 2026-07-20): comportamento INTENCIONAL — SSO/grupo AAD é a
+  // fonte da verdade de role para contas 'microsoft' (falha para o lado seguro:
+  // sem grupo-admin configurado → sempre 'user', nunca escala sozinho). Um admin
+  // que promover/rebaixar manualmente uma conta SSO verá a mudança revertida no
+  // PRÓXIMO login dessa conta — ver aviso equivalente em api/users.js#PATCH.
   const dbUser = await User.findOneAndUpdate(
     { email },
     { name, role, provider: 'microsoft', azureId, lastLogin: new Date() },
@@ -172,3 +196,5 @@ router.post('/exchange', (req, res) => {
 })
 
 module.exports = router
+module.exports.getUserGroups = getUserGroups
+module.exports.MAX_GROUP_PAGES = MAX_GROUP_PAGES

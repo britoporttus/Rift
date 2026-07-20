@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { WsMsg } from '@/hooks/useEngagementWS'
 import { Engagement, Job } from '@/lib/api'
+import { SEV_ORDER } from '@/lib/severity'
 import { RunHistory } from './RunHistory'
 import {
   Play, Radar, ScanSearch, ShieldAlert, CheckCircle2, Loader2, Circle,
@@ -33,11 +34,12 @@ const MILESTONE_ICON: Record<string, LucideIcon> = {
   tech: Cpu, waf: Shield, urls: Link2, paths: FolderSearch,
 }
 
+// cores via var(--x) (não os hex de lib/severity) pra seguir o resto do
+// componente, que estiliza tudo com custom properties do tema.
 const SEV_COLOR: Record<string, string> = {
   critical: 'var(--critical)', high: 'var(--high)', medium: 'var(--medium)',
   low: 'var(--low)', info: 'var(--info)',
 }
-const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
 // Fases por DOMÍNIO. As keys (recon/enum/vuln) são as mesmas do Job/phase_update — só
 // os rótulos/ícones mudam por domain pack, então cada tipo tem sua "tela" de execução
@@ -201,7 +203,7 @@ export function ExecutionPanel({
   const findingMsgs = messages.filter((m) => m.type === 'finding')
   const allFindings = Object.values(
     findingMsgs.reduce((acc, f) => { acc[String(f.id ?? f._id)] = f; return acc }, {} as Record<string, WsMsg>)
-  ).sort((a, b) => SEV_ORDER.indexOf(String(a.severity)) - SEV_ORDER.indexOf(String(b.severity)))
+  ).sort((a, b) => (SEV_ORDER as readonly string[]).indexOf(String(a.severity)) - (SEV_ORDER as readonly string[]).indexOf(String(b.severity)))
 
   // A-LIVE-3/4 + B-LINK: separar por taxonomia (state). Só `confirmed` é ACHADO;
   // `probable`/`informational` são SUPERFÍCIE/observações (o "mapa", muito ruído

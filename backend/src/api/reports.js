@@ -5,7 +5,7 @@ const { requireAuth } = require('../auth')
 const { getEngagement } = require('../store')
 const { getFrameworkPath } = require('../frameworks')
 const { renderReport } = require('../report')
-const { htmlToPdf } = require('../report-pdf')
+const { htmlToPdf, PdfConcurrencyLimitError } = require('../report-pdf')
 const { generateExecNarrative } = require('../report-ai')
 const Finding = require('../models/Finding')
 const Usage = require('../models/Usage')
@@ -22,8 +22,19 @@ function reportsDir(e) {
 }
 
 // Relatório executivo (C-level) é restrito a admin pela tabela de ROLES.
+// P0-6 (auditoria 2026-07-20): a convenção REAL do framework (ver
+// Agentes-Pentest/*/.claude/commands/pentest-report.md) nomeia o C-level como
+// `clevel-{date}.md`/`clevel-surface-{date}.md` — sem a substring "exec". A
+// regex antiga só pegava o nome legado `relatorio-executivo.md` (framework v1)
+// e deixava QUALQUER `clevel-*` das versões v2/v2-next passar como "técnico"
+// (visível a qualquer usuário autenticado) — confirmado em arquivos já
+// existentes em disco (ex.: clients/akdmi/2026-07-08/reports/clevel-surface-2026-07-08.md).
+// Ainda depende do nome do arquivo (limitação conhecida — o ideal é um
+// manifesto controlado pelo backend), mas cobre a convenção real de todas as
+// versões do framework hoje em uso.
 function isExecutiveReport(filename) {
-  return /exec/i.test(filename)
+  const f = filename.toLowerCase()
+  return f.startsWith('clevel') || /exec/i.test(f)
 }
 
 async function costFor(engagementId) {
@@ -65,6 +76,8 @@ router.get('/:engagementId/generated', async (req, res) => {
       res.setHeader('X-Content-Type-Options', 'nosniff')
       return res.send(pdf)
     } catch (err) {
+      // P2-33: teto de concorrência vira 429 (tente de novo), não 502 (falha real).
+      if (err instanceof PdfConcurrencyLimitError) return res.status(429).json({ error: err.message })
       return res.status(502).json({ error: `Falha ao gerar PDF: ${err.message}` })
     }
   }
@@ -82,6 +95,7 @@ router.get('/:engagementId/generated', async (req, res) => {
 // ── Resumo executivo por IA (opt-in, cacheado) ──────────────────────────────────────
 // GET: devolve a narrativa salva (+ se está desatualizada vs findings atuais).
 router.get('/:engagementId/narrative', async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Resumo executivo restrito a administradores' })
   const e = await getEngagement(req.params.engagementId)
   if (!e) return res.status(404).json({ error: 'not found' })
   const n = await ReportNarrative.findById(e._id).lean().catch(() => null)
@@ -180,3 +194,4 @@ router.get('/:engagementId/download/:filename', async (req, res) => {
 })
 
 module.exports = router
+module.exports.isExecutiveReport = isExecutiveReport

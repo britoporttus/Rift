@@ -211,4 +211,10 @@ O backend do Rift lê/escreve nesse diretório para:
 - O diretório do framework tem `.claude/settings.json` com permissões dos tools de pentest
 - `context/` é gitignored no framework (contém credenciais)
 - Engagements em andamento vivem em `context/{engagement_id}/`
-- Por enquanto: 1 usuário, 1 VPS, sem multi-tenancy
+- Por enquanto: 1 usuário, 1 VPS, sem multi-tenancy. `@porttus.com` e `@trustsis.com`
+  (domínios liberados no SSO, ver `ALLOWED_EMAIL_DOMAINS`) são a MESMA equipe operando
+  o Rift (confirmado com o operador em 2026-07-20, auditoria de código) — não são
+  clientes/organizações distintas. Não há hoje necessidade real de ACL por
+  engagement (qualquer usuário autenticado ver qualquer engagement não é um bug
+  de isolamento entre tenants); reavaliar só se o Rift passar a atender clientes
+  externos de verdade (ver `docs/ROADMAP-MULTI-DOMINIO.md`).
