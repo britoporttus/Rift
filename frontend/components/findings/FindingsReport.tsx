@@ -4,13 +4,14 @@ import { api, Finding, RemediationStatus } from '@/lib/api'
 import { SEV_COLOR, SEV_ORDER, safeHref } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import { findingType, findingConfirmation, findingExploitation, cvssKind } from '@/lib/findingClassify'
+import { Donut } from '@/components/ui/charts/Donut'
 
 // Status de remediação — fecha o ciclo "achei → corrigi → confirmei"
 const REMEDIATION: Record<RemediationStatus, { label: string; color: string; icon: string }> = {
-  open:          { label: 'Aberto',       color: '#f97316', icon: '○' },
+  open:          { label: 'Aberto',       color: '#F5892E', icon: '○' },
   fixed:         { label: 'Corrigido',    color: '#22c55e', icon: '✓' },
-  regressed:     { label: 'Regrediu',     color: '#ef4444', icon: '⚠' },
-  accepted_risk: { label: 'Risco aceito', color: '#94A3B8', icon: '◆' },
+  regressed:     { label: 'Regrediu',     color: '#F04452', icon: '⚠' },
+  accepted_risk: { label: 'Risco aceito', color: '#A6ACC0', icon: '◆' },
 }
 
 function fmtDate(d?: string | null) {
@@ -31,42 +32,14 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
 const CONF_META: Record<string, { label: string; color: string }> = {
   confirmed:      { label: 'Confirmado',     color: '#22c55e' },
   probable:       { label: 'Provável',       color: '#eab308' },
-  unvalidated:    { label: 'Não validado',   color: '#94A3B8' },
+  unvalidated:    { label: 'Não validado',   color: '#A6ACC0' },
   false_positive: { label: 'Falso positivo', color: '#64748b' },
 }
 const EXPL_META: Record<string, { label: string; color: string }> = {
-  confirmed:       { label: 'Exploração confirmada',      color: '#ef4444' },
-  potential:       { label: 'Potencialmente explorável', color: '#f97316' },
+  confirmed:       { label: 'Exploração confirmada',      color: '#F04452' },
+  potential:       { label: 'Potencialmente explorável', color: '#F5892E' },
   not_exploitable: { label: 'Não explorável',            color: '#64748b' },
-  untested:        { label: 'Não testada',               color: '#94A3B8' },
-}
-
-// ── SVG donut chart ──────────────────────────────────────────────
-function Donut({ segments, total }: { segments: { value: number; color: string }[]; total: number }) {
-  const r = 52, cx = 64, cy = 64, stroke = 16
-  const circ = 2 * Math.PI * r
-  let offset = 0
-  return (
-    <svg width={128} height={128} viewBox="0 0 128 128">
-      <circle r={r} cx={cx} cy={cy} fill="none" stroke="#2D2D4E" strokeWidth={stroke} />
-      {segments.filter(s => s.value > 0).map((s, i) => {
-        const pct = s.value / (total || 1)
-        const dash = pct * circ
-        const el = (
-          <circle key={i} r={r} cx={cx} cy={cy} fill="none"
-            stroke={s.color} strokeWidth={stroke}
-            strokeDasharray={`${dash} ${circ - dash}`}
-            strokeDashoffset={circ * 0.25 - offset}
-            style={{ transition: 'stroke-dashoffset 0.4s' }}
-          />
-        )
-        offset += dash
-        return el
-      })}
-      <text x={cx} y={cy - 6} textAnchor="middle" fill="#E2E8F0" fontSize={22} fontWeight={700}>{total}</text>
-      <text x={cx} y={cy + 12} textAnchor="middle" fill="#94A3B8" fontSize={9}>findings</text>
-    </svg>
-  )
+  untested:        { label: 'Não testada',               color: '#A6ACC0' },
 }
 
 // ── expandable finding card ──────────────────────────────────────
@@ -104,7 +77,7 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
       background: 'var(--surface)', borderRadius: 10, overflow: 'hidden',
       border: '1px solid var(--border)', transition: 'border-color .15s',
     }}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = '#3e4166')}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border-hi)')}
       onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
     >
       {/* header */}
@@ -112,17 +85,17 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
         display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', cursor: 'pointer',
       }}>
         {/* severity bar */}
-        <div style={{ width: 4, height: 36, borderRadius: 2, background: SEV_COLOR[sev] ?? '#94A3B8', flexShrink: 0 }} />
+        <div style={{ width: 4, height: 36, borderRadius: 2, background: SEV_COLOR[sev] ?? 'var(--muted)', flexShrink: 0 }} />
 
         {/* title */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 13.5, color: '#E2E8F0', marginBottom: 2 }}>{f.title}</div>
+          <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--text)', marginBottom: 2 }}>{f.title}</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {f.cwe && (
-              <span style={{ fontSize: 10, color: '#60a5fa' }}>{f.cwe}</span>
+              <span style={{ fontSize: 10, color: 'var(--info)' }}>{f.cwe}</span>
             )}
             {f.owasp && (
-              <span style={{ fontSize: 10, color: '#f97316' }}>{f.owasp}</span>
+              <span style={{ fontSize: 10, color: 'var(--high)' }}>{f.owasp}</span>
             )}
           </div>
         </div>
@@ -149,7 +122,7 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
           {/* CONFIRMAÇÃO (dot + rótulo neutro) */}
           <span title="Confirmação" style={{
             display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 10, fontWeight: 600, color: '#94A3B8',
+            fontSize: 10, fontWeight: 600, color: 'var(--muted)',
           }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: CONF_META[conf].color, flexShrink: 0 }} />
             {CONF_META[conf].label}
@@ -166,18 +139,18 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
           {/* instance count */}
           {instances.length > 0 && (
             <span style={{
-              background: '#1a1d27', border: '1px solid var(--border)',
-              borderRadius: 6, padding: '2px 8px', fontSize: 11, color: '#94A3B8',
+              background: 'var(--raised)', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--muted)',
             }}>
               {instances.length} {instances.length === 1 ? 'instância' : 'instâncias'}
             </span>
           )}
           {ck && (
-            <span title={ck === 'calculated' ? 'CVSS calculado (com vetor)' : 'CVSS estimado (sem vetor)'} style={{ fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>
-              CVSS {f.cvss} <span style={{ color: '#64748b', fontSize: 9.5 }}>{ck === 'calculated' ? 'calc.' : 'est.'}</span>
+            <span title={ck === 'calculated' ? 'CVSS calculado (com vetor)' : 'CVSS estimado (sem vetor)'} style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+              CVSS {f.cvss} <span style={{ color: 'var(--text-mute)', fontSize: 9.5 }}>{ck === 'calculated' ? 'calc.' : 'est.'}</span>
             </span>
           )}
-          <span style={{ color: '#94A3B8', fontSize: 12, transition: 'transform .2s', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+          <span style={{ color: 'var(--muted)', fontSize: 12, transition: 'transform .2s', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
         </div>
       </div>
 
@@ -186,7 +159,7 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
         <div style={{ padding: '0 16px 16px 32px' }}>
           {/* Exploração (dimensão 5) — dot + rótulo, separada da severidade/tipo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0 0' }}>
-            <span style={{ fontSize: 11, color: '#94A3B8' }}>Exploração:</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Exploração:</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: EXPL_META[expl].color }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: EXPL_META[expl].color, flexShrink: 0 }} />
               {EXPL_META[expl].label}
@@ -197,7 +170,7 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
             display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
             padding: '10px 0 12px', borderBottom: '1px solid rgba(46,49,73,.5)', marginBottom: 12,
           }}>
-            <span style={{ fontSize: 11, color: '#94A3B8' }}>Status:</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Status:</span>
             {(['open', 'fixed', 'accepted_risk'] as RemediationStatus[]).map(s => {
               const active = (f.remediationStatus ?? 'open') === s
               const cfg = REMEDIATION[s]
@@ -208,32 +181,35 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
                     cursor: saving ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
                     border: `1px solid ${active ? cfg.color : 'var(--border)'}`,
                     background: active ? `${cfg.color}22` : 'transparent',
-                    color: active ? cfg.color : '#94A3B8',
+                    color: active ? cfg.color : 'var(--muted)',
                   }}>
                   <span>{cfg.icon}</span>{cfg.label}
                 </button>
               )
             })}
             {(firstSeen || lastSeen) && (
-              <span style={{ fontSize: 11, color: '#64748b', marginLeft: 'auto' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-mute)', marginLeft: 'auto' }}>
                 {firstSeen && `1ª detecção: ${firstSeen}`}
                 {firstSeen && lastSeen && '  ·  '}
                 {lastSeen && `última: ${lastSeen}`}
               </span>
             )}
           </div>
+          {f.discoveredBy && (
+            <div style={{ fontSize: 11, color: 'var(--purple-light)', fontFamily: 'var(--mono)', marginBottom: 8 }}>via {f.discoveredBy}</div>
+          )}
           {f.description && (
-            <p style={{ color: '#94A3B8', fontSize: 13, lineHeight: 1.7, marginBottom: 12 }}>{f.description}</p>
+            <p style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.7, marginBottom: 12 }}>{f.description}</p>
           )}
 
           {f.solution && (
             <>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: '#7C3AED', margin: '10px 0 6px' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--purple)', margin: '10px 0 6px' }}>
                 Solução recomendada
               </div>
               <div style={{
-                background: '#1a1d27', borderRadius: 8, padding: '10px 12px',
-                fontSize: 12, color: '#94A3B8', borderLeft: '3px solid #22c55e',
+                background: 'var(--raised)', borderRadius: 8, padding: '10px 12px',
+                fontSize: 12, color: 'var(--muted)', borderLeft: '3px solid var(--low)',
               }}>
                 {f.solution}
               </div>
@@ -242,7 +218,7 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
 
           {instances.length > 0 && (
             <>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: '#7C3AED', margin: '12px 0 6px' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--purple)', margin: '12px 0 6px' }}>
                 Instâncias afetadas
               </div>
               <div style={{ overflowX: 'auto' }}>
@@ -250,7 +226,7 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
                   <thead>
                     <tr>
                       {['Método', 'URL', 'Evidência'].map(h => (
-                        <th key={h} style={{ textAlign: 'left', color: '#94A3B8', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                        <th key={h} style={{ textAlign: 'left', color: 'var(--muted)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -258,16 +234,16 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
                     {instances.map((inst, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid rgba(46,49,73,.5)' }}>
                         <td style={{ padding: '6px 8px' }}>
-                          <span style={{ background: 'rgba(124,58,237,.2)', color: '#A78BFA', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
+                          <span style={{ background: 'rgba(124,58,237,.2)', color: 'var(--purple-light)', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>
                             {inst.method}
                           </span>
                         </td>
                         <td style={{ padding: '6px 8px', wordBreak: 'break-all' }}>
                           {safeHref(inst.uri)
-                            ? <a href={safeHref(inst.uri)!} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', textDecoration: 'none' }}>{inst.uri}</a>
-                            : <span style={{ color: '#94A3B8' }} title="URL não-http bloqueada por segurança">{inst.uri}</span>}
+                            ? <a href={safeHref(inst.uri)!} target="_blank" rel="noreferrer" style={{ color: 'var(--info)', textDecoration: 'none' }}>{inst.uri}</a>
+                            : <span style={{ color: 'var(--muted)' }} title="URL não-http bloqueada por segurança">{inst.uri}</span>}
                         </td>
-                        <td style={{ padding: '6px 8px', color: '#94A3B8', wordBreak: 'break-all' }}>
+                        <td style={{ padding: '6px 8px', color: 'var(--muted)', wordBreak: 'break-all' }}>
                           {inst.evidence || '—'}
                         </td>
                       </tr>
@@ -304,7 +280,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
   }
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#94A3B8', fontSize: 13 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--muted)', fontSize: 13 }}>
       Carregando findings...
     </div>
   )
@@ -328,11 +304,11 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
     ? byTypeFiltered
     : byTypeFiltered.filter(f => (f.remediationStatus ?? 'open') === statusFilter)
 
-  const donutSegs = SEV_ORDER.map(s => ({ value: bySev(s).length, color: SEV_COLOR[s] }))
+  const donutData = SEV_ORDER.map(s => ({ key: s, label: s, value: bySev(s).length, color: SEV_COLOR[s] }))
   const total = sorted.length
 
   if (total === 0) return (
-    <div style={{ padding: '3rem', textAlign: 'center', color: '#94A3B8', fontSize: 14 }}>
+    <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
       Nenhum finding ainda neste engagement.
     </div>
   )
@@ -341,9 +317,9 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
     <button key={t} onClick={() => setFilter(t)} style={{
       padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12,
       border: '1px solid', transition: 'all .15s',
-      borderColor: filter === t ? '#7C3AED' : 'var(--border)',
-      background: filter === t ? 'rgba(124,58,237,.12)' : '#222535',
-      color: filter === t ? '#E2E8F0' : '#94A3B8',
+      borderColor: filter === t ? 'var(--purple)' : 'var(--border)',
+      background: filter === t ? 'rgba(124,58,237,.12)' : 'var(--surface2)',
+      color: filter === t ? 'var(--text)' : 'var(--muted)',
     }}>
       {label} ({count})
     </button>
@@ -356,14 +332,14 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 20, marginBottom: 20 }}>
         {/* donut */}
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em', color: '#94A3B8', marginBottom: 4 }}>Distribuição</div>
-          <Donut segments={donutSegs} total={total} />
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--muted)', marginBottom: 4 }}>Distribuição</div>
+          <Donut data={donutData} total={total} caption="findings" size={128} thickness={16} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             {SEV_ORDER.filter(s => bySev(s).length > 0).map(s => (
               <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: SEV_COLOR[s], flexShrink: 0 }} />
                 <span style={{ color: SEV_COLOR[s], textTransform: 'capitalize', minWidth: 55 }}>{s}</span>
-                <span style={{ color: '#94A3B8' }}>{bySev(s).length}</span>
+                <span style={{ color: 'var(--muted)' }}>{bySev(s).length}</span>
               </div>
             ))}
           </div>
@@ -378,7 +354,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
                 padding: '16px 16px 12px', position: 'relative', overflow: 'hidden',
               }}>
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: SEV_COLOR[s] }} />
-                <div style={{ fontSize: 11, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '.08em' }}>{s}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.08em' }}>{s}</div>
                 <div style={{ fontSize: 34, fontWeight: 700, color: SEV_COLOR[s], margin: '4px 0 2px' }}>{bySev(s).length}</div>
               </div>
             ))}
@@ -398,8 +374,8 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
               }} onClick={() => setFilter(filter === type as FilterType ? 'all' : type as FilterType)}>
                 <div style={{ fontSize: 32, fontWeight: 700, color, lineHeight: 1, flexShrink: 0 }}>{items.length}</div>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 12, color: '#E2E8F0', marginBottom: 2 }}>{label}</div>
-                  <div style={{ fontSize: 11, color: '#94A3B8' }}>{sub}</div>
+                  <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{sub}</div>
                 </div>
               </div>
             ))}
@@ -409,14 +385,14 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
 
       {/* ── remediation status bar ── */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
-        <span style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.06em', marginRight: 2 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-mute)', textTransform: 'uppercase', letterSpacing: '.06em', marginRight: 2 }}>
           Remediação
         </span>
         <button onClick={() => setStatusFilter('all')} style={{
           padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12,
-          border: '1px solid', borderColor: statusFilter === 'all' ? '#7C3AED' : 'var(--border)',
-          background: statusFilter === 'all' ? 'rgba(124,58,237,.12)' : '#222535',
-          color: statusFilter === 'all' ? '#E2E8F0' : '#94A3B8',
+          border: '1px solid', borderColor: statusFilter === 'all' ? 'var(--purple)' : 'var(--border)',
+          background: statusFilter === 'all' ? 'rgba(124,58,237,.12)' : 'var(--surface2)',
+          color: statusFilter === 'all' ? 'var(--text)' : 'var(--muted)',
         }}>
           Todos ({total})
         </button>
@@ -429,8 +405,8 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
               padding: '5px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12,
               border: '1px solid', display: 'inline-flex', alignItems: 'center', gap: 5,
               borderColor: active ? cfg.color : 'var(--border)',
-              background: active ? `${cfg.color}1f` : '#222535',
-              color: active ? cfg.color : '#94A3B8',
+              background: active ? `${cfg.color}1f` : 'var(--surface2)',
+              color: active ? cfg.color : 'var(--muted)',
             }}>
               <span>{cfg.icon}</span>{cfg.label} ({count})
             </button>
@@ -449,7 +425,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
       {/* ── finding list ── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {displayed.length === 0
-          ? <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', fontSize: 13 }}>Nenhum finding com esse filtro.</div>
+          ? <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-mute)', fontSize: 13 }}>Nenhum finding com esse filtro.</div>
           : displayed.map(f => <FindingCard key={f.id} f={f} onStatusChange={handleStatusChange} />)}
       </div>
     </div>

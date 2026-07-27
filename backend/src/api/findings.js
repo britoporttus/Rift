@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { requireAuth } = require('../auth')
 const Finding = require('../models/Finding')
 const Engagement = require('../models/Engagement')
+const ChatMessage = require('../models/ChatMessage')
 const { cleanFindings } = require('../findings-count')
 
 const router = Router()
@@ -25,6 +26,8 @@ function toDto(f) {
     type:              f.type,
     location:          f.location,
     confirmed:         f.confirmed,
+    phase:             f.phase,
+    discoveredBy:      f.discoveredBy,
     // Taxonomia + rastreamento de regressão (antes eram descartados pela API)
     state:             f.state,
     confidence:        f.confidence,
@@ -94,6 +97,31 @@ router.patch('/:id/status', async (req, res) => {
   ).lean()
   if (!finding) return res.status(404).json({ error: 'finding não encontrado' })
   res.json(toDto(finding))
+})
+
+// GET /api/findings/:id/trace — reconstrói "como o agente chegou aqui" a
+// partir do histórico de ChatMessage já persistido (agent_action/agent_message),
+// pela proximidade de horário com o achado. Não há vínculo causal explícito
+// (Finding não referencia mensagens) — é aproximação por janela de tempo, mas
+// usa dado que já existe, não coleta nada novo.
+const TRACE_WINDOW_MS = 30 * 60 * 1000
+const TRACE_TYPES = ['agent_action', 'agent_message']
+
+router.get('/:id/trace', async (req, res) => {
+  const finding = await Finding.findById(req.params.id).lean()
+  if (!finding) return res.status(404).json({ error: 'finding não encontrado' })
+
+  const at = finding.createdAt ? new Date(finding.createdAt) : new Date()
+  const messages = await ChatMessage.find({
+    engagementId: finding.engagementId,
+    type: { $in: TRACE_TYPES },
+    createdAt: { $gte: new Date(at.getTime() - TRACE_WINDOW_MS), $lte: at },
+  }).sort({ createdAt: 1 }).limit(40).lean()
+
+  res.json({
+    findingAt: at,
+    messages: messages.map((m) => ({ type: m.type, payload: m.payload, at: m.createdAt })),
+  })
 })
 
 router.get('/:engagementId', async (req, res) => {

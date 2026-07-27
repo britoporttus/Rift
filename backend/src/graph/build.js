@@ -186,6 +186,18 @@ function addDomainBundle(b, { domain, assets = [], findings = [], leaks = [], ag
       type: f.type || null,
       location: f.location || null,
       engagementId: f.engagementId,
+      // Conteúdo completo — o popup de detalhe no front (Domínios/Caminho) não
+      // faz uma segunda chamada a /findings pra isso, usa direto o nó do grafo.
+      description: f.description || null,
+      evidence: f.evidence || null,
+      recommendation: f.recommendation || null,
+      discoveredBy: f.discoveredBy || null,
+      owasp: f.owasp || null,
+      cwe: f.cwe || null,
+      poc: f.poc || null,
+      reproducible: f.reproducible ?? null,
+      remediationStatus: f.remediationStatus || 'open',
+      confidence: f.confidence || null,
     })
     const host = normHost(f.location)
     const anchor = (host && subByHost.get(host)) || domId

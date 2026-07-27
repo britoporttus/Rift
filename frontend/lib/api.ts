@@ -95,6 +95,7 @@ export const api = {
     },
     setStatus: (id: string, remediationStatus: RemediationStatus) =>
       req<Finding>(`/findings/${id}/status`, { method: 'PATCH', body: JSON.stringify({ remediationStatus }) }),
+    trace: (id: string) => req<FindingTrace>(`/findings/${id}/trace`),
   },
   reports: {
     list: (engagementId: string) => req<ReportFile[]>(`/reports/${engagementId}`),
@@ -507,6 +508,10 @@ export interface Finding {
   description?: string
   cvss?: number
   evidence?: string
+  impact?: string
+  recommendation?: string
+  type?: string | null
+  location?: string | null
   engagement_id: string
   engagement_name?: string
   // Taxonomia + rastreamento de remediação/regressão
@@ -516,6 +521,23 @@ export interface Finding {
   fingerprint?: string
   firstSeen?: string | null
   lastSeen?: string | null
+  // Proveniência — nem todo finding tem, watcher/agente preenche quando disponível
+  phase?: number | null
+  discoveredBy?: string | null
+  owasp?: string | null
+  cwe?: string | null
+}
+
+// Rastro do achado — reconstrução aproximada (por horário) do que o agente
+// fez pouco antes de registrar o finding, a partir do ChatMessage já persistido.
+export interface TraceMessage {
+  type: 'agent_action' | 'agent_message'
+  payload: Record<string, unknown>
+  at: string
+}
+export interface FindingTrace {
+  findingAt: string
+  messages: TraceMessage[]
 }
 
 export interface ChatSession {

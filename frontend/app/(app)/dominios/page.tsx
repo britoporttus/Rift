@@ -4,10 +4,16 @@ import { useRouter } from 'next/navigation'
 import { api, DomainSummary } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
+import { HBars } from '@/components/ui/charts/HBars'
 import {
   Globe, Plus, ShieldCheck, ShieldAlert, Radar, Loader2, Server,
   AlertTriangle, Lock,
 } from 'lucide-react'
+
+const KIND_ORDER = ['vendor', 'partner', 'internal', 'other'] as const
+const KIND_COLOR: Record<string, string> = {
+  vendor: 'var(--purple-light)', partner: 'var(--info)', internal: 'var(--low)', other: 'var(--text-mute)',
+}
 
 const STEP_LABEL: Record<string, string> = {
   subdomains: 'subdomínios', dns: 'DNS', http: 'probe web',
@@ -65,9 +71,13 @@ export default function DominiosPage() {
 
   const totalLeaks = domains.reduce((a, d) => a + (d.leakCount || 0), 0)
   const atRisk = domains.filter((d) => d.riskLevel === 'critical' || d.riskLevel === 'high').length
+  const unauthorizedCount = domains.filter((d) => !d.authorized).length
+  const kindData = KIND_ORDER
+    .map((k) => ({ label: KIND_LABEL[k], value: domains.filter((d) => d.kind === k).length, color: KIND_COLOR[k] }))
+    .filter((k) => k.value > 0)
 
   return (
-    <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1280, margin: '0 auto', width: '100%' }}>
+    <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto', width: '100%' }}>
       <div>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: 9 }}>
           <Globe size={19} color="var(--purple-light)" /> Domínios
@@ -78,10 +88,20 @@ export default function DominiosPage() {
       </div>
 
       {!loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
           <Kpi label="Domínios" value={domains.length} color="var(--purple-light)" icon={<Globe size={18} />} />
           <Kpi label="Em risco alto/crítico" value={atRisk} color="var(--high)" icon={<AlertTriangle size={18} />} />
+          <Kpi label="Não autorizados" value={unauthorizedCount} color="var(--medium)" icon={<Lock size={18} />} />
           <Kpi label="Credenciais vazadas" value={totalLeaks} color="var(--critical)" icon={<ShieldAlert size={18} />} />
+        </div>
+      )}
+
+      {!loading && kindData.length > 0 && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.25rem 1.4rem' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 18, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Domínios por tipo
+          </div>
+          <HBars data={kindData} />
         </div>
       )}
 
@@ -95,13 +115,13 @@ export default function DominiosPage() {
           <option value="other">Outro</option>
         </select>
         <button onClick={handleCreate} disabled={creating || !newDomain.trim()}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0.5rem 1rem', background: 'var(--purple)', border: 'none', borderRadius: 7, color: 'white', fontSize: 12.5, fontWeight: 700, cursor: creating ? 'default' : 'pointer', opacity: creating || !newDomain.trim() ? 0.6 : 1, fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow)' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0.5rem 1rem', background: 'var(--purple)', border: 'none', borderRadius: 7, color: 'white', fontSize: 12.5, fontWeight: 700, cursor: creating ? 'default' : 'pointer', opacity: creating || !newDomain.trim() ? 0.6 : 1, fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow-strong)' }}>
           {creating ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} Adicionar
         </button>
       </div>
 
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
           {[0, 1, 2].map((i) => <div key={i} style={{ height: 150, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, animation: 'pulse 1.4s ease-in-out infinite' }} />)}
         </div>
       ) : domains.length === 0 ? (
@@ -111,7 +131,7 @@ export default function DominiosPage() {
           <p style={{ fontSize: 12, margin: '6px 0 0', color: 'var(--text-mute)' }}>Adicione um fornecedor acima para mapear a superfície.</p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
           {domains.map((d) => {
             const isH = hovered === d.id
             const rc = riskColor(d.riskLevel)
@@ -119,7 +139,7 @@ export default function DominiosPage() {
             return (
               <div key={d.id} {...clickableDivProps(() => router.push(`/dominios/${d.id}`))}
                 onMouseEnter={() => setHovered(d.id)} onMouseLeave={() => setHovered(null)}
-                style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none' }}>
+                style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1.25rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name || d.domain}</div>
