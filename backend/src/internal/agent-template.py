@@ -142,14 +142,25 @@ def report(hosts, trigger):
     req = urllib.request.Request(
         f"{RIFT_URL}/api/internal-networks/ingest",
         data=data, method="POST",
-        headers={"Content-Type": "application/json", "X-Rift-Agent-Token": RIFT_TOKEN},
+        headers={
+            "Content-Type": "application/json",
+            "X-Rift-Agent-Token": RIFT_TOKEN,
+            # User-Agent de navegador: sem isto, o Cloudflare na frente do Rift
+            # bloqueia a requisição (403 "error code: 1010") por parecer bot antes
+            # de chegar ao backend.
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            "Accept": "application/json",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             body = r.read().decode()
             print(f"[agente] enviado: {len(hosts)} host(s) → {r.status} {body}", file=sys.stderr)
     except urllib.error.HTTPError as e:
-        print(f"[agente] falha no envio: {e.code} {e.read().decode()[:200]}", file=sys.stderr)
+        detail = e.read().decode()[:200]
+        if e.code == 403 and "1010" in detail:
+            detail += " (bloqueio do Cloudflare — verifique RIFT_URL/atualize o agente)"
+        print(f"[agente] falha no envio: {e.code} {detail}", file=sys.stderr)
     except Exception as e:
         print(f"[agente] falha no envio: {e}", file=sys.stderr)
 
