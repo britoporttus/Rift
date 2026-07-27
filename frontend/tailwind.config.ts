@@ -8,20 +8,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        bg: '#080810',
-        surface: '#0F0F1A',
+        bg: '#0A0A12',
+        surface: '#111119',
+        surface2: '#16161F',
+        raised: '#1A1A24',
         border: '#2D2D4E',
         purple: {
           DEFAULT: '#7C3AED',
           light: '#A78BFA',
-          glow: 'rgba(124,58,237,0.15)',
+          dark: '#6D28D9',
+          glow: 'rgba(124,58,237,0.10)',
+          glowStrong: 'rgba(124,58,237,0.35)',
         },
-        critical: '#EF4444',
-        high: '#F97316',
+        critical: '#F04452',
+        high: '#F5892E',
         medium: '#EAB308',
         low: '#22C55E',
         info: '#3B82F6',
-        muted: '#94A3B8',
+        muted: '#A6ACC0',
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Fira Code', 'monospace'],

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Rift — AI Pentest Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body,#root{height:100vh;overflow:hidden;background:#0A0A12}
+    ::-webkit-scrollbar{width:8px;height:8px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:rgba(124,58,237,0.22);border-radius:99px}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(124,58,237,0.38)}
+    button:focus,input:focus{outline:none}
+    input::placeholder{color:#4A4F66}
+    a{color:#A78BFA;text-decoration:none}
+    a:hover{color:#C4B5FD}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+    @keyframes radarSweep{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="riftx-core.jsx"></script>
+<script type="text/babel" src="riftx-charts.jsx"></script>
+<script type="text/babel" src="riftx-dashboard.jsx"></script>
+<script type="text/babel" src="riftx-asm.jsx"></script>
+<script type="text/babel" src="riftx-extra.jsx"></script>
+
+<script type="text/babel">
+const { useState } = React;
+const { Shell, Login, Dashboard, EngagementDetail, Dominios, DominioDetalhe, Mapa,
+        Findings, Vazamentos, Relatorios, Usuarios, Admin } = window;
+
+const LABELS = { dashboard:'Dashboard', dominios:'Domínios', vazamentos:'Vazamentos',
+  mapa:'Mapa de Superfície', findings:'Findings', relatorios:'Relatórios', usuarios:'Usuários', admin:'Admin' };
+
+function App() {
+  const [authed, setAuthed]   = useState(false);
+  const [page, setPage]       = useState('dashboard');
+  const [collapsed, setColl]  = useState(false);
+  const [eng, setEng]         = useState(null);   // open engagement
+  const [dom, setDom]         = useState(null);   // open domain
+
+  if (!authed) return <Login onAuth={()=>setAuthed(true)}/>;
+
+  const nav = (p) => { setPage(p); setEng(null); setDom(null); };
+
+  // build breadcrumbs + content per route
+  let crumbs = ['Rift', LABELS[page]];
+  let content;
+
+  if (eng) {
+    crumbs = ['Rift','Dashboard', eng.name];
+    content = <EngagementDetail eng={eng} onBack={()=>setEng(null)}/>;
+  } else if (dom) {
+    crumbs = ['Rift','Domínios', dom.name];
+    content = <DominioDetalhe domain={dom} onBack={()=>setDom(null)} onMap={()=>{ setDom(null); setPage('mapa'); }}/>;
+  } else {
+    content = {
+      dashboard:  <Dashboard onOpenEngagement={setEng}/>,
+      dominios:   <Dominios onOpenDomain={setDom}/>,
+      vazamentos: <Vazamentos/>,
+      mapa:       <Mapa/>,
+      findings:   <Findings/>,
+      relatorios: <Relatorios/>,
+      usuarios:   <Usuarios/>,
+      admin:      <Admin/>,
+    }[page];
+  }
+
+  return (
+    <Shell active={page} onNav={nav} collapsed={collapsed} onToggle={()=>setColl(c=>!c)} crumbs={crumbs}>
+      {content}
+    </Shell>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

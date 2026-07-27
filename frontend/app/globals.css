@@ -6,24 +6,29 @@
 
 :root {
   --mono: 'JetBrains Mono', monospace;
-  --bg: #080810;
-  --surface: rgba(4,4,12,0.97);
-  --panel: rgba(5,5,14,0.95);
-  --border: rgba(124,58,237,0.13);
-  --border-mid: rgba(124,58,237,0.28);
-  --border-hi: rgba(124,58,237,0.45);
+  --bg: #0A0A12;
+  --surface: #111119;
+  --surface2: #16161F;
+  --raised: #1A1A24;
+  --panel: #0B0B13;
+  --border: rgba(140,120,225,0.09);
+  --border-mid: rgba(140,120,225,0.18);
+  --border-hi: rgba(140,120,225,0.30);
   --purple: #7C3AED;
   --purple-light: #A78BFA;
-  --purple-glow: rgba(124, 58, 237, 0.15);
-  --critical: #EF4444;
-  --high: #F97316;
+  --purple-dark: #6D28D9;
+  --purple-dim: rgba(124,58,237,0.10);
+  --purple-glow: rgba(124,58,237,0.10);
+  --purple-glow-strong: rgba(124,58,237,0.35);
+  --critical: #F04452;
+  --high: #F5892E;
   --medium: #EAB308;
   --low: #22C55E;
   --info: #3B82F6;
-  --text: #E2E8F0;
-  --muted: #94A3B8;
-  --text-mute: #3A3A58;
-  --text-dim: #252545;
+  --text: #EBEDF4;
+  --muted: #A6ACC0;
+  --text-mute: #71768C;
+  --text-dim: #4A4F66;
 }
 
 * {
@@ -71,23 +76,6 @@ a {
 @keyframes spin     { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
 @keyframes ticker   { from{transform:translateX(0)} to{transform:translateX(-50%)} }
 
-/* ── Login page animations ── */
-@keyframes tvSpin      { to { transform: rotate(360deg); } }
-@keyframes tvSpinRev   { to { transform: rotate(-360deg); } }
-@keyframes tvPulse     { 0%,100%{opacity:.55;transform:scale(1)} 50%{opacity:1;transform:scale(1.28)} }
-@keyframes tvScan      { 0%,100%{top:0;opacity:0} 6%{opacity:1} 94%{opacity:1} 98%{top:100%;opacity:0} }
-@keyframes tvRipple    { 0%{transform:scale(1);opacity:.5} 100%{transform:scale(1.65);opacity:0} }
-@keyframes tvBlink     { 0%,100%{opacity:1} 50%{opacity:0} }
-@keyframes tvFadeIn    { from{opacity:0} to{opacity:1} }
-@keyframes tvSlideUp   { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-@keyframes tvSlideLeft { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
-@keyframes tvStatusPulse { 0%,100%{opacity:.55} 50%{opacity:1} }
-@keyframes tickerScroll  { from{transform:translateX(0)} to{transform:translateX(-50%)} }
-@keyframes ghostGlitch {
-  0%,87%,100% { transform:translate(-50%,-50%) skewX(0deg); color:rgba(124,58,237,0.034); }
-  88%  { transform:translate(calc(-50% + 4px),-50%) skewX(-0.6deg); color:rgba(167,139,250,0.052); }
-  89%  { transform:translate(calc(-50% - 3px),-50%) skewX(0.4deg);  color:rgba(239,68,68,0.03); }
-  90%  { transform:translate(-50%,-50%); color:rgba(124,58,237,0.034); }
-  91%  { transform:translate(calc(-50% + 2px),-50%); color:rgba(124,58,237,0.048); }
-  92%  { transform:translate(-50%,-50%); color:rgba(124,58,237,0.034); }
-}
+/* ── Login page (split + radar orbital, v6) ── */
+@keyframes loginPulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.82)} }
+@keyframes loginFadeUp   { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }

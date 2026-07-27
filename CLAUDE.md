@@ -2,7 +2,7 @@
 
 Você é o agente de desenvolvimento do **Rift**, uma plataforma web que expõe o pentest-framework-v2 (já instalado nesta VPS) através de uma interface moderna.
 
-**Stack:** Next.js 14 + Node.js + WebSocket + SSH2 | **Paleta:** roxo/preto (#080810, #7C3AED) | **Modelo:** claude-sonnet-4-6
+**Stack:** Next.js 14 + Node.js + WebSocket + SSH2 | **Paleta:** roxo/preto (#0A0A12, #7C3AED) | **Modelo:** claude-sonnet-4-6
 
 ---
 
@@ -138,22 +138,33 @@ Frontend → Backend (operador respondendo):
 ## PALETA DE CORES
 
 ```
---bg:           #080810    (fundo principal)
---surface:      #0F0F1A    (cards, painéis)
---border:       #2D2D4E    (bordas)
---purple:       #7C3AED    (accent principal)
---purple-light: #A78BFA    (texto secundário, ícones)
---purple-glow:  rgba(124,58,237,0.15)
+--bg:            #0A0A12    (fundo principal)
+--surface:       #111119    (cards, painéis)
+--surface2:      #16161F    (hover / elevado)
+--raised:        #1A1A24    (elementos elevados)
+--panel:         #0B0B13    (sidebar / topbar)
+--border:        rgba(140,120,225,0.09)
+--border-mid:    rgba(140,120,225,0.18)
+--border-hi:     rgba(140,120,225,0.30)
+--purple:        #7C3AED    (accent principal)
+--purple-light:  #A78BFA    (texto secundário, ícones)
+--purple-dark:   #6D28D9
+--purple-dim:    rgba(124,58,237,0.10)   (tint de fundo)
+--purple-glow-strong: rgba(124,58,237,0.35)   (glow/box-shadow de botão primário)
 
---critical:     #EF4444
---high:         #F97316
---medium:       #EAB308
---low:          #22C55E
---info:         #3B82F6
+--critical:      #F04452
+--high:          #F5892E
+--medium:        #EAB308
+--low:           #22C55E
+--info:          #3B82F6
 
---text:         #E2E8F0
---muted:        #94A3B8
+--text:          #EBEDF4
+--muted:         #A6ACC0
+--text-mute:     #71768C
+--text-dim:      #4A4F66
 ```
+
+> Fonte única (`frontend/app/globals.css` `:root` + `frontend/lib/severity.ts` `SEV_COLOR`) — reformulação visual 2026-07-23 a partir do handoff em `Rifit-desgin/design_handoff_rift_reformulacao/`. Atualizar aqui só documenta; quem vale é o CSS.
 
 ---
 
