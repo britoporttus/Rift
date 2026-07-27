@@ -14,6 +14,7 @@ const dns = require('dns').promises
 
 const Domain = require('../models/Domain')
 const DomainAsset = require('../models/DomainAsset')
+const DomainScan = require('../models/DomainScan')
 const LeakedCredential = require('../models/LeakedCredential')
 const { runTool, hasBin } = require('./binaries')
 const { computeScore } = require('./score')
@@ -21,7 +22,22 @@ const { computeAssetDiff } = require('./diff')
 const { isBlockedIp } = require('../net-guard')
 
 const MAX_PROBE_HOSTS = Number(process.env.ASM_MAX_HOSTS) || 400
-const NUCLEI_ENABLED = process.env.ASM_NUCLEI === '1'
+// Default-ON: nuclei (exposições + CVEs) roda por padrão nos domínios
+// autorizados. `ASM_NUCLEI=0` desliga. Autorização continua obrigatória — o
+// chamador só invoca stageNuclei dentro do bloco `if (authorized && ...)`.
+const NUCLEI_ENABLED = process.env.ASM_NUCLEI !== '0'
+
+// Extrai o identificador de CVE de um resultado do nuclei. A classificação vem
+// como `cve-id` (com hífen, via -jsonl) ou `cve_id`, string OU array; alguns
+// templates não têm classificação mas o próprio id já é a CVE.
+function extractCveId(info, templateId) {
+  const cls = (info && info.classification) || {}
+  let cve = cls['cve-id'] || cls['cve_id'] || null
+  if (Array.isArray(cve)) cve = cve[0] || null
+  if (typeof cve === 'string' && /^CVE-/i.test(cve)) return cve.toUpperCase()
+  if (typeof templateId === 'string' && /^CVE-\d{4}-\d+$/i.test(templateId)) return templateId.toUpperCase()
+  return null
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────
 function get(obj, ...keys) { for (const k of keys) if (obj && obj[k] != null) return obj[k]; return null }
@@ -139,10 +155,12 @@ async function stageNuclei(domainId, aliveHosts) {
   try { fs.writeFileSync(tmp, aliveHosts.join('\n'), 'utf8') } catch { return 0 }
   const r = await runTool('nuclei', [
     '-l', tmp, '-jsonl', '-silent', '-no-color',
-    '-tags', 'exposure,misconfig,config',
-    '-severity', 'low,medium,high,critical',
+    // Inclui CVEs conhecidas (nuclei auto-filtra por tech-match do httpx). Severidade
+    // ≥ medium pra limitar volume/ruído do set enorme de CVE; low ficou de fora.
+    '-tags', 'cve,exposure,misconfig,config',
+    '-severity', 'medium,high,critical',
     '-rate-limit', '50', '-timeout', '8',
-  ], { timeoutMs: 300000 })
+  ], { timeoutMs: 480000 })
   try { fs.unlinkSync(tmp) } catch {}
 
   let n = 0
@@ -152,11 +170,12 @@ async function stageNuclei(domainId, aliveHosts) {
     const info = j.info || {}
     const matched = get(j, 'matched-at', 'matched_at', 'host') || ''
     const tid = get(j, 'template-id', 'templateID') || 'exposure'
+    const cveId = extractCveId(info, tid)
     n++
     await upsertAsset(domainId, `${domainId}:exp:${tid}:${matched}`, {
       type: 'exposure', value: matched, alive: true,
       severity: ['critical', 'high', 'medium', 'low'].includes(info.severity) ? info.severity : 'info',
-      label: info.name || tid, source: 'nuclei',
+      label: info.name || tid, cveId, source: 'nuclei',
     })
   }
   return n
@@ -164,7 +183,7 @@ async function stageNuclei(domainId, aliveHosts) {
 
 // ── entrada principal ─────────────────────────────────────────────────────────
 // Fire-and-forget: a API chama sem await; o estado vive no Domain (polling no front).
-async function runScan(domainId, { userName } = {}) {
+async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
   const dom = await Domain.findById(domainId)
   if (!dom) return
   const domain = dom.domain
@@ -213,16 +232,30 @@ async function runScan(domainId, { userName } = {}) {
     // 4) score + contadores (o sinal de vazamento vem do módulo Vazamentos, por
     //    string de domínio — não rodamos leak aqui; ASM = superfície).
     await setStep(domainId, 'scoring')
-    const { score } = await recomputeDomain(domainId)
+    const { score, level } = await recomputeDomain(domainId)
 
     // 5) diff de superfície vs. o scan anterior (novo/sumido + Δscore).
-    const currentAssets = await DomainAsset.find({ domainId }).select('type value fingerprint severity').lean()
+    const currentAssets = await DomainAsset.find({ domainId }).select('type value fingerprint severity cveId alive').lean()
     const diff = computeAssetDiff({ previousAssets, currentAssets, scopedTypes })
+    const now = new Date()
+    const scoreDelta = score - previousScore
 
     await Domain.findByIdAndUpdate(domainId, { $set: {
-      scanState: 'done', scanStep: 'done', lastScanAt: new Date(),
-      lastDiff: { ...diff, computedAt: new Date(), scoreDelta: score - previousScore },
+      scanState: 'done', scanStep: 'done', lastScanAt: now,
+      lastDiff: { ...diff, computedAt: now, scoreDelta },
     } })
+
+    // 6) histórico de monitoramento — 1 registro por execução, pra a linha do
+    //    tempo mostrar que o monitoramento é contínuo (ver models/DomainScan).
+    await DomainScan.create({
+      domainId, ranAt: now, trigger, authorized,
+      assetCount: currentAssets.length,
+      aliveCount: currentAssets.filter((a) => a.alive).length,
+      exposureCount: currentAssets.filter((a) => a.type === 'exposure').length,
+      cveCount: currentAssets.filter((a) => a.cveId).length,
+      riskScore: score, riskLevel: level,
+      newCount: diff.newCount, missingCount: diff.missingCount, scoreDelta,
+    }).catch((e) => console.warn('[asm] falha ao gravar histórico de scan:', e?.message))
   } catch (err) {
     await Domain.findByIdAndUpdate(domainId, { $set: {
       scanState: 'failed', scanStep: null, scanError: String(err?.message || err).slice(0, 300),
@@ -262,4 +295,4 @@ async function recoverInterruptedScans() {
   } catch { return 0 }
 }
 
-module.exports = { runScan, recomputeDomain, recoverInterruptedScans, isProbeSafe, upsertAsset }
+module.exports = { runScan, recomputeDomain, recoverInterruptedScans, isProbeSafe, upsertAsset, extractCveId }

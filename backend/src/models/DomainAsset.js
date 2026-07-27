@@ -25,6 +25,7 @@ const assetSchema = new mongoose.Schema({
   // Classificação de exposição (quando o probe/nuclei acha algo notável)
   severity:  { type: String, enum: ['critical', 'high', 'medium', 'low', 'info'], default: 'info' },
   label:     { type: String, default: null },      // ex. "Painel de login exposto", "Swagger público"
+  cveId:     { type: String, default: null },      // ex. "CVE-2021-44228" quando a exposição casa uma CVE (nuclei)
   source:    { type: String, default: null },      // subfinder | dns | httpx | gau | nuclei
 
   // P1-17 (auditoria 2026-07-20): unique — o padrão de upsert (findOneAndUpdate

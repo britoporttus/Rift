@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { requireAuth } = require('../auth')
 const Domain = require('../models/Domain')
 const DomainAsset = require('../models/DomainAsset')
+const DomainScan = require('../models/DomainScan')
 const scanner = require('../asm/scanner')
 const { isIpLiteral } = require('../net-guard')
 const { cooldownRemainingMs, canForceCooldown } = require('../cooldown')
@@ -74,9 +75,12 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', requireAuth(['admin']), async (req, res) => {
   const d = await Domain.findByIdAndDelete(req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
-  // Só remove os ativos ASM. As credenciais vazadas pertencem ao módulo Vazamentos
-  // (keyed por string de domínio) e sobrevivem à exclusão do domínio ASM.
-  await DomainAsset.deleteMany({ domainId: req.params.id })
+  // Só remove os ativos ASM + histórico de scans. As credenciais vazadas pertencem
+  // ao módulo Vazamentos (keyed por string de domínio) e sobrevivem à exclusão.
+  await Promise.all([
+    DomainAsset.deleteMany({ domainId: req.params.id }),
+    DomainScan.deleteMany({ domainId: req.params.id }),
+  ])
   res.status(204).end()
 })
 
@@ -114,35 +118,17 @@ router.post('/:id/scan', async (req, res) => {
     }
   }
 
-  scanner.runScan(d._id, { userName: req.user?.name || req.user?.email })
+  scanner.runScan(d._id, { userName: req.user?.name || req.user?.email, trigger: 'manual' })
     .catch((err) => console.error('[asm] runScan falhou:', err?.message))
   res.status(202).json({ ok: true, message: d.authorized ? 'Scan iniciado (passivo + probe ativo autorizado).' : 'Scan iniciado (modo passivo — autorize o domínio para probe ativo).' })
 })
 
-// ── Monitoramento contínuo (agendamento de re-scan) ─────────────────────────
-// Mesma forma de PATCH /engagements/:id/schedule (api/engagements.js) — admin,
-// preserva lastRunAt/lastRunStatus correntes, agenda o primeiro ciclo ao ligar.
-const ASM_FREQ = ['daily', 'weekly']
-
-router.patch('/:id/schedule', requireAuth(['admin']), async (req, res) => {
-  const d = await Domain.findById(req.params.id)
-  if (!d) return res.status(404).json({ error: 'not found' })
-
-  const cur = d.schedule || {}
-  const body = req.body ?? {}
-  const next = {
-    enabled:       typeof body.enabled === 'boolean' ? body.enabled : (cur.enabled || false),
-    frequency:     ASM_FREQ.includes(body.frequency) ? body.frequency : (cur.frequency || 'weekly'),
-    nextRunAt:     cur.nextRunAt || null,
-    lastRunAt:     cur.lastRunAt || null,
-    lastRunStatus: cur.lastRunStatus || null,
-  }
-  // Ao habilitar pela primeira vez, agenda um scan-base já para o próximo ciclo do agendador.
-  if (next.enabled && !next.nextRunAt) next.nextRunAt = new Date()
-  if (!next.enabled) next.nextRunAt = null
-
-  const updated = await Domain.findByIdAndUpdate(req.params.id, { $set: { schedule: next } }, { new: true })
-  res.json(toDto(updated))
+// ── Histórico de monitoramento ──────────────────────────────────────────────
+// Linha do tempo de scans do domínio (monitoramento é contínuo/sempre-ativo).
+router.get('/:id/history', async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200)
+  const list = await DomainScan.find({ domainId: req.params.id }).sort({ ranAt: -1 }).limit(limit).lean()
+  res.json(list.map((s) => ({ ...s, id: s._id })))
 })
 
 // ── Ativos e credenciais ────────────────────────────────────────────────────

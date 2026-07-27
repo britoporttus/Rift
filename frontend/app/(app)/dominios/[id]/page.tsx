@@ -8,17 +8,28 @@ import { SEV_COLOR, SEV_ORDER } from '@/lib/severity'
 import { ScoreSlider } from '@/components/ui/charts/ScoreSlider'
 import { Donut } from '@/components/ui/charts/Donut'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
-import { DomainScheduleSettings } from '@/components/dominios/DomainScheduleSettings'
+import type { DomainScanRecord } from '@/lib/api'
 import {
   ArrowLeft, Globe, Radar, Loader2, ShieldCheck, ShieldAlert, Lock,
   AlertTriangle, Trash2, Check, Info, ChevronRight, Share2, Target, Plus, Workflow,
-  Clock, History, TrendingUp, TrendingDown, Minus,
+  Radio, History, TrendingUp, TrendingDown, Minus, Bug,
 } from 'lucide-react'
 
 function fmtDate(d?: string | null) {
   if (!d) return '—'
   const t = new Date(d)
   return isNaN(t.getTime()) ? '—' : t.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+function timeAgo(d?: string | null) {
+  if (!d) return 'nunca'
+  const t = new Date(d).getTime()
+  if (isNaN(t)) return '—'
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000))
+  if (s < 60) return 'agora há pouco'
+  const m = Math.floor(s / 60); if (m < 60) return `há ${m} min`
+  const h = Math.floor(m / 60); if (h < 24) return `há ${h}h`
+  const dd = Math.floor(h / 24); return `há ${dd}d`
 }
 
 const RS_BADGE: Record<string, { t: string; c: string }> = {
@@ -50,12 +61,12 @@ export default function DominioDetailPage() {
   const [scanning, setScanning] = useState(false)
   const [authNote, setAuthNote] = useState('')
   const [authOpen, setAuthOpen] = useState(false)
-  const [schedOpen, setSchedOpen] = useState(false)
+  const [history, setHistory] = useState<DomainScanRecord[]>([])
 
   const load = useCallback(() => {
-    return Promise.all([api.domains.get(id), api.domains.assets(id), api.engagements.list(), api.graph.domain(id)])
-      .then(([d, a, engs, g]) => {
-        setDomain(d); setAssets(a); setGraph(g)
+    return Promise.all([api.domains.get(id), api.domains.assets(id), api.engagements.list(), api.graph.domain(id), api.domains.history(id, 30)])
+      .then(([d, a, engs, g, h]) => {
+        setDomain(d); setAssets(a); setGraph(g); setHistory(h)
         setEngagements(engs.filter((e) => engagementMatchesDomain(e.target, d.domain)))
       })
       .catch(() => router.replace('/dominios'))
@@ -190,6 +201,41 @@ export default function DominioDetailPage() {
         </div>
       )}
 
+      {/* Histórico de monitoramento — linha do tempo de scans (sempre-ativo) */}
+      {history.length > 0 && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.1rem 1.4rem' }}>
+          <SectionTitle icon={<History size={13} />} color="var(--muted)">Histórico de monitoramento ({history.length})</SectionTitle>
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column' }}>
+            {history.map((h, i) => (
+              <div key={h.id} style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0',
+                borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+              }}>
+                {/* marcador de score */}
+                <span title={h.riskLevel} style={{ width: 9, height: 9, borderRadius: '50%', background: rc(h.riskLevel), flexShrink: 0 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12.5, color: 'var(--text)', fontFamily: 'var(--mono)' }}>{fmtDate(h.ranAt)}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-mute)', marginTop: 2 }}>
+                    {h.trigger === 'monitor' ? 'automático' : 'manual'} · {h.assetCount} ativos · {h.aliveCount} vivos
+                    {h.cveCount > 0 && <span style={{ color: 'var(--critical)', fontWeight: 700 }}> · {h.cveCount} CVE(s)</span>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                  {(h.newCount > 0 || h.missingCount > 0) && (
+                    <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--text-mute)' }}>
+                      {h.newCount > 0 && <span style={{ color: 'var(--low)' }}>+{h.newCount}</span>}
+                      {h.newCount > 0 && h.missingCount > 0 && ' '}
+                      {h.missingCount > 0 && <span style={{ color: 'var(--high)' }}>−{h.missingCount}</span>}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--mono)', color: rc(h.riskLevel), minWidth: 26, textAlign: 'right' }}>{h.riskScore}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Panorama de risco — vulnerabilidades correlacionadas a ESTE domínio
           (subdomínios + engagements ligados a ele), não o agregado geral da
           plataforma. */}
@@ -258,25 +304,17 @@ export default function DominioDetailPage() {
         </div>
       </div>
 
-      {/* Monitoramento contínuo (re-scan agendado) */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '0.9rem 1.1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 1, minWidth: 200 }}>
-            <Clock size={18} color={domain.schedule?.enabled ? 'var(--purple-light)' : 'var(--text-mute)'} />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                {domain.schedule?.enabled
-                  ? `Monitoramento ativo (${domain.schedule.frequency === 'daily' ? 'diário' : 'semanal'})`
-                  : 'Monitoramento contínuo desligado'}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-mute)', marginTop: 2 }}>
-                {domain.schedule?.enabled
-                  ? `Próximo scan: ${fmtDate(domain.schedule.nextRunAt)}`
-                  : 'Ligue para re-escanear automaticamente e ver o que muda a cada ciclo.'}
-              </div>
+      {/* Monitoramento contínuo — sempre ativo (sem toggle). Faixa de status passiva. */}
+      <div style={{ background: 'var(--surface)', border: '1px solid color-mix(in srgb, var(--low) 22%, var(--border))', borderRadius: 12, padding: '0.9rem 1.1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Radio size={18} color="var(--low)" />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Monitoramento contínuo ativo</div>
+            <div style={{ fontSize: 11, color: 'var(--text-mute)', marginTop: 2 }}>
+              Re-escaneado automaticamente · último scan {timeAgo(domain.lastScanAt)}
+              {domain.authorized ? ' · checando CVEs conhecidas' : ' · autorize para checar CVEs e sondar ativamente'}
             </div>
           </div>
-          {isAdmin && <button onClick={() => setSchedOpen(true)} style={ghostBtn('var(--purple-light)')}>Configurar</button>}
         </div>
       </div>
 
@@ -371,14 +409,6 @@ export default function DominioDetailPage() {
         </div>
       </Link>
 
-      {schedOpen && (
-        <DomainScheduleSettings
-          domain={domain}
-          onClose={() => setSchedOpen(false)}
-          onUpdated={(d) => { setDomain(d); setSchedOpen(false) }}
-        />
-      )}
-
       <style jsx global>{`.spin { animation: spin 0.9s linear infinite; }`}</style>
     </div>
   )
@@ -421,13 +451,22 @@ function AssetRow({ a }: { a: DomainAsset }) {
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: a.alive ? 'var(--low)' : 'var(--text-dim)' }} title={a.alive ? 'vivo' : 'sem resposta web'} />
         </div>
       </div>
-      {(a.label || (a.ips && a.ips.length) || (a.tech && a.tech.length) || a.webServer) && (
+      {(a.cveId || a.label || (a.ips && a.ips.length) || (a.tech && a.tech.length) || a.webServer) && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+          {a.cveId && (
+            <a href={`https://nvd.nist.gov/vuln/detail/${a.cveId}`} target="_blank" rel="noreferrer"
+              style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--critical)', background: 'color-mix(in srgb, var(--critical) 14%, transparent)', border: '1px solid color-mix(in srgb, var(--critical) 34%, transparent)', borderRadius: 99, padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none', fontFamily: 'var(--mono)' }}>
+              <Bug size={10} /> {a.cveId}
+            </a>
+          )}
           {a.label && a.severity !== 'info' && <span style={{ fontSize: 9.5, fontWeight: 700, color: sc, background: `color-mix(in srgb, ${sc} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${sc} 30%, transparent)`, borderRadius: 99, padding: '2px 8px' }}>{a.label}</span>}
           {a.ips?.slice(0, 3).map((ip) => <Chip key={ip}>{ip}</Chip>)}
           {a.webServer && <Chip>{a.webServer}</Chip>}
           {a.tech?.slice(0, 5).map((t) => <Chip key={t}>{t}</Chip>)}
         </div>
+      )}
+      {a.firstSeen && (
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6 }}>visto desde {fmtDate(a.firstSeen)}</div>
       )}
     </div>
   )

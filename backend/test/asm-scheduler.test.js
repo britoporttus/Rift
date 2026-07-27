@@ -1,6 +1,5 @@
-// asm-scheduler.js — mirror simplificado de scheduler.js (sem fila de Jobs).
-// Mesmo estilo de mock de scheduler-defer.test.js: substitui os métodos do
-// model/scanner por stubs em vez de bater no Mongo real.
+// asm-scheduler.js — monitoramento SEMPRE-ATIVO por intervalo (sem toggle).
+// Mesmo estilo de mock de scheduler-defer.test.js: stubs no model/scanner.
 const { test } = require('node:test')
 const assert = require('node:assert')
 
@@ -10,79 +9,97 @@ const asmScheduler = require('../src/asm-scheduler')
 const Domain = require('../src/models/Domain')
 const scanner = require('../src/asm/scanner')
 
-test('nextRunFrom: soma o intervalo certo por frequência (e cai pra weekly se desconhecida)', () => {
-  const base = new Date('2026-01-01T00:00:00Z')
-  const daily = asmScheduler.nextRunFrom(base, 'daily')
-  const weekly = asmScheduler.nextRunFrom(base, 'weekly')
-  const fallback = asmScheduler.nextRunFrom(base, 'mensal')
-  assert.equal(daily.getTime() - base.getTime(), 24 * 60 * 60 * 1000)
-  assert.equal(weekly.getTime() - base.getTime(), 7 * 24 * 60 * 60 * 1000)
-  assert.equal(fallback.getTime(), weekly.getTime())
+const DAY = 24 * 60 * 60 * 1000
+
+test('isDomainDue: domínio nunca escaneado está vencido', () => {
+  const now = new Date()
+  assert.equal(asmScheduler.isDomainDue({ lastScanAt: null }, now, 7 * DAY), true)
+  assert.equal(asmScheduler.isDomainDue({}, now, 7 * DAY), true)
 })
 
-test('tick: pula domínio cujo nextRunAt ainda não venceu', async () => {
+test('isDomainDue: escaneado há menos que o intervalo NÃO está vencido', () => {
+  const now = new Date()
+  const recent = new Date(now.getTime() - 2 * DAY)
+  assert.equal(asmScheduler.isDomainDue({ lastScanAt: recent }, now, 7 * DAY), false)
+})
+
+test('isDomainDue: escaneado há mais que o intervalo está vencido', () => {
+  const now = new Date()
+  const old = new Date(now.getTime() - 10 * DAY)
+  assert.equal(asmScheduler.isDomainDue({ lastScanAt: old }, now, 7 * DAY), true)
+})
+
+test('tick: dispara scan (trigger monitor) em domínio vencido e ocioso', async () => {
   const originalFind = Domain.find
-  const originalUpdate = Domain.findByIdAndUpdate
   const originalRunScan = scanner.runScan
-  let updateCalled = false
+  const calls = []
+
+  const old = new Date(Date.now() - 30 * DAY)
+  Domain.find = () => ({ select: () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'done', lastScanAt: old }] }) })
+  scanner.runScan = async (id, opts) => { calls.push({ id, opts }) }
+
+  try {
+    await asmScheduler.tick()
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].id, 'd1')
+    assert.equal(calls[0].opts.trigger, 'monitor')
+  } finally {
+    Domain.find = originalFind
+    scanner.runScan = originalRunScan
+  }
+})
+
+test('tick: NÃO dispara em domínio que está escaneando (não empilha)', async () => {
+  const originalFind = Domain.find
+  const originalRunScan = scanner.runScan
   let runCalled = false
 
-  const future = new Date(Date.now() + 60 * 60 * 1000)
-  Domain.find = () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'done', schedule: { enabled: true, frequency: 'weekly', nextRunAt: future } }] })
-  Domain.findByIdAndUpdate = async () => { updateCalled = true }
+  const old = new Date(Date.now() - 30 * DAY)
+  Domain.find = () => ({ select: () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'scanning', lastScanAt: old }] }) })
   scanner.runScan = async () => { runCalled = true }
 
   try {
     await asmScheduler.tick()
-    assert.equal(updateCalled, false, 'não deveria reagendar um domínio que ainda não venceu')
-    assert.equal(runCalled, false, 'não deveria escanear um domínio que ainda não venceu')
+    assert.equal(runCalled, false)
   } finally {
     Domain.find = originalFind
-    Domain.findByIdAndUpdate = originalUpdate
     scanner.runScan = originalRunScan
   }
 })
 
-test('tick: domínio vencido e já escaneando é reagendado mas NÃO dispara outro scan (não empilha)', async () => {
+test('tick: respeita o cap de MAX_PER_TICK (não dispara todos de uma vez)', async () => {
   const originalFind = Domain.find
-  const originalUpdate = Domain.findByIdAndUpdate
   const originalRunScan = scanner.runScan
-  let rescheduled = false
-  let runCalled = false
+  let disparados = 0
 
-  const past = new Date(Date.now() - 60 * 1000)
-  Domain.find = () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'scanning', schedule: { enabled: true, frequency: 'weekly', nextRunAt: past } }] })
-  Domain.findByIdAndUpdate = async (_id, patch) => { if (patch?.$set?.['schedule.nextRunAt']) rescheduled = true }
-  scanner.runScan = async () => { runCalled = true }
+  const old = new Date(Date.now() - 30 * DAY)
+  const many = Array.from({ length: 10 }, (_, i) => ({ _id: `d${i}`, domain: `x${i}.com`, scanState: 'done', lastScanAt: old }))
+  Domain.find = () => ({ select: () => ({ lean: async () => many }) })
+  scanner.runScan = async () => { disparados++ }
 
   try {
     await asmScheduler.tick()
-    assert.equal(rescheduled, true, 'deveria reagendar ANTES de checar se está escaneando (evita ficar preso)')
-    assert.equal(runCalled, false, 'NÃO deveria disparar outro scan por cima de um já em andamento')
+    assert.equal(disparados, 3, 'default ASM_RESCAN_MAX_PER_TICK = 3')
   } finally {
     Domain.find = originalFind
-    Domain.findByIdAndUpdate = originalUpdate
     scanner.runScan = originalRunScan
   }
 })
 
-test('tick: domínio vencido e ocioso dispara o scan', async () => {
-  const originalFind = Domain.find
-  const originalUpdate = Domain.findByIdAndUpdate
-  const originalRunScan = scanner.runScan
-  let runCalledWith = null
+// ── extractCveId (scanner.js) ──────────────────────────────────────────────
+test('extractCveId: pega cve-id da classificação (string)', () => {
+  assert.equal(scanner.extractCveId({ classification: { 'cve-id': 'CVE-2021-44228' } }, 'log4j'), 'CVE-2021-44228')
+})
 
-  const past = new Date(Date.now() - 60 * 1000)
-  Domain.find = () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'done', schedule: { enabled: true, frequency: 'weekly', nextRunAt: past } }] })
-  Domain.findByIdAndUpdate = async () => {}
-  scanner.runScan = async (id) => { runCalledWith = id }
+test('extractCveId: pega cve-id quando vem como array', () => {
+  assert.equal(scanner.extractCveId({ classification: { 'cve-id': ['cve-2023-1234'] } }, 'x'), 'CVE-2023-1234')
+})
 
-  try {
-    await asmScheduler.tick()
-    assert.equal(runCalledWith, 'd1')
-  } finally {
-    Domain.find = originalFind
-    Domain.findByIdAndUpdate = originalUpdate
-    scanner.runScan = originalRunScan
-  }
+test('extractCveId: fallback pro template-id quando ele já é uma CVE', () => {
+  assert.equal(scanner.extractCveId({}, 'CVE-2020-5902'), 'CVE-2020-5902')
+})
+
+test('extractCveId: null quando não há CVE nenhuma', () => {
+  assert.equal(scanner.extractCveId({ classification: {} }, 'exposed-panel'), null)
+  assert.equal(scanner.extractCveId({}, null), null)
 })
