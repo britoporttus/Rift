@@ -175,6 +175,25 @@ export const api = {
     get: () => req<GraphResponse>('/graph'),
     domain: (id: string) => req<GraphResponse>(`/graph/domain/${id}`),
   },
+  // Módulo Rede Interna — descoberta/inventário de LAN via agente local (nmap).
+  internalNetworks: {
+    list: () => req<InternalNetworkSummary[]>('/internal-networks'),
+    get: (id: string) => req<InternalNetworkDetail>(`/internal-networks/${id}`),
+    create: (data: { name: string; kind?: InternalNetworkKind; description?: string; authorized?: boolean; authorizationNote?: string }) =>
+      req<InternalNetworkDetail>('/internal-networks', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: { name?: string; kind?: InternalNetworkKind; description?: string }) =>
+      req<InternalNetworkDetail>(`/internal-networks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) => req<void>(`/internal-networks/${id}`, { method: 'DELETE' }),
+    setAuthorization: (id: string, authorized: boolean, note?: string) =>
+      req<InternalNetworkDetail>(`/internal-networks/${id}/authorization`, { method: 'PATCH', body: JSON.stringify({ authorized, note }) }),
+    hosts: (id: string) => req<InternalHost[]>(`/internal-networks/${id}/hosts`),
+    history: (id: string, limit?: number) =>
+      req<InternalScanRecord[]>(`/internal-networks/${id}/history${limit ? `?limit=${limit}` : ''}`),
+    regenerateToken: (id: string) =>
+      req<{ ok: boolean; token: string }>(`/internal-networks/${id}/regenerate-token`, { method: 'POST' }),
+    agentCommand: (id: string) =>
+      req<{ token: string; scriptUrl: string; command: string; watchHint: string }>(`/internal-networks/${id}/agent-command`),
+  },
 }
 
 // ── Mapa de Superfície (grafo) ────────────────────────────────────────────────
@@ -298,6 +317,91 @@ export interface DomainAsset {
   source?: string | null
   firstSeen?: string | null
   lastSeen?: string | null
+}
+
+// ── Módulo Rede Interna ───────────────────────────────────────────────────────
+export type InternalNetworkKind = 'lan' | 'dmz' | 'cloud' | 'other'
+export type DeviceType =
+  | 'server' | 'workstation' | 'router' | 'switch' | 'firewall' | 'printer'
+  | 'camera' | 'iot' | 'nas' | 'voip' | 'mobile' | 'unknown'
+export type RiskLevel = 'critical' | 'high' | 'medium' | 'low' | 'info'
+
+export interface InternalNetworkSummary {
+  id: string
+  name: string
+  description?: string | null
+  kind: InternalNetworkKind
+  authorized: boolean
+  lastImportAt?: string | null
+  lastImportBy?: string | null
+  agent?: { hostname?: string | null; os?: string | null; version?: string | null }
+  hostCount: number
+  aliveCount: number
+  riskyCount: number
+  deviceTypeCounts: Record<string, number>
+  riskScore: number
+  riskLevel: RiskLevel
+  riskReasons?: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface InternalNetworkDiff {
+  computedAt: string | null
+  newHosts: Array<{ ip: string; mac?: string | null; deviceType: string }>
+  missingHosts: Array<{ ip: string; mac?: string | null; deviceType: string }>
+  newCount: number
+  missingCount: number
+  scoreDelta: number
+}
+
+export interface InternalNetworkDetail extends InternalNetworkSummary {
+  authorizedBy?: string | null
+  authorizedAt?: string | null
+  authorizationNote?: string | null
+  lastDiff?: InternalNetworkDiff
+}
+
+export interface InternalPort {
+  port: number
+  proto?: string
+  service?: string | null
+  product?: string | null
+  version?: string | null
+}
+
+export interface InternalHost {
+  id: string
+  networkId: string
+  ip: string
+  mac?: string | null
+  macVendor?: string | null
+  hostname?: string | null
+  os?: string | null
+  deviceType: DeviceType
+  openPorts: InternalPort[]
+  protocols: string[]
+  severity: RiskLevel
+  labels: string[]
+  source?: string
+  firstSeen?: string | null
+  lastSeen?: string | null
+}
+
+export interface InternalScanRecord {
+  id: string
+  networkId: string
+  ranAt: string
+  trigger: 'agent' | 'watch'
+  agentHost?: string | null
+  hostCount: number
+  aliveCount: number
+  riskyCount: number
+  riskScore: number
+  riskLevel: RiskLevel
+  newCount: number
+  missingCount: number
+  scoreDelta: number
 }
 
 export type LeakCategory = 'malware' | 'breach' | 'combolist'
