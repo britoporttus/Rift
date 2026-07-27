@@ -41,14 +41,10 @@ const domainSchema = new mongoose.Schema({
   riskLevel:  { type: String, enum: ['critical', 'high', 'medium', 'low', 'info'], default: 'info' },
   riskReasons: { type: [String], default: [] },
 
-  // --- Monitoramento contínuo (re-scan recorrente, ver asm-scheduler.js) ---
-  schedule: {
-    enabled:       { type: Boolean, default: false },
-    frequency:     { type: String, enum: ['daily', 'weekly'], default: 'weekly' },
-    nextRunAt:     { type: Date, default: null },
-    lastRunAt:     { type: Date, default: null },
-    lastRunStatus: { type: String, enum: ['completed', 'error'], default: null },
-  },
+  // --- Monitoramento contínuo ---
+  // É SEMPRE-ATIVO (sem toggle): o asm-scheduler re-escaneia todo domínio numa
+  // cadência padrão, usando `lastScanAt` acima como fonte de verdade de "quando
+  // rodou por último". Não há campo de agendamento por domínio.
 
   // --- Diff do último scan vs. o anterior (asm/diff.js), recomputado a cada
   // scan e persistido para não recalcular a cada GET. Ver scanner.js runScan().
