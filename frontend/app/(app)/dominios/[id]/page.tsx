@@ -8,10 +8,18 @@ import { SEV_COLOR, SEV_ORDER } from '@/lib/severity'
 import { ScoreSlider } from '@/components/ui/charts/ScoreSlider'
 import { Donut } from '@/components/ui/charts/Donut'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
+import { DomainScheduleSettings } from '@/components/dominios/DomainScheduleSettings'
 import {
   ArrowLeft, Globe, Radar, Loader2, ShieldCheck, ShieldAlert, Lock,
   AlertTriangle, Trash2, Check, Info, ChevronRight, Share2, Target, Plus, Workflow,
+  Clock, History, TrendingUp, TrendingDown, Minus,
 } from 'lucide-react'
+
+function fmtDate(d?: string | null) {
+  if (!d) return '—'
+  const t = new Date(d)
+  return isNaN(t.getTime()) ? '—' : t.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 const RS_BADGE: Record<string, { t: string; c: string }> = {
   running:   { t: 'RODANDO',    c: 'var(--purple-light)' },
@@ -42,6 +50,7 @@ export default function DominioDetailPage() {
   const [scanning, setScanning] = useState(false)
   const [authNote, setAuthNote] = useState('')
   const [authOpen, setAuthOpen] = useState(false)
+  const [schedOpen, setSchedOpen] = useState(false)
 
   const load = useCallback(() => {
     return Promise.all([api.domains.get(id), api.domains.assets(id), api.engagements.list(), api.graph.domain(id)])
@@ -146,6 +155,41 @@ export default function DominioDetailPage() {
         </div>
       </div>
 
+      {/* O que mudou desde o último scan (monitoramento contínuo) */}
+      {domain.lastDiff && domain.lastDiff.computedAt && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.1rem 1.4rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            <SectionTitle icon={<History size={13} />} color="var(--muted)">O que mudou desde o último scan</SectionTitle>
+            <ScoreDeltaBadge delta={domain.lastDiff.scoreDelta} />
+          </div>
+          <div style={{ display: 'flex', gap: 26 }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: domain.lastDiff.newCount > 0 ? 'var(--low)' : 'var(--muted)', fontFamily: 'var(--mono)' }}>+{domain.lastDiff.newCount}</div>
+              <div style={{ fontSize: 9.5, color: 'var(--text-mute)', marginTop: 4, letterSpacing: '0.08em' }}>NOVOS</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: domain.lastDiff.missingCount > 0 ? 'var(--high)' : 'var(--muted)', fontFamily: 'var(--mono)' }}>−{domain.lastDiff.missingCount}</div>
+              <div style={{ fontSize: 9.5, color: 'var(--text-mute)', marginTop: 4, letterSpacing: '0.08em' }}>SUMIRAM</div>
+            </div>
+          </div>
+          {(domain.lastDiff.newAssets.length > 0 || domain.lastDiff.missingAssets.length > 0) && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {domain.lastDiff.newAssets.slice(0, 6).map((a, i) => (
+                <div key={`n${i}`} style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', gap: 8, fontFamily: 'var(--mono)' }}>
+                  <span style={{ color: 'var(--low)', fontFamily: 'inherit' }}>+</span> {a.value}
+                </div>
+              ))}
+              {domain.lastDiff.missingAssets.slice(0, 6).map((a, i) => (
+                <div key={`m${i}`} style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', gap: 8, fontFamily: 'var(--mono)' }}>
+                  <span style={{ color: 'var(--high)', fontFamily: 'inherit' }}>−</span> {a.value}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 10 }}>comparado ao scan de antes · calculado em {fmtDate(domain.lastDiff.computedAt)}</div>
+        </div>
+      )}
+
       {/* Panorama de risco — vulnerabilidades correlacionadas a ESTE domínio
           (subdomínios + engagements ligados a ele), não o agregado geral da
           plataforma. */}
@@ -211,6 +255,28 @@ export default function DominioDetailPage() {
           ) : (
             <button onClick={() => setAuthOpen(true)} style={ghostBtn('var(--purple-light)')}>Autorizar domínio</button>
           ))}
+        </div>
+      </div>
+
+      {/* Monitoramento contínuo (re-scan agendado) */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '0.9rem 1.1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 1, minWidth: 200 }}>
+            <Clock size={18} color={domain.schedule?.enabled ? 'var(--purple-light)' : 'var(--text-mute)'} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                {domain.schedule?.enabled
+                  ? `Monitoramento ativo (${domain.schedule.frequency === 'daily' ? 'diário' : 'semanal'})`
+                  : 'Monitoramento contínuo desligado'}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-mute)', marginTop: 2 }}>
+                {domain.schedule?.enabled
+                  ? `Próximo scan: ${fmtDate(domain.schedule.nextRunAt)}`
+                  : 'Ligue para re-escanear automaticamente e ver o que muda a cada ciclo.'}
+              </div>
+            </div>
+          </div>
+          {isAdmin && <button onClick={() => setSchedOpen(true)} style={ghostBtn('var(--purple-light)')}>Configurar</button>}
         </div>
       </div>
 
@@ -305,8 +371,29 @@ export default function DominioDetailPage() {
         </div>
       </Link>
 
+      {schedOpen && (
+        <DomainScheduleSettings
+          domain={domain}
+          onClose={() => setSchedOpen(false)}
+          onUpdated={(d) => { setDomain(d); setSchedOpen(false) }}
+        />
+      )}
+
       <style jsx global>{`.spin { animation: spin 0.9s linear infinite; }`}</style>
     </div>
+  )
+}
+
+function ScoreDeltaBadge({ delta }: { delta: number }) {
+  if (!delta) {
+    return <span style={{ fontSize: 11, color: 'var(--text-mute)', display: 'flex', alignItems: 'center', gap: 4 }}><Minus size={12} /> score estável</span>
+  }
+  const worse = delta > 0
+  const color = worse ? 'var(--high)' : 'var(--low)'
+  return (
+    <span style={{ fontSize: 11, fontWeight: 700, color, display: 'flex', alignItems: 'center', gap: 4 }}>
+      {worse ? <TrendingUp size={12} /> : <TrendingDown size={12} />} {worse ? '+' : ''}{delta} no score
+    </span>
   )
 }
 

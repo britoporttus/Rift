@@ -151,6 +151,8 @@ export const api = {
       req<DomainDetail>(`/domains/${id}/authorization`, { method: 'PATCH', body: JSON.stringify({ authorized, note }) }),
     assets: (id: string, type?: string) =>
       req<DomainAsset[]>(`/domains/${id}/assets${type ? `?type=${type}` : ''}`),
+    setSchedule: (id: string, schedule: { enabled: boolean; frequency: 'daily' | 'weekly' }) =>
+      req<DomainDetail>(`/domains/${id}/schedule`, { method: 'PATCH', body: JSON.stringify(schedule) }),
   },
   // Módulo Vazamentos — exposição de credenciais por domínio (estilo QuimeraX).
   leaks: {
@@ -237,11 +239,32 @@ export interface DomainSummary {
   updatedAt: string
 }
 
+export interface DomainSchedule {
+  enabled: boolean
+  frequency: 'daily' | 'weekly'
+  nextRunAt: string | null
+  lastRunAt: string | null
+  lastRunStatus: 'completed' | 'error' | null
+}
+
+// O que mudou desde o scan anterior (computado a cada scan, ver asm/diff.js).
+// `newAssets`/`missingAssets` são exemplos (até 20); use os counts p/ o total.
+export interface DomainDiff {
+  computedAt: string | null
+  newAssets: Array<{ type: string; value: string; severity?: string }>
+  missingAssets: Array<{ type: string; value: string }>
+  newCount: number
+  missingCount: number
+  scoreDelta: number
+}
+
 export interface DomainDetail extends DomainSummary {
   notes?: string | null
   authorizedBy?: string | null
   authorizedAt?: string | null
   authorizationNote?: string | null
+  schedule?: DomainSchedule
+  lastDiff?: DomainDiff
 }
 
 export interface DomainAsset {

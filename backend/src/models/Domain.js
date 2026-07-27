@@ -40,6 +40,26 @@ const domainSchema = new mongoose.Schema({
   riskScore:  { type: Number, default: 0 },   // 0-100
   riskLevel:  { type: String, enum: ['critical', 'high', 'medium', 'low', 'info'], default: 'info' },
   riskReasons: { type: [String], default: [] },
+
+  // --- Monitoramento contínuo (re-scan recorrente, ver asm-scheduler.js) ---
+  schedule: {
+    enabled:       { type: Boolean, default: false },
+    frequency:     { type: String, enum: ['daily', 'weekly'], default: 'weekly' },
+    nextRunAt:     { type: Date, default: null },
+    lastRunAt:     { type: Date, default: null },
+    lastRunStatus: { type: String, enum: ['completed', 'error'], default: null },
+  },
+
+  // --- Diff do último scan vs. o anterior (asm/diff.js), recomputado a cada
+  // scan e persistido para não recalcular a cada GET. Ver scanner.js runScan().
+  lastDiff: {
+    computedAt:    { type: Date, default: null },
+    newAssets:     { type: [{ type: { type: String }, value: String, severity: String }], default: [] },
+    missingAssets: { type: [{ type: { type: String }, value: String }], default: [] },
+    newCount:      { type: Number, default: 0 },
+    missingCount:  { type: Number, default: 0 },
+    scoreDelta:    { type: Number, default: 0 },
+  },
 }, { timestamps: true, _id: false })
 
 module.exports = mongoose.model('Domain', domainSchema)
