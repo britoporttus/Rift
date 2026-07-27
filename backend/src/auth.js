@@ -28,6 +28,21 @@ const cookieOptions = {
   path: '/',
   maxAge: 12 * 60 * 60 * 1000, // mesma janela do JWT (expiresIn: '12h')
 }
+// `secure` fixo em `isProd` quebra login em qualquer acesso direto por HTTP puro
+// (staging local, porta solta sem TLS na frente) — o browser recusa silenciosamente
+// gravar um cookie Secure fora de HTTPS, então o login "funciona" (200) mas a sessão
+// nunca gruda. Continua `secure:true` pra QUALQUER host que não seja localhost —
+// produção (atrás de proxy HTTPS) não muda de comportamento.
+// IMPORTANTE: o rewrite do Next.js (`/api/:path*` → http://localhost:3001) faz o
+// backend enxergar sempre `Host: localhost:3001`, não o host que o navegador usou —
+// por isso é `x-forwarded-host` (que o Next preserva) que precisa ser checado aqui,
+// nunca `req.hostname`/`req.headers.host` puro (sempre daria "localhost" pra tudo).
+function cookieOptionsFor(req) {
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(':')[0].toLowerCase()
+  const host = forwardedHost || (req.hostname || '').toLowerCase()
+  const isLocal = host === 'localhost' || host === '127.0.0.1'
+  return { ...cookieOptions, secure: isProd && !isLocal }
+}
 
 // SEC-2: rate limit em memória para /login (app interno, 1 instância) — trava
 // brute force sem dependência externa. Chaveado por e-mail (dimensão que importa
@@ -83,7 +98,7 @@ router.post('/login', loginRateLimit, async (req, res) => {
   await User.findByIdAndUpdate(user._id, { lastLogin: new Date() })
 
   const token = signToken(user)
-  res.cookie(COOKIE_NAME, token, cookieOptions)
+  res.cookie(COOKIE_NAME, token, cookieOptionsFor(req))
   return res.json({
     user: { id: user._id, email: user.email, role: user.role, name: user.name },
   })
@@ -146,4 +161,4 @@ async function bumpTokenVersion(userId) {
   await User.findByIdAndUpdate(userId, { $inc: { tokenVersion: 1 } }).catch(() => {})
 }
 
-module.exports = { router, requireAuth, signToken, checkTokenVersion, bumpTokenVersion, JWT_SECRET, COOKIE_NAME, cookieOptions }
+module.exports = { router, requireAuth, signToken, checkTokenVersion, bumpTokenVersion, JWT_SECRET, COOKIE_NAME, cookieOptions, cookieOptionsFor }
