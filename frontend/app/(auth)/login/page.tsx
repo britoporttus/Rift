@@ -10,468 +10,573 @@ const ERROR_MESSAGES: Record<string, string> = {
   token_exchange_failed: 'Falha na autenticação Microsoft. Tente novamente.',
 }
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
-function MicrosoftIcon() {
+const FONT_DISPLAY = "'Space Grotesk', sans-serif"
+
+// ── Icons ────────────────────────────────────────────────────────────────────
+function CrosshairIcon({ size = 24, color = 'currentColor', strokeWidth = 1.6 }: { size?: number; color?: string; strokeWidth?: number }) {
   return (
-    <svg width="13" height="13" viewBox="0 0 21 21" fill="none" style={{ flexShrink: 0 }}>
-      <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-      <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-      <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
+      <circle cx="12" cy="12" r="9.2" /><circle cx="12" cy="12" r="3" />
+      <line x1="12" y1="1.2" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="22.8" />
+      <line x1="1.2" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="22.8" y2="12" />
     </svg>
   )
 }
-function ShieldIcon({ size = 13, color = 'currentColor' }: { size?: number; color?: string }) {
+function MailIcon({ size = 16 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" /><path d="M3 6l9 6.5L21 6" />
+    </svg>
+  )
+}
+function LockIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2.2" /><path d="M8 10.5V7a4 4 0 018 0v3.5" />
+    </svg>
+  )
+}
+function EyeIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z" /><circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+function EyeOffIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9.9 5.2A9.7 9.7 0 0112 5c6.5 0 10.5 7 10.5 7a17 17 0 01-2.2 2.9M6.2 6.7A17 17 0 001.5 12s4 7 10.5 7a9.5 9.5 0 004-.9" />
+      <path d="M9.9 9.9a3 3 0 004.2 4.2" /><line x1="2" y1="2" x2="22" y2="22" />
+    </svg>
+  )
+}
+function CheckIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 12l5 5L20 6" />
+    </svg>
+  )
+}
+function ShieldIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     </svg>
   )
 }
-function CrosshairIcon({ size = 24, color = 'currentColor' }: { size?: number; color?: string }) {
+function MicrosoftIcon({ size = 18 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" /><line x1="22" y1="12" x2="18" y2="12" />
-      <line x1="6" y1="12" x2="2" y2="12" /><line x1="12" y1="6" x2="12" y2="2" />
-      <line x1="12" y1="22" x2="12" y2="18" />
-    </svg>
-  )
-}
-function EyeIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
-    </svg>
-  )
-}
-function EyeOffIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
-      <line x1="1" y1="1" x2="23" y2="23" />
+    <svg width={size} height={size} viewBox="0 0 21 21">
+      <rect x="1" y="1" width="9" height="9" fill="#F25022" /><rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" /><rect x="11" y="11" width="9" height="9" fill="#FFB900" />
     </svg>
   )
 }
 
-// ── Network map ───────────────────────────────────────────────────────────────
-const NODES = [
-  { dx: -230, dy: -175, name: 'WEB-01',  ip: '192.168.1.22', s: 'active'   },
-  { dx:  252, dy: -158, name: 'DB-02',   ip: '192.168.1.45', s: 'critical' },
-  { dx:  280, dy:  108, name: 'API-03',  ip: '192.168.2.8',  s: 'active'   },
-  { dx: -198, dy:  185, name: 'FW-01',   ip: '192.168.2.31', s: 'scanning' },
-  { dx:  -38, dy: -288, name: 'VPN-GW',  ip: '192.168.3.7',  s: 'offline'  },
-  { dx:   92, dy:  265, name: 'SMTP-01', ip: '192.168.3.19', s: 'active'   },
-  { dx: -305, dy:   18, name: 'PROXY',   ip: '192.168.4.2',  s: 'scanning' },
+// ── Radar / orbital visualization (canvas) ─────────────────────────────────────
+type Star = { x: number; y: number; r: number; ph: number; tw: number }
+type Particle = { a: number; rr: number; x: number; y: number; sp: number; z: number }
+type Orbit = { rxF: number; ryF: number; tilt: number; sp: number; n: number; col: [number, number, number]; beam: boolean }
+
+const ORBITS: Orbit[] = [
+  { rxF: 1.00, ryF: 0.34, tilt: -0.36, sp: 0.13, n: 2, col: [168, 130, 255], beam: true },
+  { rxF: 0.70, ryF: 0.70, tilt: 0.0, sp: -0.19, n: 3, col: [139, 92, 246], beam: false },
+  { rxF: 0.52, ryF: 0.90, tilt: 0.62, sp: 0.26, n: 2, col: [192, 132, 252], beam: true },
+  { rxF: 0.86, ryF: 0.58, tilt: 2.4, sp: -0.11, n: 2, col: [124, 90, 220], beam: false },
 ]
-const NC: Record<string, string> = { active: '#22C55E', critical: '#EF4444', offline: '#3A3A58', scanning: '#F59E0B' }
+const HOT_COLORS: [number, number, number][] = [[34, 197, 94], [245, 158, 11]]
 
-function NetworkMap() {
-  const cx = 450, cy = 400
-  return (
-    <svg width="900" height="800" style={{ position: 'absolute', left: -450, top: -400, overflow: 'visible', pointerEvents: 'none', zIndex: 2 }}>
-      {NODES.map((n, i) => {
-        const nx = cx + n.dx, ny = cy + n.dy, c = NC[n.s], right = n.dx >= 0
-        return (
-          <g key={i} style={{ animation: `tvFadeIn 0.4s ease ${0.7 + i * 0.13}s both` }}>
-            <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="rgba(124,58,237,0.17)" strokeWidth="0.7" strokeDasharray="4 8" />
-            <circle cx={nx} cy={ny} r="4" fill={c} opacity="0.88" />
-            {(n.s === 'active' || n.s === 'critical') && (
-              <circle cx={nx} cy={ny} r="9" fill="none" stroke={c} strokeWidth="0.8" opacity="0.3"
-                style={{ animation: 'tvRipple 3.5s ease-out infinite' }} />
-            )}
-            <text x={right ? nx + 11 : nx - 11} y={ny - 7} fill="rgba(148,163,184,0.6)" fontSize="9"
-              textAnchor={right ? 'start' : 'end'} fontFamily="'JetBrains Mono',monospace">{n.name}</text>
-            <text x={right ? nx + 11 : nx - 11} y={ny + 3} fill="rgba(100,116,139,0.4)" fontSize="8"
-              textAnchor={right ? 'start' : 'end'} fontFamily="'JetBrains Mono',monospace">{n.ip}</text>
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
+function RadarStage() {
+  const ref = useRef<HTMLCanvasElement>(null)
 
-// ── Target ────────────────────────────────────────────────────────────────────
-function TargetV4() {
-  const corners = [
-    { top: 12, left: 12, borderTop: '2px solid #A78BFA', borderLeft: '2px solid #A78BFA' },
-    { top: 12, right: 12, borderTop: '2px solid #A78BFA', borderRight: '2px solid #A78BFA' },
-    { bottom: 12, left: 12, borderBottom: '2px solid #A78BFA', borderLeft: '2px solid #A78BFA' },
-    { bottom: 12, right: 12, borderBottom: '2px solid #A78BFA', borderRight: '2px solid #A78BFA' },
-  ]
-  return (
-    <div style={{ position: 'relative', width: 400, height: 400, zIndex: 3 }}>
-      <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '1px dashed rgba(124,58,237,0.25)', animation: 'tvSpin 45s linear infinite' }} />
-      <div style={{ position: 'absolute', inset: 14, borderRadius: '50%', border: '1px solid rgba(124,58,237,0.13)', animation: 'tvRipple 4.5s ease-out infinite' }} />
-      <div style={{ position: 'absolute', inset: 14, borderRadius: '50%', border: '1px solid rgba(124,58,237,0.07)', animation: 'tvRipple 4.5s ease-out 2.25s infinite' }} />
-      <div style={{ position: 'absolute', inset: 62, borderRadius: '50%', border: '1px solid rgba(124,58,237,0.65)', animation: 'tvSpinRev 24s linear infinite' }} />
-      <div style={{ position: 'absolute', inset: 120, borderRadius: '50%', border: '1px solid rgba(167,139,250,0.2)', animation: 'tvSpin 11s linear infinite' }} />
-      <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 1, transform: 'translateY(-0.5px)', background: 'linear-gradient(to right,transparent 0%,rgba(124,58,237,0.1) 12%,rgba(167,139,250,0.97) 50%,rgba(124,58,237,0.1) 88%,transparent 100%)', boxShadow: '0 0 14px rgba(167,139,250,0.3)' }} />
-      <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, transform: 'translateX(-0.5px)', background: 'linear-gradient(to bottom,transparent 0%,rgba(124,58,237,0.1) 12%,rgba(167,139,250,0.97) 50%,rgba(124,58,237,0.1) 88%,transparent 100%)', boxShadow: '0 0 14px rgba(167,139,250,0.3)' }} />
-      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)' }}>
-        <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#7C3AED', boxShadow: '0 0 28px #7C3AED,0 0 60px rgba(124,58,237,0.5)', animation: 'tvPulse 2.2s ease-in-out infinite' }} />
-      </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, height: 1, top: 0, background: 'linear-gradient(to right,transparent,rgba(167,139,250,0.88),transparent)', boxShadow: '0 0 10px rgba(167,139,250,0.5)', animation: 'tvScan 4s ease-in-out infinite' }} />
-      {corners.map((s, i) => <div key={i} style={{ position: 'absolute', width: 26, height: 26, ...s }} />)}
-    </div>
-  )
-}
-
-// ── RIFT brand ────────────────────────────────────────────────────────────────
-function RiftBrand() {
-  const bc = 'rgba(124,58,237,0.5)'
-  const corners = [
-    { top: 0, left: 0, borderTop: `1px solid ${bc}`, borderLeft: `1px solid ${bc}` },
-    { top: 0, right: 0, borderTop: `1px solid ${bc}`, borderRight: `1px solid ${bc}` },
-    { bottom: 0, left: 0, borderBottom: `1px solid ${bc}`, borderLeft: `1px solid ${bc}` },
-    { bottom: 0, right: 0, borderBottom: `1px solid ${bc}`, borderRight: `1px solid ${bc}` },
-  ]
-  return (
-    <div style={{ position: 'relative', padding: '14px 32px', textAlign: 'center', zIndex: 3 }}>
-      {corners.map((s, i) => <div key={i} style={{ position: 'absolute', width: 20, height: 20, ...s }} />)}
-      <div style={{ fontSize: 92, fontWeight: 700, letterSpacing: '0.22em', lineHeight: 1, fontFamily: "'JetBrains Mono',monospace", color: 'rgba(167,139,250,0.52)', textShadow: '0 0 80px rgba(124,58,237,0.22)' }}>RIFT</div>
-      <div style={{ fontSize: 9, color: '#3A3A5A', letterSpacing: '0.3em', marginTop: 6 }}>AI PENTEST PLATFORM</div>
-      <div style={{ fontSize: 9, color: 'rgba(124,58,237,0.45)', letterSpacing: '0.2em', marginTop: 4 }}>v1.0.2</div>
-    </div>
-  )
-}
-
-// ── System status panel ───────────────────────────────────────────────────────
-function useUptime() {
-  const [sec, setSec] = useState(0)
-  useEffect(() => { const t = setInterval(() => setSec(s => s + 1), 1000); return () => clearInterval(t) }, [])
-  const total = 2 * 86400 + 14 * 3600 + 37 * 60 + 22 + sec
-  const d = Math.floor(total / 86400)
-  const h = String(Math.floor((total % 86400) / 3600)).padStart(2, '0')
-  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
-  return `${d}d ${h}h ${m}m`
-}
-function SystemStatusPanel() {
-  const uptime = useUptime()
-  const rows = [
-    { k: 'ENGINE', v: 'v2.4.1' }, { k: 'MODULES', v: 'CARREGADOS' },
-    { k: 'DATABASE', v: 'CONECTADO' }, { k: 'UPTIME', v: uptime },
-  ]
-  return (
-    <div style={{ position: 'absolute', top: '2rem', right: '2.5rem', width: 196, zIndex: 8, animation: 'tvSlideLeft 0.5s ease 0.4s both' }}>
-      <div style={{ background: 'rgba(4,4,12,0.93)', border: '1px solid rgba(124,58,237,0.15)', borderRadius: 5, overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.65)' }}>
-        <div style={{ padding: '0.5rem 0.9rem', borderBottom: '1px solid rgba(20,20,40,0.9)', fontSize: 9, color: '#A78BFA', letterSpacing: '0.13em', fontWeight: 600 }}>SISTEMA OPERACIONAL</div>
-        <div style={{ padding: '0.4rem 0.9rem', borderBottom: '1px solid rgba(14,14,28,0.8)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22C55E', boxShadow: '0 0 6px #22C55E', animation: 'tvStatusPulse 1.5s ease-in-out infinite' }} />
-          <span style={{ fontSize: 10, color: '#22C55E', fontWeight: 600, letterSpacing: '0.08em' }}>ONLINE</span>
-        </div>
-        <div style={{ padding: '0.5rem 0.9rem', display: 'flex', flexDirection: 'column', gap: 9 }}>
-          {rows.map(({ k, v }) => (
-            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontSize: 9, color: '#353558', letterSpacing: '0.09em' }}>{k}</span>
-              <span style={{ fontSize: 9, color: '#94A3B8', letterSpacing: '0.04em' }}>{v}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Threat level panel ────────────────────────────────────────────────────────
-const SPARK = [5, 4, 3, 4, 5, 4, 3, 2, 2, 3, 2, 1, 1, 2, 1, 1, 2, 1, 0, 1]
-function SparkLine() {
-  const W = 168, H = 28
-  const pts = SPARK.map((v, i) => `${(i / (SPARK.length - 1)) * W},${H - (v / 5) * H}`).join(' ')
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-      <polyline points={pts} fill="none" stroke="#22C55E" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" opacity="0.6" />
-    </svg>
-  )
-}
-function ThreatLevelPanel() {
-  return (
-    <div style={{ position: 'absolute', bottom: '2.5rem', right: '2.5rem', width: 196, zIndex: 8, animation: 'tvSlideLeft 0.5s ease 0.6s both' }}>
-      <div style={{ background: 'rgba(4,4,12,0.93)', border: '1px solid rgba(124,58,237,0.15)', borderRadius: 5, overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.65)' }}>
-        <div style={{ padding: '0.5rem 0.9rem', borderBottom: '1px solid rgba(20,20,40,0.9)', fontSize: 9, color: '#A78BFA', letterSpacing: '0.13em', fontWeight: 600 }}>THREAT LEVEL</div>
-        <div style={{ padding: '0.65rem 0.9rem' }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#22C55E', letterSpacing: '0.06em', marginBottom: 10 }}>BAIXO</div>
-          <SparkLine />
-          <div style={{ fontSize: 8, color: '#2A2A48', letterSpacing: '0.06em', marginTop: 7 }}>Última verificação: agora</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Clock ─────────────────────────────────────────────────────────────────────
-function LiveClock() {
-  const [time, setTime] = useState('')
   useEffect(() => {
-    const fmt = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    setTime(fmt())
-    const t = setInterval(() => setTime(fmt()), 1000)
-    return () => clearInterval(t)
+    const cv = ref.current
+    if (!cv) return
+    const ctx = cv.getContext('2d')
+    if (!ctx) return
+
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const t0 = performance.now()
+    let W = 0, H = 0, DPR = 1, raf = 0
+    let cx = 0, cy = 0, S = 0, R = 0
+    const stars: Star[] = []
+    const parts: Particle[] = []
+
+    function resize() {
+      if (!cv || !ctx) return
+      DPR = Math.min(window.devicePixelRatio || 1, 2)
+      W = cv.clientWidth
+      H = cv.clientHeight
+      cv.width = W * DPR
+      cv.height = H * DPR
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
+      cx = W * 0.5
+      cy = H * 0.5
+      S = Math.min(W, H)
+      R = S * 0.44
+      stars.length = 0
+      for (let i = 0; i < 40; i++) {
+        stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.2 + 0.3, ph: Math.random() * 6.28, tw: 0.6 + Math.random() * 1.6 })
+      }
+      parts.length = 0
+      for (let i = 0; i < 46; i++) {
+        const a = Math.random() * 6.28
+        const rr = R * (0.2 + Math.random() * 1.1)
+        parts.push({ a, rr, x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr, sp: 0.1 + Math.random() * 0.5, z: Math.random() })
+      }
+    }
+
+    function proj(X: number, Y: number, tilt: number): [number, number] {
+      return [cx + X * Math.cos(tilt) - Y * Math.sin(tilt), cy + X * Math.sin(tilt) + Y * Math.cos(tilt)]
+    }
+
+    function ellipse(o: Orbit) {
+      if (!ctx) return
+      ctx.beginPath()
+      for (let k = 0; k <= 64; k++) {
+        const th = (k / 64) * 6.283
+        const [x, y] = proj(o.rxF * R * Math.cos(th), o.ryF * R * Math.sin(th), o.tilt)
+        if (k) ctx.lineTo(x, y)
+        else ctx.moveTo(x, y)
+      }
+      ctx.closePath()
+    }
+
+    function frame(now: number) {
+      if (!ctx) return
+      const t = reduce ? 6 : Math.max(0, (now - t0) / 1000)
+      ctx.clearRect(0, 0, W, H)
+      ctx.fillStyle = '#05050d'
+      ctx.fillRect(0, 0, W, H)
+
+      const centerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.25)
+      centerGlow.addColorStop(0, 'rgba(124,58,237,0.16)')
+      centerGlow.addColorStop(0.5, 'rgba(124,58,237,0.05)')
+      centerGlow.addColorStop(1, 'transparent')
+      ctx.fillStyle = centerGlow
+      ctx.fillRect(0, 0, W, H)
+
+      ctx.globalCompositeOperation = 'lighter'
+
+      for (const s of stars) {
+        const a = 0.15 + 0.35 * (0.5 + 0.5 * Math.sin(t * s.tw + s.ph))
+        ctx.fillStyle = `rgba(180,160,240,${a})`
+        ctx.beginPath()
+        ctx.arc(s.x, s.y, s.r, 0, 6.283)
+        ctx.fill()
+      }
+
+      for (const p of parts) {
+        p.a += p.sp * 0.004
+        p.x = cx + Math.cos(p.a) * p.rr
+        p.y = cy + Math.sin(p.a) * p.rr
+        ctx.fillStyle = `rgba(${(150 + p.z * 50) | 0},120,250,${0.12 + p.z * 0.28})`
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, 0.5 + p.z * 1.3, 0, 6.283)
+        ctx.fill()
+      }
+
+      const ringRadii = [1, 0.68, 0.4, 0.2]
+      for (let i = 0; i < ringRadii.length; i++) {
+        ctx.strokeStyle = `rgba(139,92,246,${0.16 - i * 0.02})`
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.arc(cx, cy, R * ringRadii[i], 0, 6.283)
+        ctx.stroke()
+      }
+
+      ctx.save()
+      ctx.translate(cx, cy)
+      ctx.rotate(t * 0.12)
+      ctx.setLineDash([3, 10])
+      ctx.strokeStyle = 'rgba(167,139,250,0.28)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.arc(0, 0, R * 0.86, 0, 6.283)
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.restore()
+
+      ctx.save()
+      ctx.translate(cx, cy)
+      ctx.rotate(-t * 0.2)
+      ctx.setLineDash([2, 14])
+      ctx.strokeStyle = 'rgba(139,92,246,0.22)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.arc(0, 0, R * 0.54, 0, 6.283)
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.restore()
+
+      const sweep = t * 0.5
+      for (let k = 0; k < 32; k++) {
+        const ang = sweep - k * 0.022
+        const al = (1 - k / 32) * 0.14
+        ctx.strokeStyle = `rgba(167,139,250,${al})`
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(cx, cy)
+        ctx.lineTo(cx + Math.cos(ang) * R, cy + Math.sin(ang) * R)
+        ctx.stroke()
+      }
+      ctx.strokeStyle = 'rgba(210,190,255,0.5)'
+      ctx.lineWidth = 1.4
+      ctx.beginPath()
+      ctx.moveTo(cx, cy)
+      ctx.lineTo(cx + Math.cos(sweep) * R, cy + Math.sin(sweep) * R)
+      ctx.stroke()
+
+      for (let i = 0; i < 2; i++) {
+        const e = (t / 4.5 + i * 0.5) % 1
+        const rr = e * R * 1.05
+        ctx.strokeStyle = `rgba(124,58,237,${(1 - e) * 0.4})`
+        ctx.lineWidth = 1.2
+        ctx.beginPath()
+        ctx.arc(cx, cy, rr, 0, 6.283)
+        ctx.stroke()
+      }
+
+      ORBITS.forEach((o, oi) => {
+        ctx.strokeStyle = `rgba(${o.col[0]},${o.col[1]},${o.col[2]},0.16)`
+        ctx.lineWidth = 1
+        ellipse(o)
+        ctx.stroke()
+        for (let i = 0; i < o.n; i++) {
+          const th = (t * o.sp * 6.283) / 2 + i * (6.283 / o.n) + oi * 1.3
+          const depth = 0.5 + 0.5 * Math.sin(th)
+          const [x, y] = proj(o.rxF * R * Math.cos(th), o.ryF * R * Math.sin(th), o.tilt)
+
+          for (let k = 8; k >= 1; k--) {
+            const tk = th - k * 0.05
+            const [tx, ty] = proj(o.rxF * R * Math.cos(tk), o.ryF * R * Math.sin(tk), o.tilt)
+            ctx.fillStyle = `rgba(${o.col[0]},${o.col[1]},${o.col[2]},${(1 - k / 8) * 0.18 * (0.4 + depth)})`
+            ctx.beginPath()
+            ctx.arc(tx, ty, 1.2, 0, 6.283)
+            ctx.fill()
+          }
+
+          if (o.beam && i === 0) {
+            const bp = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * 1.3 + oi))
+            const lg = ctx.createLinearGradient(x, y, cx, cy)
+            lg.addColorStop(0, `rgba(210,190,255,${0.5 * bp})`)
+            lg.addColorStop(1, 'transparent')
+            ctx.strokeStyle = lg
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            ctx.moveTo(x, y)
+            ctx.lineTo(cx, cy)
+            ctx.stroke()
+          }
+
+          const col = oi === 0 && i === 0 ? HOT_COLORS[0] : oi === 2 && i === 0 ? HOT_COLORS[1] : o.col
+          const rr = 2.4 + depth * 3
+          const rg = ctx.createRadialGradient(x, y, 0, x, y, rr * 3.4)
+          rg.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},${0.55 + depth * 0.4})`)
+          rg.addColorStop(0.4, `rgba(${col[0]},${col[1]},${col[2]},${0.28 + depth * 0.3})`)
+          rg.addColorStop(1, 'transparent')
+          ctx.fillStyle = rg
+          ctx.beginPath()
+          ctx.arc(x, y, rr * 3.4, 0, 6.283)
+          ctx.fill()
+          ctx.fillStyle = `rgba(255,255,255,${0.6 + depth * 0.4})`
+          ctx.beginPath()
+          ctx.arc(x, y, rr * 0.6, 0, 6.283)
+          ctx.fill()
+        }
+      })
+
+      ctx.save()
+      ctx.translate(cx, cy)
+      ctx.rotate(t * 0.3)
+      ctx.setLineDash([4, 7])
+      ctx.strokeStyle = 'rgba(167,139,250,0.5)'
+      ctx.lineWidth = 1.3
+      ctx.beginPath()
+      ctx.arc(0, 0, R * 0.13, 0, 6.283)
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.restore()
+
+      const arm = R * 0.2
+      const gap = R * 0.05
+      ctx.lineWidth = 1.4
+      const arms: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]]
+      for (const [dx, dy] of arms) {
+        const lg = ctx.createLinearGradient(cx + dx * gap, cy + dy * gap, cx + dx * arm, cy + dy * arm)
+        lg.addColorStop(0, 'rgba(200,170,255,0.75)')
+        lg.addColorStop(1, 'rgba(124,58,237,0)')
+        ctx.strokeStyle = lg
+        ctx.beginPath()
+        ctx.moveTo(cx + dx * gap, cy + dy * gap)
+        ctx.lineTo(cx + dx * arm, cy + dy * arm)
+        ctx.stroke()
+      }
+
+      const bx = R * 0.115
+      const bl = R * 0.035
+      ctx.strokeStyle = 'rgba(167,139,250,0.7)'
+      ctx.lineWidth = 1.5
+      const corners: [number, number][] = [[-1, -1], [1, -1], [-1, 1], [1, 1]]
+      for (const [sx, sy] of corners) {
+        ctx.beginPath()
+        ctx.moveTo(cx + sx * bx - sx * bl, cy + sy * bx)
+        ctx.lineTo(cx + sx * bx, cy + sy * bx)
+        ctx.lineTo(cx + sx * bx, cy + sy * bx - sy * bl)
+        ctx.stroke()
+      }
+
+      const cp = 0.6 + 0.4 * Math.sin(t * 2.0)
+      const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.1 * cp + 8)
+      cg.addColorStop(0, 'rgba(235,225,255,0.95)')
+      cg.addColorStop(0.4, `rgba(160,120,255,${0.6 * cp})`)
+      cg.addColorStop(1, 'transparent')
+      ctx.fillStyle = cg
+      ctx.beginPath()
+      ctx.arc(cx, cy, R * 0.1 * cp + 8, 0, 6.283)
+      ctx.fill()
+      ctx.fillStyle = 'rgba(124,58,237,0.95)'
+      ctx.beginPath()
+      ctx.arc(cx, cy, 3.2, 0, 6.283)
+      ctx.fill()
+
+      ctx.globalCompositeOperation = 'source-over'
+      if (!reduce) raf = requestAnimationFrame(frame)
+    }
+
+    resize()
+    frame(performance.now())
+    window.addEventListener('resize', resize)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', resize)
+    }
   }, [])
-  return <span>{time}</span>
+
+  return <canvas ref={ref} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }} />
 }
 
-// ── HUD corner ────────────────────────────────────────────────────────────────
-function HudCorner({ top, left, right, bottom }: { top?: number; left?: number; right?: number; bottom?: number }) {
-  return (
-    <div style={{
-      position: 'absolute', width: 17, height: 17, top, left, right, bottom, pointerEvents: 'none',
-      borderTop: top != null ? '1px solid rgba(124,58,237,0.38)' : 'none',
-      borderBottom: bottom != null ? '1px solid rgba(124,58,237,0.38)' : 'none',
-      borderLeft: left != null ? '1px solid rgba(124,58,237,0.38)' : 'none',
-      borderRight: right != null ? '1px solid rgba(124,58,237,0.38)' : 'none',
-    }} />
-  )
-}
-
-// ── Login form ────────────────────────────────────────────────────────────────
-const STAGES = ['ESTABLISHING TLS HANDSHAKE', 'VERIFYING IDENTITY TOKEN', 'CHECKING CLEARANCE LEVEL', 'INITIALIZING SESSION']
-const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
-
-function LoginForm({ onLogin, ssoError }: { onLogin: (e: string, p: string) => Promise<void>; ssoError: string }) {
+// ── Right panel: login form ─────────────────────────────────────────────────────
+function LoginSide({ onLogin, ssoError, narrow }: { onLogin: (email: string, password: string) => Promise<void>; ssoError: string; narrow: boolean }) {
+  const [show, setShow] = useState(false)
+  const [remember, setRemember] = useState(true)
   const [email, setEmail] = useState('')
-  const [pass,  setPass]  = useState('')
-  const [show,  setShow]  = useState(false)
-  const [err,   setErr]   = useState(ssoError)
-  const [stage, setStage] = useState(-1)
-  const [focus, setFocus] = useState<string | null>(null)
-  const [hMs,   setHMs]   = useState(false)
-  const [hBtn,  setHBtn]  = useState(false)
+  const [pass, setPass] = useState('')
+  const [err, setErr] = useState(ssoError)
+  const [loading, setLoading] = useState(false)
+  const [focus, setFocus] = useState<'email' | 'pass' | null>(null)
+  const [hoverBtn, setHoverBtn] = useState(false)
+  const [hoverMs, setHoverMs] = useState(false)
 
   useEffect(() => { setErr(ssoError) }, [ssoError])
 
-  const loading = stage >= 0 && stage < 4
-  const success = stage === 4
-  const pct = loading ? Math.round(((stage + 1) / 4) * 94) : success ? 100 : 0
-
-  const run = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErr('')
-    setStage(0); await delay(450)
-    setStage(1); await delay(400)
+    setLoading(true)
     try {
       await onLogin(email, pass)
-      setStage(2); await delay(380)
-      setStage(3); await delay(380)
-      setStage(4)
     } catch (ex: unknown) {
-      setStage(-1)
-      setErr(ex instanceof Error ? ex.message : 'AUTH KEY REJEITADA — CREDENCIAL INVÁLIDA')
+      setErr(ex instanceof Error ? ex.message : 'Credenciais inválidas.')
+      setLoading(false)
     }
   }
 
-  const fl = (label: string) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7 }}>
-      <span style={{ color: '#7C3AED', fontSize: 9, flexShrink: 0 }}>▶</span>
-      <span style={{ color: '#A78BFA', fontSize: 9, letterSpacing: '0.12em', flexShrink: 0 }}>{label}</span>
-      <div style={{ flex: 1, height: 1, background: 'linear-gradient(to right,rgba(45,45,78,0.7),transparent)' }} />
-    </div>
-  )
-
-  const inp = (f: string): React.CSSProperties => ({
-    width: '100%', padding: '0.35rem 0', background: 'transparent', border: 'none',
-    borderBottom: `1px solid ${focus === f ? '#7C3AED' : 'rgba(45,45,78,0.65)'}`,
-    color: focus === f ? '#E2E8F0' : '#CBD5E1', fontSize: 12, outline: 'none', fontFamily: 'inherit',
-    caretColor: '#A78BFA', letterSpacing: '0.02em', transition: 'border-color 0.2s,color 0.15s',
+  const inputStyle = (focused: boolean): React.CSSProperties => ({
+    width: '100%', height: 52, padding: '0 2.8rem', borderRadius: '.7rem',
+    background: focused ? 'rgba(9,8,22,0.85)' : 'rgba(6,6,16,0.65)',
+    border: `1px solid ${focused ? 'rgba(124,58,237,0.65)' : 'rgba(139,92,246,0.16)'}`,
+    color: '#e5e7eb', fontFamily: 'var(--mono)', fontSize: '.9rem', outline: 'none',
+    boxShadow: focused ? '0 0 0 3px rgba(124,58,237,0.12)' : 'none',
+    transition: 'border-color .18s, box-shadow .18s, background .18s',
   })
 
   return (
-    <div>
-      <a href="/api/auth/microsoft" style={{
-        display: 'flex', alignItems: 'center', padding: '0.5rem 0.8rem', marginBottom: 6,
-        background: hMs ? 'rgba(124,58,237,0.07)' : 'rgba(6,6,14,0.7)',
-        border: `1px solid ${hMs ? 'rgba(124,58,237,0.5)' : '#252540'}`,
-        borderRadius: 3, textDecoration: 'none', fontFamily: 'inherit', fontSize: 11, transition: 'all 0.15s',
-      }} onMouseEnter={() => setHMs(true)} onMouseLeave={() => setHMs(false)}>
-        <span style={{ color: '#22C55E', marginRight: 7, flexShrink: 0, fontSize: 10 }}>$</span>
-        <span style={{ color: '#94A3B8', marginRight: 3 }}>auth</span>
-        <span style={{ color: '#64748B', marginRight: 3 }}>--provider</span>
-        <span style={{ color: hMs ? '#A78BFA' : '#7C3AED', marginRight: 'auto', transition: 'color 0.15s' }}>microsoft --sso</span>
-        <MicrosoftIcon />
-        <span style={{ marginLeft: 8, fontSize: 9, color: '#252540', border: '1px solid #252540', borderRadius: 2, padding: '1px 4px', flexShrink: 0 }}>↵</span>
-      </a>
-
-      <div style={{ display: 'flex', alignItems: 'center', margin: '1rem 0' }}>
-        <div style={{ flex: 1, height: 1, background: '#181830' }} />
-        <span style={{ color: '#2D2D50', fontSize: 9, letterSpacing: '0.07em', padding: '0 10px', whiteSpace: 'nowrap' }}>── local access ──</span>
-        <div style={{ flex: 1, height: 1, background: '#181830' }} />
-      </div>
-
-      <form onSubmit={run} style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
-        <div>
-          {fl('IDENT')}
-          <input type="email" value={email} required disabled={loading || success}
-            onChange={e => setEmail(e.target.value)} onFocus={() => setFocus('e')} onBlur={() => setFocus(null)} style={inp('e')} />
+    <aside style={{
+      width: narrow ? '100%' : 480, flex: narrow ? 1 : '0 0 auto', flexShrink: 0, position: 'relative',
+      display: 'flex', flexDirection: 'column', justifyContent: 'center',
+      padding: narrow ? '2.2rem 1.5rem' : '2.5rem 3.4rem',
+      background: 'linear-gradient(180deg,#08060f,#06050c)',
+      borderLeft: narrow ? 'none' : '1px solid rgba(139,92,246,0.14)',
+      borderTop: narrow ? '1px solid rgba(139,92,246,0.14)' : 'none',
+      boxShadow: narrow ? '0 -30px 60px rgba(0,0,0,0.5)' : '-30px 0 80px rgba(0,0,0,0.5)',
+    }}>
+      {!narrow && (
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 1,
+          background: 'linear-gradient(180deg,transparent,rgba(139,92,246,0.5),transparent)' }} />
+      )}
+      <div style={{ width: '100%', maxWidth: 360, margin: '0 auto', animation: 'loginFadeUp .6s cubic-bezier(.2,.7,.3,1) both' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.7rem', marginBottom: '2rem' }}>
+          <CrosshairIcon size={34} color="#a78bfa" strokeWidth={1.5} />
+          <span style={{
+            fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: '1.7rem', letterSpacing: '.05em',
+            background: 'linear-gradient(120deg,#c4b5fd,#a78bfa 50%,#7c3aed)',
+            WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+          }}>RIFT</span>
         </div>
-        <div>
-          {fl('AUTH-KEY')}
-          <div style={{ position: 'relative' }}>
-            <input type={show ? 'text' : 'password'} value={pass} required disabled={loading || success}
-              onChange={e => setPass(e.target.value)} onFocus={() => setFocus('p')} onBlur={() => setFocus(null)}
-              style={{ ...inp('p'), paddingRight: '1.8rem' }} />
-            <button type="button" onClick={() => setShow(!show)} style={{
-              position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
-              background: 'none', border: 'none', cursor: 'pointer', color: '#3A3A5A', display: 'flex', padding: 0, transition: 'color 0.15s',
-            }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#A78BFA')}
-              onMouseLeave={e => (e.currentTarget.style.color = '#3A3A5A')}>
+        <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: '1.55rem', color: '#f5f5f5', letterSpacing: '-.01em' }}>
+          Bem-vindo de volta
+        </h1>
+        <div style={{ fontSize: '.88rem', color: '#71717a', marginTop: '.5rem', marginBottom: '1.8rem' }}>
+          Faça login para continuar sua jornada.
+        </div>
+
+        <form onSubmit={submit}>
+          <div style={{ position: 'relative', marginBottom: '.85rem' }}>
+            <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#52525b', display: 'flex', pointerEvents: 'none' }}>
+              <MailIcon />
+            </span>
+            <input
+              type="text" value={email} required disabled={loading}
+              placeholder="Email ou nome de usuário" autoComplete="username"
+              onChange={e => setEmail(e.target.value)}
+              onFocus={() => setFocus('email')} onBlur={() => setFocus(null)}
+              style={inputStyle(focus === 'email')}
+            />
+          </div>
+          <div style={{ position: 'relative', marginBottom: '.85rem' }}>
+            <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#52525b', display: 'flex', pointerEvents: 'none' }}>
+              <LockIcon />
+            </span>
+            <input
+              type={show ? 'text' : 'password'} value={pass} required disabled={loading}
+              placeholder="Senha" autoComplete="current-password"
+              onChange={e => setPass(e.target.value)}
+              onFocus={() => setFocus('pass')} onBlur={() => setFocus(null)}
+              style={{ ...inputStyle(focus === 'pass'), paddingRight: '2.8rem' }}
+            />
+            <button
+              type="button" onClick={() => setShow(s => !s)} aria-label={show ? 'Ocultar senha' : 'Mostrar senha'}
+              style={{ position: 'absolute', right: '.9rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none',
+                color: '#52525b', cursor: 'pointer', display: 'flex', padding: 4, transition: 'color .15s' }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#a78bfa' }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#52525b' }}
+            >
               {show ? <EyeOffIcon /> : <EyeIcon />}
             </button>
           </div>
-        </div>
 
-        {(loading || success) && (
-          <div style={{ animation: 'tvFadeIn 0.2s ease' }}>
-            {loading && (
-              <div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 7 }}>
-                <span style={{ color: '#7C3AED' }}>{'> '}</span>{STAGES[stage]}{'...'}
-                <span style={{ animation: 'tvBlink 0.7s step-end infinite', color: '#A78BFA' }}>_</span>
-              </div>
+          <div style={{ display: 'flex', alignItems: 'center', margin: '.4rem 0 1.5rem', fontSize: '.82rem' }}>
+            <label onClick={() => setRemember(r => !r)} style={{ display: 'flex', alignItems: 'center', gap: '.5rem', color: '#a1a1aa', cursor: 'pointer', userSelect: 'none' }}>
+              <span style={{
+                width: 18, height: 18, borderRadius: 6,
+                border: `1px solid ${remember ? '#7c3aed' : 'rgba(139,92,246,0.35)'}`,
+                background: remember ? '#7c3aed' : 'rgba(6,6,16,0.6)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s',
+              }}>
+                {remember && <CheckIcon />}
+              </span>
+              Lembrar de mim
+            </label>
+          </div>
+
+          <button
+            type="submit" disabled={loading}
+            onMouseEnter={() => setHoverBtn(true)} onMouseLeave={() => setHoverBtn(false)}
+            style={{
+              width: '100%', height: 54, border: 'none', borderRadius: '.75rem', cursor: loading ? 'default' : 'pointer',
+              fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: '.98rem', color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '.6rem',
+              background: 'linear-gradient(100deg,#6d28d9,#7c3aed 45%,#9563e8)',
+              boxShadow: hoverBtn && !loading
+                ? '0 16px 40px rgba(124,58,237,0.58), inset 0 1px 0 rgba(255,255,255,0.22)'
+                : '0 12px 32px rgba(124,58,237,0.42), inset 0 1px 0 rgba(255,255,255,0.15)',
+              filter: hoverBtn && !loading ? 'brightness(1.08)' : 'none',
+              opacity: loading ? 0.75 : 1,
+              transition: 'box-shadow .18s, filter .18s',
+            }}
+          >
+            {loading ? 'Entrando…' : (
+              <>
+                Entrar na plataforma
+                <span style={{ transition: 'transform .18s', transform: hoverBtn ? 'translateX(4px)' : 'none' }}>→</span>
+              </>
             )}
-            <div style={{ height: 2, background: '#10102A', borderRadius: 1, overflow: 'hidden', marginBottom: 7 }}>
-              <div style={{ height: '100%', width: `${pct}%`, borderRadius: 1, transition: 'width 0.45s cubic-bezier(.4,0,.2,1),background 0.3s',
-                background: success ? '#22C55E' : 'linear-gradient(to right,#7C3AED,#A78BFA)',
-                boxShadow: '0 0 8px rgba(167,139,250,0.4)' }} />
-            </div>
-            <div style={{ fontSize: 9, lineHeight: 1.9, color: '#94A3B8' }}>
-              {STAGES.slice(0, success ? 4 : stage).map((s, i) => (
-                <div key={i} style={{ animation: 'tvFadeIn 0.2s ease' }}>
-                  <span style={{ color: '#22C55E', marginRight: 5 }}>[OK]</span>{s}
-                </div>
-              ))}
-              {success && <div style={{ color: '#22C55E', marginTop: 4, fontWeight: 600, animation: 'tvFadeIn 0.3s ease' }}>● ACCESS GRANTED</div>}
-            </div>
-          </div>
-        )}
-
-        {err && <div style={{ fontSize: 10, color: '#EF4444', animation: 'tvFadeIn 0.2s ease' }}><span style={{ opacity: 0.6 }}>[!] ERR: </span>{err}</div>}
-
-        {!loading && !success && (
-          <button type="submit" style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
-            width: '100%', padding: '0.62rem 1rem', marginTop: 2, cursor: 'pointer', fontFamily: 'inherit',
-            background: hBtn ? 'rgba(124,58,237,0.14)' : 'transparent',
-            border: `1px solid ${hBtn ? '#7C3AED' : '#252540'}`,
-            borderRadius: 3, color: hBtn ? '#E2E8F0' : '#94A3B8', fontSize: 11, fontWeight: 600,
-            letterSpacing: '0.1em', transition: 'all 0.15s',
-            boxShadow: hBtn ? '0 0 20px rgba(124,58,237,0.18)' : 'none',
-          }} onMouseEnter={() => setHBtn(true)} onMouseLeave={() => setHBtn(false)}>
-            <span style={{ color: hBtn ? '#A78BFA' : '#7C3AED', fontSize: 9, transition: 'color 0.15s' }}>▶</span>
-            RUN AUTHENTICATE
-            <span style={{ marginLeft: 'auto', fontSize: 9, color: hBtn ? '#4A4A70' : '#252540',
-              border: `1px solid ${hBtn ? '#4A4A70' : '#252540'}`, borderRadius: 2, padding: '1px 4px', transition: 'border-color 0.15s,color 0.15s' }}>↵</span>
           </button>
+
+          {err && <div style={{ marginTop: '.9rem', fontSize: '.8rem', color: 'var(--critical)' }}>{err}</div>}
+        </form>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '1.6rem 0 1.2rem', color: '#52525b', fontSize: '.78rem' }}>
+          <div style={{ flex: 1, height: 1, background: 'rgba(139,92,246,0.15)' }} />
+          ou continue com
+          <div style={{ flex: 1, height: 1, background: 'rgba(139,92,246,0.15)' }} />
+        </div>
+
+        <a
+          href="/api/auth/microsoft"
+          onMouseEnter={() => setHoverMs(true)} onMouseLeave={() => setHoverMs(false)}
+          style={{
+            height: 52, borderRadius: '.7rem',
+            background: hoverMs ? 'rgba(124,58,237,0.08)' : 'rgba(6,6,16,0.6)',
+            border: `1px solid ${hoverMs ? 'rgba(124,58,237,0.5)' : 'rgba(139,92,246,0.15)'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '.6rem', cursor: 'pointer',
+            color: '#e5e7eb', fontSize: '.85rem', textDecoration: 'none', transition: 'all .15s',
+          }}
+        >
+          <MicrosoftIcon size={18} /> Entrar com Microsoft
+        </a>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.55rem', justifyContent: 'center', marginTop: '1.8rem', fontSize: '.72rem', color: '#52525b' }}>
+          <span style={{ color: '#a78bfa', display: 'flex' }}><ShieldIcon /></span>
+          Acesso restrito a @porttus.com e @trustsis.com — eventos registrados.
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+// ── Full split screen ─────────────────────────────────────────────────────────
+function LoginScreen({ onLogin, ssoError }: { onLogin: (email: string, password: string) => Promise<void>; ssoError: string }) {
+  const [narrow, setNarrow] = useState(false)
+
+  useEffect(() => {
+    const check = () => setNarrow(window.innerWidth <= 900)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: narrow ? 'column' : 'row', height: '100vh', width: '100%', overflow: 'hidden',
+      fontFamily: 'var(--mono)', color: '#e5e7eb',
+    }}>
+      <div style={{
+        flex: narrow ? 'none' : 1, height: narrow ? '34vh' : undefined, minHeight: narrow ? 220 : undefined,
+        position: 'relative', overflow: 'hidden', background: '#05050d',
+      }}>
+        <RadarStage />
+        <div style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          background: 'radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(5,5,13,0.7) 100%)',
+        }} />
+        <div style={{ position: 'absolute', top: '2rem', left: '2.2rem', zIndex: 3, display: 'flex', alignItems: 'center', gap: '.7rem' }}>
+          <CrosshairIcon size={26} color="#a78bfa" strokeWidth={1.5} />
+          <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: '1.35rem', letterSpacing: '.05em', color: '#f5f5f5' }}>
+            R<span style={{ color: '#a78bfa' }}>i</span>FT
+          </span>
+          <span style={{ width: 1, height: 20, background: 'rgba(139,92,246,0.3)' }} />
+          <span style={{ fontSize: '.62rem', letterSpacing: '.3em', color: '#71717a' }}>AI PENTEST PLATFORM</span>
+        </div>
+        {!narrow && (
+          <div style={{
+            position: 'absolute', left: '2.2rem', bottom: '3.6rem', zIndex: 3, maxWidth: 340,
+            fontFamily: FONT_DISPLAY, fontWeight: 500, fontSize: '1.05rem', lineHeight: 1.35, color: '#e5e7eb', letterSpacing: '.01em',
+          }}>
+            Pentest contínuo por <span style={{ color: '#a78bfa' }}>agentes de IA</span>.
+          </div>
         )}
-      </form>
-    </div>
-  )
-}
-
-// ── Login card ────────────────────────────────────────────────────────────────
-function LoginCard({ onLogin, ssoError }: { onLogin: (e: string, p: string) => Promise<void>; ssoError: string }) {
-  return (
-    <div style={{ position: 'absolute', top: '50%', left: '4rem', transform: 'translateY(-50%)', width: 356, zIndex: 10,
-      background: 'rgba(4,4,11,0.95)', border: '1px solid rgba(124,58,237,0.17)', borderRadius: 5,
-      overflow: 'hidden', animation: 'tvSlideUp 0.55s ease',
-      boxShadow: '0 0 0 1px rgba(124,58,237,0.05),0 24px 64px rgba(0,0,0,0.88)' }}>
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.012) 3px,rgba(0,0,0,0.012) 4px)' }} />
-      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '0 1.25rem', height: 30,
-        borderBottom: '1px solid rgba(16,16,34,0.9)', background: 'rgba(2,2,8,0.97)', fontSize: 9, color: '#2A2A45', letterSpacing: '0.09em' }}>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {['rgba(239,68,68,0.38)', 'rgba(234,179,8,0.38)', 'rgba(34,197,94,0.38)'].map((c, i) => (
-            <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: c }} />
-          ))}
-        </div>
-        <span style={{ color: '#7C3AED', fontWeight: 600, letterSpacing: '0.1em', marginLeft: 2 }}>RIFT-AUTH</span>
-        <span>│</span><span>TLS 1.3</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, color: '#22C55E' }}>
-          <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#22C55E', animation: 'tvStatusPulse 2s ease-in-out infinite' }} />
-          SECURE
+        <div style={{
+          position: 'absolute', left: '2.2rem', bottom: '1.8rem', zIndex: 3, display: 'flex', alignItems: 'center', gap: '.55rem',
+          fontSize: '.66rem', letterSpacing: '.2em', color: '#71717a',
+        }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 9px #22c55e', animation: 'loginPulseDot 2.4s ease-in-out infinite' }} />
+          SISTEMA OPERACIONAL · ONLINE
         </div>
       </div>
-      <div style={{ position: 'relative', zIndex: 1, padding: '1.4rem 1.7rem 1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-          <CrosshairIcon size={18} color="#7C3AED" />
-          <span style={{ fontSize: 17, fontWeight: 700, color: '#A78BFA', letterSpacing: '0.08em' }}>Rift</span>
-        </div>
-        <h2 style={{ fontSize: 19, fontWeight: 600, color: '#E2E8F0', letterSpacing: '-0.01em', lineHeight: 1.2, marginBottom: 4 }}>
-          Bem-vindo de volta<span style={{ color: '#7C3AED', animation: 'tvBlink 1s step-end infinite' }}>_</span>
-        </h2>
-        <div style={{ color: '#7C3AED', fontSize: 10, letterSpacing: '0.07em', marginBottom: '1.35rem', opacity: 0.7 }}>
-          {'// autenticação local'}
-        </div>
-        <LoginForm onLogin={onLogin} ssoError={ssoError} />
-      </div>
-      <div style={{ position: 'relative', zIndex: 1, borderTop: '1px solid #0A0A1C', padding: '0.5rem 1.25rem',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(2,2,8,0.88)' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
-          <div style={{ marginTop: 1, flexShrink: 0 }}><ShieldIcon size={12} color="#3A3A62" /></div>
-          <div>
-            <div style={{ fontSize: 8, letterSpacing: '0.04em', color: '#3A3A62' }}>Acesso restrito e monitorado</div>
-            <div style={{ fontSize: 7, color: '#252540', marginTop: 2, letterSpacing: '0.03em' }}>Todos os eventos são registrados.</div>
-          </div>
-        </div>
-        <div style={{ fontSize: 8, fontWeight: 600, letterSpacing: '0.1em', color: '#22C55E', flexShrink: 0,
-          border: '1px solid rgba(34,197,94,0.28)', borderRadius: 2, padding: '2px 7px',
-          background: 'rgba(34,197,94,0.06)', whiteSpace: 'nowrap' }}>VERIFICADO</div>
-      </div>
-    </div>
-  )
-}
-
-// ── Full canvas ───────────────────────────────────────────────────────────────
-function FullCanvas({ onLogin, ssoError }: { onLogin: (e: string, p: string) => Promise<void>; ssoError: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', fontFamily: "'JetBrains Mono','Fira Code',monospace" }}>
-      {/* HUD bar — only real/relevant info */}
-      <div style={{ flexShrink: 0, zIndex: 20, display: 'flex', alignItems: 'center', height: 34, padding: '0 1.5rem',
-        borderBottom: '1px solid rgba(10,10,26,0.98)', background: 'rgba(2,2,8,0.98)',
-        fontSize: 9, color: '#252545', letterSpacing: '0.1em', gap: 14 }}>
-        <div style={{ display: 'flex', gap: 5, marginRight: 2 }}>
-          {['rgba(239,68,68,0.38)', 'rgba(234,179,8,0.38)', 'rgba(34,197,94,0.38)'].map((c, i) => (
-            <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: c }} />
-          ))}
-        </div>
-        <span style={{ color: '#7C3AED', fontWeight: 600, letterSpacing: '0.12em', fontSize: 10 }}>RIFT</span>
-        <span>│</span>
-        <span>AI Pentest Platform</span>
-        <span>│</span>
-        <span style={{ color: 'rgba(124,58,237,0.6)' }}>v1.0.2</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
-          <LiveClock />
-          <span>│</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#22C55E' }}>
-            <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#22C55E', animation: 'tvStatusPulse 2s ease-in-out infinite' }} />
-            SECURE
-          </div>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#080810',
-        backgroundImage: 'linear-gradient(rgba(124,58,237,0.037) 1px,transparent 1px),linear-gradient(90deg,rgba(124,58,237,0.037) 1px,transparent 1px)',
-        backgroundSize: '40px 40px' }}>
-        <div style={{ position: 'absolute', top: '40%', left: '61%', transform: 'translate(-50%,-50%)', width: 920, height: 920, pointerEvents: 'none', zIndex: 0, background: 'radial-gradient(circle,rgba(124,58,237,0.08) 0%,transparent 58%)' }} />
-        <div style={{ position: 'absolute', top: '40%', left: '52%', transform: 'translate(-50%,-50%)', fontSize: 300, fontWeight: 700, color: 'rgba(124,58,237,0.03)', letterSpacing: '0.24em', lineHeight: 1, userSelect: 'none', pointerEvents: 'none', zIndex: 1, whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono',monospace", animation: 'ghostGlitch 14s step-end infinite' }}>RIFT</div>
-        <HudCorner top={16} left={16} /><HudCorner top={16} right={16} />
-        <HudCorner bottom={5} left={16} /><HudCorner bottom={5} right={16} />
-        <div style={{ position: 'absolute', top: '40%', left: '61%', zIndex: 5 }}>
-          <NetworkMap />
-          <div style={{ position: 'absolute', left: -200, top: -200 }}><TargetV4 /></div>
-        </div>
-        <div style={{ position: 'absolute', top: 'calc(40% + 230px)', left: 'calc(61% - 254px)', width: 508, zIndex: 4 }}>
-          <RiftBrand />
-        </div>
-        <SystemStatusPanel />
-        <ThreatLevelPanel />
-        <LoginCard onLogin={onLogin} ssoError={ssoError} />
-      </div>
-
-      {/* Footer bar — version + copyright */}
-      <div style={{ flexShrink: 0, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 1.5rem', borderTop: '1px solid #0C0C1E', background: 'rgba(3,3,8,0.94)',
-        fontSize: 9, color: '#252545', letterSpacing: '0.06em' }}>
-        <span>Rift AI Pentest Platform <span style={{ color: 'rgba(124,58,237,0.45)' }}>v1.0.2</span></span>
-        <span>© 2026 Porttus — Acesso restrito e monitorado</span>
-      </div>
+      <LoginSide onLogin={onLogin} ssoError={ssoError} narrow={narrow} />
     </div>
   )
 }
@@ -512,5 +617,5 @@ function LoginPageInner() {
     router.replace('/dashboard')
   }
 
-  return <FullCanvas onLogin={handleLogin} ssoError={ssoError} />
+  return <LoginScreen onLogin={handleLogin} ssoError={ssoError} />
 }

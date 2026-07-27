@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RIFT — Login</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#05050d;--purple:#7c3aed;--purple2:#8b5cf6;--purple-lt:#a78bfa;--purple-glow:#c084fc;
+    --t1:#f5f5f5;--t2:#e5e7eb;--t3:#a1a1aa;--t4:#71717a;--t5:#52525b;--online:#22c55e;
+    --mono:'JetBrains Mono',monospace;--disp:'Space Grotesk',system-ui,sans-serif;
+  }
+  html,body{background:var(--bg);color:var(--t2);font-family:var(--mono);height:100%}
+  body{overflow:hidden}
+  a{color:var(--purple-lt);text-decoration:none}
+  a:hover{color:var(--purple-glow)}
+  ::selection{background:rgba(124,58,237,0.35);color:#fff}
+
+  #app{display:flex;height:100vh;width:100%;overflow:hidden}
+  .stage{flex:1;position:relative;overflow:hidden;background:var(--bg)}
+  #viz{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .stage-vig{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 120% at 50% 50%,transparent 55%,rgba(5,5,13,0.7) 100%)}
+  .vbrand{position:absolute;top:2rem;left:2.2rem;z-index:3;display:flex;align-items:center;gap:.7rem}
+  .vbrand .mk{font-family:var(--disp);font-weight:700;font-size:1.35rem;letter-spacing:.05em;color:var(--t1)}
+  .vbrand .mk .i{color:var(--purple-lt)}
+  .vbrand .div{width:1px;height:20px;background:rgba(139,92,246,0.3)}
+  .vbrand .tag{font-size:.62rem;letter-spacing:.3em;color:var(--t4)}
+  .vcap{position:absolute;left:2.2rem;bottom:3.6rem;z-index:3;max-width:340px;font-family:var(--disp);font-weight:500;font-size:1.05rem;line-height:1.35;color:var(--t2);letter-spacing:.01em}
+  .vcap .hl{color:var(--purple-lt)}
+  .statuschip{position:absolute;left:2.2rem;bottom:1.8rem;z-index:3;display:flex;align-items:center;gap:.55rem;
+    font-size:.66rem;letter-spacing:.2em;color:var(--t4)}
+  .statuschip .d{width:7px;height:7px;border-radius:50%;background:var(--online);box-shadow:0 0 9px var(--online);animation:pulseDot 2.4s ease-in-out infinite}
+
+  .side{width:480px;flex-shrink:0;position:relative;display:flex;flex-direction:column;justify-content:center;
+    padding:2.5rem 3.4rem;background:linear-gradient(180deg,#08060f,#06050c);
+    border-left:1px solid rgba(139,92,246,0.14);box-shadow:-30px 0 80px rgba(0,0,0,0.5)}
+  .side::before{content:"";position:absolute;left:0;top:0;bottom:0;width:1px;
+    background:linear-gradient(180deg,transparent,rgba(139,92,246,0.5),transparent)}
+  .inner{width:100%;max-width:360px;margin:0 auto;animation:fadeUp .6s cubic-bezier(.2,.7,.3,1) both}
+  .logo{display:flex;align-items:center;gap:.7rem;margin-bottom:2rem}
+  .logo .mk{font-family:var(--disp);font-weight:700;font-size:1.7rem;letter-spacing:.05em;
+    background:linear-gradient(120deg,#c4b5fd,#a78bfa 50%,#7c3aed);-webkit-background-clip:text;background-clip:text;color:transparent}
+  h2{font-family:var(--disp);font-weight:600;font-size:1.55rem;color:var(--t1);letter-spacing:-.01em}
+  .sub{font-size:.88rem;color:var(--t4);margin-top:.5rem;margin-bottom:1.8rem}
+  .field{position:relative;margin-bottom:.85rem}
+  .field .fico{position:absolute;left:1rem;top:50%;transform:translateY(-50%);color:var(--t5);display:flex}
+  .field input{width:100%;height:52px;padding:0 2.8rem;border-radius:.7rem;background:rgba(6,6,16,0.65);
+    border:1px solid rgba(139,92,246,0.16);color:var(--t2);font-family:var(--mono);font-size:.9rem;outline:none;
+    transition:border-color .18s,box-shadow .18s,background .18s}
+  .field input::placeholder{color:var(--t5)}
+  .field input:focus{border-color:rgba(124,58,237,0.65);background:rgba(9,8,22,0.85);box-shadow:0 0 0 3px rgba(124,58,237,0.12)}
+  .field .eye{position:absolute;right:.9rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--t5);cursor:pointer;display:flex;padding:4px;transition:color .15s}
+  .field .eye:hover{color:var(--purple-lt)}
+  .rowline{display:flex;align-items:center;justify-content:space-between;margin:.4rem 0 1.5rem;font-size:.82rem}
+  .remember{display:flex;align-items:center;gap:.5rem;color:var(--t3);cursor:pointer;user-select:none}
+  .remember .box{width:18px;height:18px;border-radius:6px;border:1px solid rgba(139,92,246,0.35);background:rgba(6,6,16,0.6);display:flex;align-items:center;justify-content:center;transition:all .15s}
+  .remember .box.on{background:var(--purple);border-color:var(--purple)}
+  .btn{width:100%;height:54px;border:none;border-radius:.75rem;cursor:pointer;font-family:var(--disp);font-weight:600;font-size:.98rem;color:#fff;
+    display:flex;align-items:center;justify-content:center;gap:.6rem;position:relative;overflow:hidden;
+    background:linear-gradient(100deg,#6d28d9,#7c3aed 45%,#9563e8);
+    box-shadow:0 12px 32px rgba(124,58,237,0.42),inset 0 1px 0 rgba(255,255,255,0.15);transition:transform .12s,box-shadow .18s,filter .18s}
+  .btn:hover{filter:brightness(1.08);box-shadow:0 16px 40px rgba(124,58,237,0.58),inset 0 1px 0 rgba(255,255,255,0.22)}
+  .btn:active{transform:translateY(1px)}
+  .btn .arr{transition:transform .18s}.btn:hover .arr{transform:translateX(4px)}
+  .or{display:flex;align-items:center;gap:1rem;margin:1.6rem 0 1.2rem;color:var(--t5);font-size:.78rem}
+  .or::before,.or::after{content:"";flex:1;height:1px;background:rgba(139,92,246,0.15)}
+  .socials{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem}
+  .soc{height:52px;border-radius:.7rem;background:rgba(6,6,16,0.6);border:1px solid rgba(139,92,246,0.15);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--t2);transition:all .15s}
+  .soc:hover{border-color:rgba(124,58,237,0.5);background:rgba(124,58,237,0.08)}
+  .createacc{text-align:center;margin-top:1.7rem;font-size:.85rem;color:var(--t4)}
+  .secure{display:flex;align-items:center;gap:.55rem;justify-content:center;margin-top:1.8rem;font-size:.72rem;color:var(--t5)}
+  .secure .s{color:var(--purple-lt);display:flex}
+
+  @keyframes pulseDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.82)}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+
+  @media (max-width:900px){
+    #app{flex-direction:column}
+    .stage{height:34vh;min-height:220px}
+    .side{width:100%;flex:1;border-left:none;border-top:1px solid rgba(139,92,246,0.14);
+      padding:2.2rem 1.5rem;box-shadow:0 -30px 60px rgba(0,0,0,0.5)}
+    .side::before{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important}}
+</style>
+<template id="__bundler_thumbnail" data-bg-color="#05050d">
+  <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <rect width="64" height="64" fill="#05050d"/>
+    <ellipse cx="32" cy="32" rx="24" ry="11" fill="none" stroke="#7c3aed" stroke-width="1" opacity=".5"/>
+    <ellipse cx="32" cy="32" rx="11" ry="24" fill="none" stroke="#a78bfa" stroke-width="1" opacity=".4"/>
+    <circle cx="32" cy="32" r="3" fill="#c084fc"/>
+    <circle cx="56" cy="32" r="2" fill="#a78bfa"/><circle cx="32" cy="8" r="2" fill="#a78bfa"/>
+  </svg>
+</template>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useRef, useEffect, useState } = React;
+
+/* ============================ Icons ============================ */
+const Crosshair = ({s=24,c="currentColor",w=1.6}) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={w} strokeLinecap="round">
+    <circle cx="12" cy="12" r="9.2"/><circle cx="12" cy="12" r="3"/>
+    <line x1="12" y1="1.2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22.8"/>
+    <line x1="1.2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22.8" y2="12"/>
+  </svg>
+);
+const Mail = ({s=18}) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M3 6l9 6.5L21 6"/></svg>);
+const Lock = ({s=18}) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"/><path d="M8 10.5V7a4 4 0 018 0v3.5"/></svg>);
+const Eye = ({s=18}) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>);
+const EyeOff = ({s=18}) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9.9 5.2A9.7 9.7 0 0112 5c6.5 0 10.5 7 10.5 7a17 17 0 01-2.2 2.9M6.2 6.7A17 17 0 001.5 12s4 7 10.5 7a9.5 9.5 0 004-.9"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/></svg>);
+const Check = ({s=12}) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12l5 5L20 6"/></svg>);
+const Shield = ({s=15}) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>);
+const Github = ({s=22}) => (<svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5A10.5 10.5 0 001.5 12c0 4.64 3 8.57 7.18 9.96.53.1.72-.23.72-.5v-1.9c-2.92.63-3.54-1.25-3.54-1.25-.48-1.22-1.17-1.54-1.17-1.54-.95-.65.08-.64.08-.64 1.06.08 1.61 1.08 1.61 1.08.94 1.6 2.46 1.14 3.06.87.1-.68.37-1.14.67-1.4-2.33-.27-4.78-1.17-4.78-5.18 0-1.15.4-2.08 1.07-2.82-.11-.27-.47-1.34.1-2.79 0 0 .88-.28 2.88 1.07a9.9 9.9 0 015.24 0c2-1.35 2.87-1.07 2.87-1.07.57 1.45.21 2.52.1 2.79.67.74 1.07 1.67 1.07 2.82 0 4.02-2.46 4.9-4.8 5.16.38.33.72.97.72 1.96v2.9c0 .28.19.61.73.5A10.5 10.5 0 0022.5 12 10.5 10.5 0 0012 1.5z"/></svg>);
+const Google = ({s=22}) => (<svg width={s} height={s} viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.9a5.04 5.04 0 01-2.19 3.31v2.76h3.54c2.08-1.92 3.25-4.74 3.25-8.08z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.67l-3.54-2.76c-.98.66-2.24 1.06-3.74 1.06-2.87 0-5.3-1.94-6.17-4.55H2.18v2.85A11 11 0 0012 23z"/><path fill="#FBBC05" d="M5.83 14.08a6.6 6.6 0 010-4.16V7.07H2.18a11 11 0 000 9.86l3.65-2.85z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.2 1.64l3.14-3.14A10.98 10.98 0 0012 1a11 11 0 00-9.82 6.07l3.65 2.85C6.7 7.31 9.13 5.38 12 5.38z"/></svg>);
+const MsIcon = ({s=20}) => (<svg width={s} height={s} viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>);
+
+/* ============================ Radar / orbital viz ============================ */
+function RadarStage(){
+  const ref=useRef(null);
+  useEffect(()=>{
+    const cv=ref.current, ctx=cv.getContext('2d');
+    const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let W,H,DPR,raf,t0=performance.now(),cx,cy,S,R;
+    const stars=[], parts=[];
+    // orbit definitions: rxF/ryF = ellipse radii as fraction of R, tilt, angular speed, agents
+    const ORB=[
+      {rxF:1.00, ryF:0.34, tilt:-0.36, sp:0.13,  n:2, col:[168,130,255], beam:true },
+      {rxF:0.70, ryF:0.70, tilt:0.0,   sp:-0.19, n:3, col:[139,92,246], beam:false},
+      {rxF:0.52, ryF:0.90, tilt:0.62,  sp:0.26,  n:2, col:[192,132,252], beam:true },
+      {rxF:0.86, ryF:0.58, tilt:2.4,   sp:-0.11, n:2, col:[124,90,220],  beam:false},
+    ];
+    const HOT=[[34,197,94],[245,158,11]]; // occasional accent agents
+    function resize(){
+      DPR=Math.min(window.devicePixelRatio||1,2);
+      W=cv.clientWidth; H=cv.clientHeight;
+      cv.width=W*DPR; cv.height=H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+      cx=W*0.5; cy=H*0.5; S=Math.min(W,H); R=S*0.44;
+      stars.length=0;
+      for(let i=0;i<40;i++)stars.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.2+0.3,ph:Math.random()*6.28,tw:0.6+Math.random()*1.6});
+      parts.length=0;
+      for(let i=0;i<46;i++){const a=Math.random()*6.28,rr=R*(0.2+Math.random()*1.1);parts.push({a,rr,x:cx+Math.cos(a)*rr,y:cy+Math.sin(a)*rr,sp:0.1+Math.random()*0.5,z:Math.random()});}
+    }
+    // rotate a local (X,Y) by tilt and translate to screen
+    const proj=(X,Y,tilt)=>[cx+X*Math.cos(tilt)-Y*Math.sin(tilt), cy+X*Math.sin(tilt)+Y*Math.cos(tilt)];
+    function ellipse(o){
+      ctx.beginPath();
+      for(let k=0;k<=64;k++){const th=k/64*6.283;const[x,y]=proj(o.rxF*R*Math.cos(th),o.ryF*R*Math.sin(th),o.tilt);k?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+      ctx.closePath();
+    }
+    function frame(now){
+      const t=reduce?6:Math.max(0,(now-t0)/1000);
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle='#05050d'; ctx.fillRect(0,0,W,H);
+      // center glow
+      let g=ctx.createRadialGradient(cx,cy,0,cx,cy,R*1.25);
+      g.addColorStop(0,'rgba(124,58,237,0.16)');g.addColorStop(.5,'rgba(124,58,237,0.05)');g.addColorStop(1,'transparent');
+      ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+      ctx.globalCompositeOperation='lighter';
+      // starfield
+      for(const s of stars){const a=0.15+0.35*(0.5+0.5*Math.sin(t*s.tw+s.ph));
+        ctx.fillStyle=`rgba(180,160,240,${a})`;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,6.283);ctx.fill();}
+      // drifting particles orbiting loosely
+      for(const p of parts){p.a+=p.sp*0.004; p.x=cx+Math.cos(p.a)*p.rr; p.y=cy+Math.sin(p.a)*p.rr;
+        ctx.fillStyle=`rgba(${150+p.z*50|0},120,250,${0.12+p.z*0.28})`;ctx.beginPath();ctx.arc(p.x,p.y,0.5+p.z*1.3,0,6.283);ctx.fill();}
+      // concentric rings
+      [1,0.68,0.4,0.2].forEach((f,i)=>{ctx.strokeStyle=`rgba(139,92,246,${0.16-i*0.02})`;ctx.lineWidth=1;ctx.beginPath();ctx.arc(cx,cy,R*f,0,6.283);ctx.stroke();});
+      // rotating dashed ring
+      ctx.save();ctx.translate(cx,cy);ctx.rotate(t*0.12);ctx.setLineDash([3,10]);ctx.strokeStyle='rgba(167,139,250,0.28)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(0,0,R*0.86,0,6.283);ctx.stroke();ctx.setLineDash([]);ctx.restore();
+      ctx.save();ctx.translate(cx,cy);ctx.rotate(-t*0.2);ctx.setLineDash([2,14]);ctx.strokeStyle='rgba(139,92,246,0.22)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(0,0,R*0.54,0,6.283);ctx.stroke();ctx.setLineDash([]);ctx.restore();
+      // radar sweep (fan trail)
+      const sweep=t*0.5;
+      for(let k=0;k<32;k++){const ang=sweep-k*0.022;const al=(1-k/32)*0.14;
+        ctx.strokeStyle=`rgba(167,139,250,${al})`;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(ang)*R,cy+Math.sin(ang)*R);ctx.stroke();}
+      ctx.strokeStyle='rgba(210,190,255,0.5)';ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(sweep)*R,cy+Math.sin(sweep)*R);ctx.stroke();
+      // expanding pulses
+      for(let i=0;i<2;i++){const e=((t/4.5+i*0.5)%1);const rr=e*R*1.05;
+        ctx.strokeStyle=`rgba(124,58,237,${(1-e)*0.4})`;ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(cx,cy,rr,0,6.283);ctx.stroke();}
+      // orbits + agents
+      ORB.forEach((o,oi)=>{
+        ctx.strokeStyle=`rgba(${o.col[0]},${o.col[1]},${o.col[2]},0.16)`;ctx.lineWidth=1;ellipse(o);ctx.stroke();
+        for(let i=0;i<o.n;i++){
+          const th=t*o.sp*6.283/2 + i*(6.283/o.n) + oi*1.3;
+          const depth=0.5+0.5*Math.sin(th); // 0 back .. 1 front
+          const[x,y]=proj(o.rxF*R*Math.cos(th),o.ryF*R*Math.sin(th),o.tilt);
+          // trail
+          for(let k=8;k>=1;k--){const tk=th-k*0.05;const[tx,ty]=proj(o.rxF*R*Math.cos(tk),o.ryF*R*Math.sin(tk),o.tilt);
+            ctx.fillStyle=`rgba(${o.col[0]},${o.col[1]},${o.col[2]},${(1-k/8)*0.18*(0.4+depth)})`;ctx.beginPath();ctx.arc(tx,ty,1.2,0,6.283);ctx.fill();}
+          // beam to core for lead agent
+          if(o.beam && i===0){const bp=0.3+0.7*(0.5+0.5*Math.sin(t*1.3+oi));
+            const lg=ctx.createLinearGradient(x,y,cx,cy);lg.addColorStop(0,`rgba(210,190,255,${0.5*bp})`);lg.addColorStop(1,'transparent');
+            ctx.strokeStyle=lg;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(cx,cy);ctx.stroke();}
+          // agent glow + dot
+          const col = (oi===0&&i===0)?HOT[0]:(oi===2&&i===0)?HOT[1]:o.col;
+          const rr=(2.4+depth*3);
+          const rg=ctx.createRadialGradient(x,y,0,x,y,rr*3.4);
+          rg.addColorStop(0,`rgba(${col[0]},${col[1]},${col[2]},${0.55+depth*0.4})`);rg.addColorStop(.4,`rgba(${col[0]},${col[1]},${col[2]},${0.28+depth*0.3})`);rg.addColorStop(1,'transparent');
+          ctx.fillStyle=rg;ctx.beginPath();ctx.arc(x,y,rr*3.4,0,6.283);ctx.fill();
+          ctx.fillStyle=`rgba(255,255,255,${0.6+depth*0.4})`;ctx.beginPath();ctx.arc(x,y,rr*0.6,0,6.283);ctx.fill();
+        }
+      });
+      // core crosshair (RIFT mark)
+      ctx.save();ctx.translate(cx,cy);ctx.rotate(t*0.3);ctx.setLineDash([4,7]);ctx.strokeStyle='rgba(167,139,250,0.5)';ctx.lineWidth=1.3;ctx.beginPath();ctx.arc(0,0,R*0.13,0,6.283);ctx.stroke();ctx.setLineDash([]);ctx.restore();
+      // cross arms
+      const arm=R*0.2, gap=R*0.05;
+      ctx.lineWidth=1.4;
+      [[0,-1],[0,1],[-1,0],[1,0]].forEach(([dx,dy])=>{
+        const lg=ctx.createLinearGradient(cx+dx*gap,cy+dy*gap,cx+dx*arm,cy+dy*arm);
+        lg.addColorStop(0,'rgba(200,170,255,0.75)');lg.addColorStop(1,'rgba(124,58,237,0)');
+        ctx.strokeStyle=lg;ctx.beginPath();ctx.moveTo(cx+dx*gap,cy+dy*gap);ctx.lineTo(cx+dx*arm,cy+dy*arm);ctx.stroke();
+      });
+      // corner brackets
+      const bx=R*0.115; ctx.strokeStyle='rgba(167,139,250,0.7)';ctx.lineWidth=1.5;const bl=R*0.035;
+      [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sy])=>{
+        ctx.beginPath();ctx.moveTo(cx+sx*bx-sx*bl,cy+sy*bx);ctx.lineTo(cx+sx*bx,cy+sy*bx);ctx.lineTo(cx+sx*bx,cy+sy*bx-sy*bl);ctx.stroke();
+      });
+      // core pulse
+      const cp=0.6+0.4*Math.sin(t*2.0);
+      const cg=ctx.createRadialGradient(cx,cy,0,cx,cy,R*0.1*cp+8);
+      cg.addColorStop(0,'rgba(235,225,255,0.95)');cg.addColorStop(.4,`rgba(160,120,255,${0.6*cp})`);cg.addColorStop(1,'transparent');
+      ctx.fillStyle=cg;ctx.beginPath();ctx.arc(cx,cy,R*0.1*cp+8,0,6.283);ctx.fill();
+      ctx.fillStyle='rgba(124,58,237,0.95)';ctx.beginPath();ctx.arc(cx,cy,3.2,0,6.283);ctx.fill();
+
+      ctx.globalCompositeOperation='source-over';
+      if(!reduce) raf=requestAnimationFrame(frame);
+    }
+    resize(); frame(performance.now());
+    window.addEventListener('resize',resize);
+    return ()=>{cancelAnimationFrame(raf);window.removeEventListener('resize',resize);};
+  },[]);
+  return <canvas id="viz" ref={ref}></canvas>;
+}
+
+/* ============================ Login side ============================ */
+function LoginSide(){
+  const [show,setShow]=useState(false);
+  const [remember,setRemember]=useState(true);
+  const [email,setEmail]=useState('');
+  const [pass,setPass]=useState('');
+  return (
+    <aside className="side">
+      <div className="inner">
+        <div className="logo">
+          <Crosshair s={34} c="#a78bfa" w={1.5}/>
+          <span className="mk">RIFT</span>
+        </div>
+        <h2>Bem-vindo de volta</h2>
+        <div className="sub">Faça login para continuar sua jornada.</div>
+        <form onSubmit={e=>e.preventDefault()}>
+          <div className="field">
+            <span className="fico"><Mail/></span>
+            <input type="text" placeholder="Email ou nome de usuário" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username"/>
+          </div>
+          <div className="field">
+            <span className="fico"><Lock/></span>
+            <input type={show?'text':'password'} placeholder="Senha" value={pass} onChange={e=>setPass(e.target.value)} autoComplete="current-password"/>
+            <button type="button" className="eye" onClick={()=>setShow(s=>!s)} aria-label="Mostrar senha">{show?<EyeOff/>:<Eye/>}</button>
+          </div>
+          <div className="rowline">
+            <label className="remember" onClick={()=>setRemember(r=>!r)}>
+              <span className={"box"+(remember?" on":"")}>{remember&&<Check/>}</span>
+              Lembrar de mim
+            </label>
+            <a href="#">Esqueceu sua senha?</a>
+          </div>
+          <button className="btn" type="submit">Entrar na plataforma <span className="arr">→</span></button>
+        </form>
+        <div className="or">ou continue com</div>
+        <div className="socials">
+          <a className="soc" href="#" aria-label="GitHub"><Github/></a>
+          <a className="soc" href="#" aria-label="Google"><Google/></a>
+          <a className="soc" href="#" aria-label="Microsoft"><MsIcon/></a>
+        </div>
+        <div className="createacc">Novo por aqui? <a href="#">Criar uma conta</a></div>
+        <div className="secure"><span className="s"><Shield/></span> Seus dados estão protegidos com segurança avançada</div>
+      </div>
+    </aside>
+  );
+}
+
+function App(){
+  return (
+    <div id="app">
+      <div className="stage">
+        <RadarStage/>
+        <div className="stage-vig"></div>
+        <div className="vbrand"><Crosshair s={26} c="#a78bfa" w={1.5}/><span className="mk">R<span className="i">i</span>FT</span><span className="div"></span><span className="tag">AI PENTEST PLATFORM</span></div>
+        <div className="vcap">Pentest contínuo por <span className="hl">agentes de IA</span>.</div>
+        <div className="statuschip"><span className="d"></span> SISTEMA OPERACIONAL · ONLINE</div>
+      </div>
+      <LoginSide/>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
