@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import dynamic from 'next/dynamic'
 import { useParams, useRouter } from 'next/navigation'
 import { api, Engagement, ReportNarrativeStatus } from '@/lib/api'
 import { useEngagementWS, WsMsg } from '@/hooks/useEngagementWS'
@@ -16,12 +17,19 @@ import { useAuth } from '@/hooks/useAuth'
 import { useEscapeClose } from '@/hooks/useEscapeClose'
 import {
   ArrowLeft, Wifi, WifiOff, Shield, FileText,
-  Eye, Download, X, Clock, Wand2, Radar, Printer, ExternalLink,
+  Eye, Download, X, Clock, Wand2, Radar, Printer, ExternalLink, Workflow,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { ReportFile } from '@/lib/api'
 
-type Tab = 'exec' | 'findings' | 'report'
+type Tab = 'exec' | 'findings' | 'path' | 'report'
+
+// React Flow só funciona no client (usa dimensões do DOM) — carrega sob demanda,
+// só quando a aba Caminho é aberta, pra não engordar o bundle das outras abas.
+const PathView = dynamic(() => import('@/components/engagement/PathView').then((m) => m.PathView), {
+  ssr: false,
+  loading: () => <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>carregando caminho...</div>,
+})
 
 // Prompt do "Iniciar mapeamento automático" (Agente 1 black-box, recon→enum→vuln).
 const AUTO_RUN_PROMPT =
@@ -216,6 +224,7 @@ export default function EngagementPage() {
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'exec',     label: 'Execução',  icon: <Radar size={14} /> },
     { id: 'findings', label: 'Findings',  icon: <Shield size={14} /> },
+    { id: 'path',     label: 'Caminho',   icon: <Workflow size={14} /> },
     { id: 'report',   label: 'Relatório', icon: <FileText size={14} /> },
   ]
 
@@ -327,6 +336,12 @@ export default function EngagementPage() {
       {tab === 'findings' && (
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <FindingsReport engagementId={id} />
+        </div>
+      )}
+
+      {tab === 'path' && (
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          <PathView engagementId={id} target={engagement.target} />
         </div>
       )}
 
@@ -520,7 +535,7 @@ function ReportTab({ engagementId, engagementName, isAdmin }: { engagementId: st
           key={`${type}-${nonce}`}
           src={reportUrl}
           title={`Relatório ${type} — ${engagementName}`}
-          style={{ flex: 1, border: 'none', background: '#161826', minHeight: 0 }}
+          style={{ flex: 1, border: 'none', background: 'var(--raised)', minHeight: 0 }}
           // Conteúdo é NOSSO template (findings escapados, sem <script>, CSP default-src 'none').
           // allow-same-origin permite o print pelo parent; allow-modals abre o diálogo de impressão.
           sandbox="allow-same-origin allow-modals"

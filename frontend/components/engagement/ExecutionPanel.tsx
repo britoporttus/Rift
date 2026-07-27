@@ -191,6 +191,11 @@ export function ExecutionPanel({
   refreshStatus: 'ok' | 'partial' | 'error' | null
 }) {
   const [feedOpen, setFeedOpen] = useState(false)
+  // Marcos vêm abertos só quando há poucos (visão rápida); com muitos, começa
+  // colapsado (mesmo padrão da Atividade do agente) — é detalhe de ferramenta,
+  // não a narrativa principal (achados/superfície), então não precisa competir
+  // por espaço na primeira dobra quando o run já gerou muitos marcos.
+  const [msOpen, setMsOpen] = useState<boolean | null>(null)
   // A-LIVE-2: qual marco está expandido (mostra o que foi encontrado).
   const [expandedMs, setExpandedMs] = useState<string | null>(null)
 
@@ -531,7 +536,7 @@ export function ExecutionPanel({
       {agentRunning && (
         <div style={{
           background: 'var(--surface)', border: '1px solid var(--purple)', borderRadius: 12,
-          padding: '1rem 1.15rem', marginBottom: 16, boxShadow: '0 0 0 3px var(--purple-glow)',
+          padding: '1rem 1.15rem', marginBottom: 16, boxShadow: '0 0 0 3px var(--purple-glow-strong)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <Loader2 size={14} color="var(--purple-light)" style={{ animation: 'spin 1s linear infinite' }} />
@@ -575,15 +580,21 @@ export function ExecutionPanel({
       )}
 
       {/* MARCOS DO MAPEAMENTO (A-LIVE-2) — pontos concretos de progresso */}
-      {milestones.length > 0 && (
+      {milestones.length > 0 && (() => {
+        const msSectionOpen = msOpen ?? milestones.length <= 6
+        return (
         <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <button onClick={() => setMsOpen(!msSectionOpen)} style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: msSectionOpen ? 8 : 0,
+            background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0,
+          }}>
+            {msSectionOpen ? <ChevronDown size={14} color="var(--muted)" /> : <ChevronRight size={14} color="var(--muted)" />}
             <span style={{ color: 'var(--text)', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Flag size={14} color="var(--purple-light)" /> Marcos do mapeamento
             </span>
             <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{milestones.length}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          </button>
+          {msSectionOpen && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {milestones.slice(0, 30).map((m) => {
               const Icon = MILESTONE_ICON[String(m.kind ?? '')] ?? CheckCircle2
               const id = String(m._id)
@@ -615,10 +626,10 @@ export function ExecutionPanel({
                 + {milestones.length - 30} marcos
               </div>
             )}
-          </div>
+          </div>}
 
           {/* Detalhe do marco expandido — o QUE foi encontrado */}
-          {expandedMs && (() => {
+          {msSectionOpen && expandedMs && (() => {
             const m = milestones.find((x) => String(x._id) === expandedMs)
             const items = m && Array.isArray(m.items) ? (m.items as unknown[]).map(String) : []
             if (!m || !items.length) return null
@@ -648,14 +659,15 @@ export function ExecutionPanel({
             )
           })()}
         </div>
-      )}
+        )
+      })()}
 
       {/* DECISÃO PENDENTE */}
       {pendingQ && (
         <div style={{
           background: 'var(--surface)', border: '1px solid var(--purple)', borderRadius: 12,
           padding: '1rem 1.15rem', marginBottom: 16,
-          boxShadow: '0 0 0 3px var(--purple-glow)',
+          boxShadow: '0 0 0 3px var(--purple-glow-strong)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, color: 'var(--purple-light)', fontWeight: 600, fontSize: 13 }}>
             <HelpCircle size={15} /> Decisão necessária
@@ -710,6 +722,7 @@ export function ExecutionPanel({
               const sev = String(f.severity ?? 'info')
               const conf = String(f.confidence ?? '')
               const desc = String(f.description ?? '').replace(/\s+/g, ' ').trim()
+              const discoveredBy = String((f as Record<string, unknown>).discoveredBy ?? '')
               return (
                 <div key={String(f._id)} style={{
                   background: 'var(--surface)', border: `1px solid ${SEV_COLOR[sev] ?? 'var(--border)'}`,
@@ -732,6 +745,9 @@ export function ExecutionPanel({
                       display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {desc}
                     </div>
+                  )}
+                  {discoveredBy && (
+                    <div style={{ color: 'var(--purple-light)', fontSize: 10, fontFamily: 'var(--mono)', marginTop: 4 }}>via {discoveredBy}</div>
                   )}
                 </div>
               )

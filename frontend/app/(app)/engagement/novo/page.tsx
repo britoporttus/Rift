@@ -1,8 +1,9 @@
 'use client'
 import { useState, useMemo, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { api, DomainPackOption } from '@/lib/api'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { api, DomainPackOption, DomainSummary } from '@/lib/api'
 import Link from 'next/link'
+import { engagementMatchesDomain } from '@/lib/domainMatch'
 import { ArrowLeft, ArrowRight, Check, Target, Radar, Loader2, Globe, Cloud, Network, KeyRound, Clock } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -120,6 +121,7 @@ function PackPicker({ packs, value, onChange }: { packs: DomainPackOption[]; val
 
 export default function NovoEngagementPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [step, setStep] = useState<1 | 2>(1)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -130,12 +132,17 @@ export default function NovoEngagementPage() {
   useEffect(() => {
     api.settings.getDomainPacks().then((info) => { setPacks(info.available); setPackId(info.default) }).catch(() => setPacks([]))
   }, [])
+
+  // Domínios cadastrados (ASM) — sugestão no campo de alvo, pra não criar
+  // engagements "órfãos" (sem Domínio vinculado) sem querer.
+  const [domains, setDomains] = useState<DomainSummary[]>([])
+  useEffect(() => { api.domains.list().then(setDomains).catch(() => setDomains([])) }, [])
   const pack = useMemo(() => packs.find((p) => p.id === packId) || null, [packs, packId])
   const isAuth = pack?.credentialHandling === 'vault'
 
   // Essencial
   const [name, setName]           = useState('')
-  const [target, setTarget]       = useState('')
+  const [target, setTarget]       = useState(() => searchParams.get('target') || '')
   const [environment, setEnv]     = useState('production')
   const [appType, setAppType]     = useState('web+api')
   const [intensity, setIntensity] = useState('medium')
@@ -151,6 +158,10 @@ export default function NovoEngagementPage() {
   const [notes, setNotes]           = useState('')
 
   const targetOk = target.trim().length > 0
+  const matchedDomain = useMemo(
+    () => (target.trim() ? domains.find((d) => engagementMatchesDomain(target, d.domain)) || null : null),
+    [target, domains],
+  )
   // Campos de credencial obrigatórios preenchidos? (packs autenticados)
   const credsOk = !isAuth || (pack?.credentialFields || [])
     .filter((f) => !f.optional)
@@ -243,8 +254,22 @@ export default function NovoEngagementPage() {
                 <label style={labelStyle} htmlFor="eng-target">{targetLabel}</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Target size={15} color="var(--purple-light)" style={{ flexShrink: 0 }} />
-                  <input id="eng-target" autoFocus value={target} onChange={(e) => setTarget(e.target.value)} placeholder={targetPlaceholder} style={inputStyle} />
+                  <input id="eng-target" autoFocus value={target} onChange={(e) => setTarget(e.target.value)} placeholder={targetPlaceholder} style={inputStyle} list="eng-target-domains" />
+                  <datalist id="eng-target-domains">
+                    {domains.map((d) => <option key={d.id} value={d.domain} />)}
+                  </datalist>
                 </div>
+                {targetOk && (
+                  matchedDomain ? (
+                    <div style={{ fontSize: 11, color: 'var(--low)', marginTop: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Check size={12} /> Vinculado ao Domínio cadastrado: {matchedDomain.name || matchedDomain.domain}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: 'var(--text-mute)', marginTop: 5 }}>
+                      Este alvo ainda não está em <Link href="/dominios" style={{ color: 'var(--purple-light)' }}>Domínios</Link> — cadastre lá também para acompanhar superfície e score.
+                    </div>
+                  )
+                )}
               </div>
               <div style={{ flex: 1, minWidth: 200 }}>
                 <label style={labelStyle} htmlFor="eng-name">Nome do engagement</label>
@@ -371,7 +396,7 @@ export default function NovoEngagementPage() {
               display: 'flex', alignItems: 'center', gap: 7, background: (targetOk && credsOk) ? 'var(--purple)' : 'var(--border)', border: 'none', borderRadius: 8,
               color: 'white', fontSize: 13.5, fontWeight: 700, padding: '0.55rem 1.2rem',
               cursor: creating || !targetOk || !credsOk ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: creating ? 0.75 : 1,
-              boxShadow: (targetOk && credsOk) ? '0 0 18px var(--purple-glow)' : 'none',
+              boxShadow: (targetOk && credsOk) ? '0 0 18px var(--purple-glow-strong)' : 'none',
             }}>
               {creating ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Criando…</> : <><Radar size={14} /> Criar escopo (sem iniciar testes)</>}
             </button>

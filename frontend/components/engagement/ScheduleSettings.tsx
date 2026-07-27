@@ -14,10 +14,10 @@ const PHASE_LABEL: Record<string, string> = {
   full: 'Completo (até o relatório)',
 }
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
-  running:         { label: 'Em execução', color: '#3b82f6' },
-  completed:       { label: 'Concluído',   color: '#22c55e' },
-  budget_exceeded: { label: 'Teto de custo atingido', color: '#eab308' },
-  error:           { label: 'Erro',        color: '#ef4444' },
+  running:         { label: 'Em execução', color: 'var(--info)' },
+  completed:       { label: 'Concluído',   color: 'var(--low)' },
+  budget_exceeded: { label: 'Teto de custo atingido', color: 'var(--medium)' },
+  error:           { label: 'Erro',        color: 'var(--critical)' },
 }
 
 function fmt(d?: string | null) {
@@ -61,7 +61,7 @@ export function ScheduleSettings({ engagement, onClose, onUpdated }: {
     finally { setRunning(false) }
   }
 
-  const labelStyle: React.CSSProperties = { fontSize: 12, color: '#94A3B8', display: 'block', marginBottom: 6 }
+  const labelStyle: React.CSSProperties = { fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6 }
   const selectStyle: React.CSSProperties = {
     width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
     color: 'var(--text)', fontSize: 13, padding: '8px 10px', fontFamily: 'inherit',
@@ -115,21 +115,21 @@ export function ScheduleSettings({ engagement, onClose, onUpdated }: {
             <label style={labelStyle}>Teto de custo por execução (US$)</label>
             <input type="number" min={0.5} max={100} step={0.5} value={sch.costCeilingUsd}
               onChange={e => patch({ costCeilingUsd: parseFloat(e.target.value) || 0 })} style={selectStyle} />
-            <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-mute)', marginTop: 4, display: 'block' }}>
               O agente é encerrado se o custo ultrapassar este valor. Um fluxo completo pode exigir mais que US$ 5.
             </span>
           </div>
 
           {/* autoExploit — destacado como ação de risco */}
-          <div style={{ border: '1px solid #f9731633', background: '#f9731610', borderRadius: 8, padding: '10px 12px' }}>
+          <div style={{ border: '1px solid color-mix(in srgb, var(--high) 20%, transparent)', background: 'color-mix(in srgb, var(--high) 6%, transparent)', borderRadius: 8, padding: '10px 12px' }}>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
               <input type="checkbox" checked={sch.autoExploit} onChange={e => patch({ autoExploit: e.target.checked })}
-                style={{ width: 16, height: 16, marginTop: 1, accentColor: '#f97316' }} />
+                style={{ width: 16, height: 16, marginTop: 1, accentColor: 'var(--high)' }} />
               <span>
-                <span style={{ fontSize: 13, color: '#f97316', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: 13, color: 'var(--high)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <AlertTriangle size={13} /> Exploração autônoma sem aprovação
                 </span>
-                <span style={{ fontSize: 11, color: '#94A3B8', marginTop: 3, display: 'block' }}>
+                <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3, display: 'block' }}>
                   Desligado (recomendado): para nos checkpoints críticos (RCE/SQLi) e registra para o admin aprovar.
                   Ligado: o agente explora ativamente sozinho, sem supervisão.
                 </span>
@@ -139,14 +139,14 @@ export function ScheduleSettings({ engagement, onClose, onUpdated }: {
 
           {/* status */}
           {(sch.lastRunAt || sch.nextRunAt) && (
-            <div style={{ fontSize: 12, color: '#94A3B8', display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
               {status && <div>Último status: <span style={{ color: status.color, fontWeight: 600 }}>{status.label}</span></div>}
               <div>Última execução: {fmt(sch.lastRunAt)}</div>
               {sch.enabled && <div>Próxima execução: {fmt(sch.nextRunAt)}</div>}
             </div>
           )}
 
-          {err && <div style={{ fontSize: 12, color: '#ef4444' }}>{err}</div>}
+          {err && <div style={{ fontSize: 12, color: 'var(--critical)' }}>{err}</div>}
 
           {/* actions */}
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>

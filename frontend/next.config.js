@@ -5,6 +5,9 @@ const isProd = process.env.NODE_ENV === 'production'
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Staging (dev mode, porta separada) usa um distDir próprio — senão o `next dev`
+  // reescreve o mesmo `.next/` que o processo de produção serve, corrompendo-o ao vivo.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   async rewrites() {
     return [
       {

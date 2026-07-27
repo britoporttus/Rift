@@ -25,9 +25,19 @@ export default function ExposurePage() {
   const [hr, setHr] = useState(false)
   const [hrOpen, setHrOpen] = useState(false)
   const [hrText, setHrText] = useState('')
+  const [linkedDomainId, setLinkedDomainId] = useState<string | null>(null)
 
   const load = useCallback(() => api.leaks.get(domain).then(setData).catch(() => router.replace('/vazamentos')).finally(() => setLoading(false)), [domain, router])
   useEffect(() => { load() }, [load])
+
+  // Se este domínio também estiver cadastrado em Domínios (ASM), oferece o
+  // caminho de volta — hoje só existe o link Domínio → Vazamentos, não o inverso.
+  useEffect(() => {
+    api.domains.list().then((list) => {
+      const match = list.find((d) => d.domain.toLowerCase() === domain.toLowerCase())
+      setLinkedDomainId(match ? match.id : null)
+    }).catch(() => {})
+  }, [domain])
 
   async function reSearch() {
     setSearching(true)
@@ -93,6 +103,9 @@ export default function ExposurePage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Link href="/vazamentos" style={{ color: 'var(--purple-light)', fontSize: 13, display: 'inline-flex', gap: 6, alignItems: 'center' }}><ArrowLeft size={15} /> Nova busca</Link>
         <div style={{ display: 'flex', gap: 8 }}>
+          {linkedDomainId && (
+            <Link href={`/dominios/${linkedDomainId}`} style={{ ...btnGhost, textDecoration: 'none' }}><Globe size={13} /> Ver em Domínios</Link>
+          )}
           <button onClick={reSearch} disabled={searching} style={btnGhost}>{searching ? <Loader2 size={13} className="spin" /> : <Search size={13} />} Buscar de novo</button>
           <button onClick={() => setHrOpen(true)} disabled={hr} style={btnGhost} title="Importar dados da Hudson Rock (grátis, via colagem)">{hr ? <Loader2 size={13} className="spin" /> : <Database size={13} />} Hudson Rock</button>
           {isAdmin && <button onClick={doDelete} style={{ ...btnGhost, color: 'var(--text-mute)' }}><Trash2 size={13} /></button>}
@@ -268,7 +281,7 @@ export default function ExposurePage() {
 // ── helpers de UI ─────────────────────────────────────────────────────────────
 const th: React.CSSProperties = { padding: '6px 10px', fontWeight: 600 }
 const td: React.CSSProperties = { padding: '8px 10px' }
-const btnPrimary: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 18px', background: 'var(--purple)', border: 'none', borderRadius: 8, color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow)' }
+const btnPrimary: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 18px', background: 'var(--purple)', border: 'none', borderRadius: 8, color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow-strong)' }
 const btnGhost: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: 'var(--bg)', border: '1px solid var(--border-mid)', borderRadius: 7, color: 'var(--purple-light)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }
 
 function dedupeBreaches(creds: LeakedCredential[]) {
@@ -284,7 +297,7 @@ function RiskRing({ score, level }: { score: number; level: string }) {
   return (
     <div style={{ position: 'relative', width: 132, height: 132, flexShrink: 0 }}>
       <svg width="132" height="132" viewBox="0 0 132 132">
-        <circle cx="66" cy="66" r={r} fill="none" stroke="rgba(124,58,237,0.12)" strokeWidth="9" />
+        <circle cx="66" cy="66" r={r} fill="none" stroke="var(--border)" strokeWidth="9" />
         <circle cx="66" cy="66" r={r} fill="none" stroke={color} strokeWidth="9" strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={off} transform="rotate(-90 66 66)" style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
@@ -344,11 +357,11 @@ function Timeline({ points }: { points: Array<{ month: string; count: number }> 
           <stop offset="100%" stopColor="var(--purple)" stopOpacity="0" />
         </linearGradient>
       </defs>
-      {[0.25, 0.5, 0.75].map((g) => <line key={g} x1={pad} x2={W - pad} y1={pad + g * (H - 2 * pad)} y2={pad + g * (H - 2 * pad)} stroke="rgba(124,58,237,0.08)" strokeWidth="1" />)}
+      {[0.25, 0.5, 0.75].map((g) => <line key={g} x1={pad} x2={W - pad} y1={pad + g * (H - 2 * pad)} y2={pad + g * (H - 2 * pad)} stroke="color-mix(in srgb, var(--purple) 8%, transparent)" strokeWidth="1" />)}
       <polygon points={area} fill="url(#tlg)" />
       <polyline points={line} fill="none" stroke="var(--purple-light)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
       {points.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.count)} r={n > 30 ? 0 : 2.5} fill="var(--purple-light)" />)}
-      {labelIdx.map((i) => <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="#3A3A58" fontFamily="var(--mono)">{points[i].month}</text>)}
+      {labelIdx.map((i) => <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="var(--text-mute)" fontFamily="var(--mono)">{points[i].month}</text>)}
     </svg>
   )
 }

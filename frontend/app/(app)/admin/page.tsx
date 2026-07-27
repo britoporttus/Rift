@@ -13,43 +13,43 @@ function fmtUptime(s: number) {
   return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
-const CpuIco      = (s?: number, c?: string) => <SI s={s || 14} c={c || '#A78BFA'}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></SI>
-const RamIco      = (s?: number, c?: string) => <SI s={s || 14} c={c || '#A78BFA'}><rect x="2" y="7" width="20" height="10" rx="2" /><line x1="6" y1="7" x2="6" y2="17" /><line x1="10" y1="7" x2="10" y2="17" /><line x1="14" y1="7" x2="14" y2="17" /><line x1="18" y1="7" x2="18" y2="17" /></SI>
-const DiskIco     = (s?: number, c?: string) => <SI s={s || 14} c={c || '#A78BFA'}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></SI>
-const ActivityIco = (s?: number, c?: string) => <SI s={s || 14} c={c || '#A78BFA'}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></SI>
-const DollarIco   = (s?: number, c?: string) => <SI s={s || 14} c={c || '#A78BFA'}><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" /></SI>
-const ZapIco      = (s?: number, c?: string) => <SI s={s || 14} c={c || '#A78BFA'}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></SI>
-const RefreshIco  = (s?: number, c?: string) => <SI s={s || 13} c={c || '#94A3B8'}><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" /></SI>
+const CpuIco      = (s?: number, c?: string) => <SI s={s || 14} c={c || 'var(--purple-light)'}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></SI>
+const RamIco      = (s?: number, c?: string) => <SI s={s || 14} c={c || 'var(--purple-light)'}><rect x="2" y="7" width="20" height="10" rx="2" /><line x1="6" y1="7" x2="6" y2="17" /><line x1="10" y1="7" x2="10" y2="17" /><line x1="14" y1="7" x2="14" y2="17" /><line x1="18" y1="7" x2="18" y2="17" /></SI>
+const DiskIco     = (s?: number, c?: string) => <SI s={s || 14} c={c || 'var(--purple-light)'}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></SI>
+const ActivityIco = (s?: number, c?: string) => <SI s={s || 14} c={c || 'var(--purple-light)'}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></SI>
+const DollarIco   = (s?: number, c?: string) => <SI s={s || 14} c={c || 'var(--purple-light)'}><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" /></SI>
+const ZapIco      = (s?: number, c?: string) => <SI s={s || 14} c={c || 'var(--purple-light)'}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></SI>
+const RefreshIco  = (s?: number, c?: string) => <SI s={s || 13} c={c || 'var(--muted)'}><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" /></SI>
 
 const SECTION_LABEL: React.CSSProperties = {
-  color: '#3A3A58', fontSize: 8, marginBottom: 10,
+  color: 'var(--text-mute)', fontSize: 8, marginBottom: 10,
   textTransform: 'uppercase', letterSpacing: '0.18em',
 }
 
 function MetricCard({ icon, title, value, sub }: { icon: React.ReactNode; title: string; value: string; sub?: string }) {
   return (
     <div style={{
-      background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)',
-      borderRadius: 4, padding: '1rem 1.25rem', flex: 1, minWidth: 150,
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, padding: '1rem 1.25rem', flex: 1, minWidth: 150,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         {icon}
-        <span style={{ color: '#94A3B8', fontSize: 11, letterSpacing: '0.06em' }}>{title}</span>
+        <span style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: '0.06em' }}>{title}</span>
       </div>
-      <div style={{ color: value === '—' ? '#3A3A58' : '#E2E8F0', fontSize: 18, fontWeight: 700 }}>{value}</div>
-      {sub && <div style={{ color: '#94A3B8', fontSize: 11, marginTop: 3 }}>{sub}</div>}
+      <div style={{ color: value === '—' ? 'var(--text-mute)' : 'var(--text)', fontSize: 18, fontWeight: 700 }}>{value}</div>
+      {sub && <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 3 }}>{sub}</div>}
     </div>
   )
 }
 
-function Gauge({ value, color = '#7C3AED', label }: { value: number; color?: string; label: string }) {
+function Gauge({ value, color = 'var(--purple)', label }: { value: number; color?: string; label: string }) {
   return (
     <div style={{ flex: 1, minWidth: 80 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94A3B8', marginBottom: 4, letterSpacing: '0.04em' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginBottom: 4, letterSpacing: '0.04em' }}>
         <span>{label}</span>
         <span style={{ color }}>{value}%</span>
       </div>
-      <div style={{ height: 4, background: 'rgba(124,58,237,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+      <div style={{ height: 4, background: 'var(--purple-dim)', borderRadius: 2, overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${value}%`, background: color, borderRadius: 2, transition: 'width 0.4s' }} />
       </div>
     </div>
@@ -86,11 +86,11 @@ export default function AdminPage() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', animation: 'fadeIn 0.2s ease' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '1.75rem 2.5rem 1.5rem', maxWidth: 960 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#E2E8F0', letterSpacing: '-0.01em' }}>Admin</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.01em' }}>Admin</h1>
         <button onClick={refresh} disabled={loading} style={{
           display: 'flex', alignItems: 'center', gap: 5,
-          background: 'none', border: '1px solid rgba(124,58,237,0.2)', borderRadius: 3,
-          color: '#94A3B8', fontSize: 11, padding: '0.4rem 0.75rem',
+          background: 'none', border: '1px solid var(--border-mid)', borderRadius: 3,
+          color: 'var(--muted)', fontSize: 11, padding: '0.4rem 0.75rem',
           cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '0.04em',
         }}>
           <span style={{ animation: loading ? 'spin 1s linear infinite' : 'none', display: 'flex' }}>{RefreshIco()}</span>
@@ -108,10 +108,10 @@ export default function AdminPage() {
           <MetricCard icon={ActivityIco()} title="Uptime" value={metrics ? fmtUptime(metrics.uptime) : '—'} />
         </div>
         {metrics && (
-          <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, padding: '1rem 1.25rem', display: 'flex', gap: '1.5rem' }}>
-            <Gauge value={cpuLoad} color="#7C3AED" label="CPU" />
-            <Gauge value={memPct} color="#3B82F6" label="RAM" />
-            <Gauge value={diskPct} color="#EAB308" label="Disco" />
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1rem 1.25rem', display: 'flex', gap: '1.5rem' }}>
+            <Gauge value={cpuLoad} color="var(--purple)" label="CPU" />
+            <Gauge value={memPct} color="var(--info)" label="RAM" />
+            <Gauge value={diskPct} color="var(--medium)" label="Disco" />
           </div>
         )}
       </div>
@@ -125,27 +125,27 @@ export default function AdminPage() {
         </div>
 
         {usage.length > 0 ? (
-          <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', padding: '0.55rem 1.25rem', borderBottom: '1px solid rgba(124,58,237,0.1)' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', padding: '0.55rem 1.25rem', borderBottom: '1px solid var(--border)' }}>
               {['Data', 'Tokens', 'Custo (USD)'].map((h) => (
-                <div key={h} style={{ color: '#3A3A58', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.14em' }}>{h}</div>
+                <div key={h} style={{ color: 'var(--text-mute)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.14em' }}>{h}</div>
               ))}
             </div>
             {usage.slice(0, 30).map((u) => (
-              <div key={u.date} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', padding: '0.55rem 1.25rem', borderBottom: '1px solid rgba(124,58,237,0.07)', fontSize: 12 }}>
-                <div style={{ color: '#94A3B8' }}>{u.date}</div>
-                <div style={{ color: '#A78BFA' }}>{u.tokens.toLocaleString()}</div>
-                <div style={{ color: '#22C55E' }}>${u.usd.toFixed(4)}</div>
+              <div key={u.date} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', padding: '0.55rem 1.25rem', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                <div style={{ color: 'var(--muted)' }}>{u.date}</div>
+                <div style={{ color: 'var(--purple-light)' }}>{u.tokens.toLocaleString()}</div>
+                <div style={{ color: 'var(--low)' }}>${u.usd.toFixed(4)}</div>
               </div>
             ))}
           </div>
         ) : (
-          <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, padding: '2rem', textAlign: 'center', color: '#3A3A58', fontSize: 12 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '2rem', textAlign: 'center', color: 'var(--text-mute)', fontSize: 12 }}>
             Sem dados de uso ainda.
           </div>
         )}
 
-        <div style={{ color: '#252545', fontSize: 10, marginTop: 6, textAlign: 'right', letterSpacing: '0.04em' }}>
+        <div style={{ color: 'var(--text-dim)', fontSize: 10, marginTop: 6, textAlign: 'right', letterSpacing: '0.04em' }}>
           atualizado em {lastRefresh.toLocaleTimeString('pt-BR')}
         </div>
       </div>
@@ -154,19 +154,19 @@ export default function AdminPage() {
       <div style={{ marginTop: '1.75rem' }}>
         <div style={SECTION_LABEL}>Utilização da SKU</div>
         {!sku ? (
-          <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, padding: '2rem', textAlign: 'center', color: '#3A3A58', fontSize: 12 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '2rem', textAlign: 'center', color: 'var(--text-mute)', fontSize: 12 }}>
             Carregando…
           </div>
         ) : !sku.available ? (
-          <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(234,179,8,0.25)', borderRadius: 4, padding: '1.15rem 1.25rem' }}>
-            <div style={{ color: '#E2E8F0', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid color-mix(in srgb, var(--medium) 25%, transparent)', borderRadius: 12, padding: '1.15rem 1.25rem' }}>
+            <div style={{ color: 'var(--text)', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
               Consumo da SKU indisponível — integração não configurada.
             </div>
-            <div style={{ color: '#94A3B8', fontSize: 11.5, lineHeight: 1.7 }}>
+            <div style={{ color: 'var(--muted)', fontSize: 11.5, lineHeight: 1.7 }}>
               O consumo real registrado é <b>${sku.spentUsd.toFixed(4)}</b> ({sku.tokensTotal.toLocaleString()} tokens),
               mas não há fonte oficial de <b>limite/saldo/período</b> do plano.
               Para habilitar consumo × limite, defina{' '}
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", color: '#A78BFA' }}>SKU_LIMIT_USD</span>{' '}
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--purple-light)' }}>SKU_LIMIT_USD</span>{' '}
               (teto do plano) no backend — ou integre a API oficial de uso/custo da Anthropic. Nenhum valor é simulado.
             </div>
           </div>
@@ -177,14 +177,14 @@ export default function AdminPage() {
               <MetricCard icon={DollarIco()} title="Limite" value={`$${(sku.limitUsd ?? 0).toFixed(2)}`} sub={sku.period ? `período: ${sku.period}` : undefined} />
               <MetricCard icon={DollarIco()} title="Saldo" value={`$${(sku.remainingUsd ?? 0).toFixed(2)}`} />
             </div>
-            <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1rem 1.25rem' }}>
               <Gauge
                 value={sku.percent ?? 0}
-                color={(sku.percent ?? 0) >= 85 ? '#EF4444' : (sku.percent ?? 0) >= 70 ? '#EAB308' : '#7C3AED'}
+                color={(sku.percent ?? 0) >= 85 ? 'var(--critical)' : (sku.percent ?? 0) >= 70 ? 'var(--medium)' : 'var(--purple)'}
                 label="Utilizado"
               />
             </div>
-            <div style={{ color: '#252545', fontSize: 10, marginTop: 6, textAlign: 'right', letterSpacing: '0.04em' }}>
+            <div style={{ color: 'var(--text-dim)', fontSize: 10, marginTop: 6, textAlign: 'right', letterSpacing: '0.04em' }}>
               atualizado em {lastRefresh.toLocaleTimeString('pt-BR')}
             </div>
           </>
@@ -196,7 +196,7 @@ export default function AdminPage() {
         <div style={SECTION_LABEL}>Uso por Usuário</div>
 
         {userUsage.length === 0 ? (
-          <div style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, padding: '2rem', textAlign: 'center', color: '#3A3A58', fontSize: 12 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '2rem', textAlign: 'center', color: 'var(--text-mute)', fontSize: 12 }}>
             Nenhum dado de uso por usuário ainda. Utilize o chat para gerar dados.
           </div>
         ) : (
@@ -204,7 +204,7 @@ export default function AdminPage() {
             {userUsage.map((u) => {
               const uOpen = expandedUser === u.userId
               return (
-                <div key={u.userId} style={{ background: 'rgba(4,4,12,0.97)', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 4, overflow: 'hidden' }}>
+                <div key={u.userId} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
                   {/* User row */}
                   <div
                     onClick={() => { setExpandedUser(uOpen ? null : u.userId); setExpandedDay(null) }}
@@ -212,33 +212,33 @@ export default function AdminPage() {
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(8,4,20,0.97)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <span style={{ fontSize: 11, color: '#3A3A58', width: 14 }}>{uOpen ? '▾' : '▸'}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-mute)', width: 14 }}>{uOpen ? '▾' : '▸'}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ color: '#E2E8F0', fontWeight: 600, fontSize: 12 }}>{u.userName || '—'}</div>
-                      <div style={{ color: '#3A3A58', fontSize: 10, marginTop: 1 }}>{u.userEmail}</div>
+                      <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 12 }}>{u.userName || '—'}</div>
+                      <div style={{ color: 'var(--text-mute)', fontSize: 10, marginTop: 1 }}>{u.userEmail}</div>
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ color: '#A78BFA', fontSize: 12, fontWeight: 600 }}>{u.totalTokens.toLocaleString()} tokens</div>
-                      <div style={{ color: '#22C55E', fontSize: 10, marginTop: 1 }}>${u.totalUsd.toFixed(4)}</div>
+                      <div style={{ color: 'var(--purple-light)', fontSize: 12, fontWeight: 600 }}>{u.totalTokens.toLocaleString()} tokens</div>
+                      <div style={{ color: 'var(--low)', fontSize: 10, marginTop: 1 }}>${u.totalUsd.toFixed(4)}</div>
                     </div>
                   </div>
 
                   {/* Day rows */}
                   {uOpen && (
-                    <div style={{ borderTop: '1px solid rgba(124,58,237,0.08)' }}>
+                    <div style={{ borderTop: '1px solid var(--border)' }}>
                       {u.days.map((d) => {
                         const dayKey = `${u.userId}:${d.date}`
                         const dOpen = expandedDay === dayKey
                         return (
-                          <div key={d.date} style={{ borderBottom: '1px solid rgba(124,58,237,0.06)' }}>
+                          <div key={d.date} style={{ borderBottom: '1px solid var(--border)' }}>
                             <div
                               onClick={() => setExpandedDay(dOpen ? null : dayKey)}
                               style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.55rem 1.4rem', cursor: 'pointer', background: 'rgba(2,2,8,0.5)', transition: 'background 0.1s' }}
                               onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(8,4,20,0.9)')}
                               onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(2,2,8,0.5)')}
                             >
-                              <span style={{ fontSize: 10, color: '#252545', width: 12 }}>{dOpen ? '▾' : '▸'}</span>
-                              <span style={{ flex: 1, color: '#94A3B8', fontSize: 11 }}>{d.date}</span>
+                              <span style={{ fontSize: 10, color: 'var(--text-dim)', width: 12 }}>{dOpen ? '▾' : '▸'}</span>
+                              <span style={{ flex: 1, color: 'var(--muted)', fontSize: 11 }}>{d.date}</span>
                               <span style={{ color: '#7C6AB5', fontSize: 11 }}>{d.tokens.toLocaleString()} tok</span>
                               <span style={{ color: '#1E6B42', fontSize: 11, marginLeft: 12 }}>${d.usd.toFixed(4)}</span>
                             </div>
@@ -247,8 +247,8 @@ export default function AdminPage() {
                             {dOpen && (
                               <div style={{ background: 'rgba(1,1,6,0.7)' }}>
                                 {d.engagements.map((eng) => (
-                                  <div key={eng.engagementId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.4rem 1.7rem', borderBottom: '1px solid rgba(124,58,237,0.04)' }}>
-                                    <span style={{ flex: 1, color: '#3A3A58', fontSize: 10 }}>{eng.engagementName}</span>
+                                  <div key={eng.engagementId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0.4rem 1.7rem', borderBottom: '1px solid var(--border)' }}>
+                                    <span style={{ flex: 1, color: 'var(--text-mute)', fontSize: 10 }}>{eng.engagementName}</span>
                                     <span style={{ color: '#4A3A7A', fontSize: 10 }}>{eng.tokens.toLocaleString()} tok</span>
                                     <span style={{ color: '#1A4A30', fontSize: 10, marginLeft: 12 }}>${eng.usd.toFixed(4)}</span>
                                   </div>

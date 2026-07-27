@@ -1,11 +1,11 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api, UserFull } from '@/lib/api'
 import { useEscapeClose } from '@/hooks/useEscapeClose'
 import { SI } from '@/components/ui/SI'
 
-const UserIco     = (s?: number, c?: string) => <SI s={s || 12} c={c || '#94A3B8'}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></SI>
-const CircleIco   = (s?: number, c?: string) => <SI s={s || 12} c={c || '#94A3B8'}><circle cx="12" cy="12" r="10" /></SI>
+const UserIco     = (s?: number, c?: string) => <SI s={s || 12} c={c || 'var(--muted)'}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></SI>
+const CircleIco   = (s?: number, c?: string) => <SI s={s || 12} c={c || 'var(--muted)'}><circle cx="12" cy="12" r="10" /></SI>
 const KeyIco      = (s?: number, c?: string) => <SI s={s || 12} c={c}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" /></SI>
 const UserPlusIco = (s?: number, c?: string) => <SI s={s || 13} c={c || 'white'}><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="8.5" cy="7" r="4" /><line x1="20" y1="8" x2="20" y2="14" /><line x1="23" y1="11" x2="17" y2="11" /></SI>
 const PencilIco   = (s?: number, c?: string) => <SI s={s || 12} c={c}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></SI>
@@ -36,8 +36,8 @@ function initials(name: string) {
 }
 
 const inputStyle: React.CSSProperties = {
-  background: 'rgba(2,2,8,0.9)', border: '1px solid rgba(124,58,237,0.2)', borderRadius: 5,
-  color: '#E2E8F0', fontSize: 12, padding: '4px 8px', outline: 'none', fontFamily: 'inherit',
+  background: 'rgba(2,2,8,0.9)', border: '1px solid var(--border-mid)', borderRadius: 5,
+  color: 'var(--text)', fontSize: 12, padding: '4px 8px', outline: 'none', fontFamily: 'inherit',
   width: '100%',
 }
 
@@ -62,16 +62,16 @@ function ActionBtn({ onClick, title, bg, border, color, children }: {
 function StatCard({ label, value, sub }: { label: string; value: number; sub?: string }) {
   return (
     <div style={{
-      background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.13)',
+      background: 'var(--surface)', border: '1px solid var(--border)',
       borderRadius: 8, padding: '0.75rem 1rem',
     }}>
-      <div style={{ fontSize: 9, fontWeight: 600, color: '#3A3A58', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6 }}>
+      <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-mute)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6 }}>
         {label}
       </div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: '#A78BFA', fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>
+      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--purple-light)', fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>
         {value}
       </div>
-      {sub && <div style={{ fontSize: 10, color: '#3A3A58', marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 10, color: 'var(--text-mute)', marginTop: 4 }}>{sub}</div>}
     </div>
   )
 }
@@ -157,7 +157,7 @@ export default function UsersPage() {
 
   const TH: React.CSSProperties = {
     padding: '0.6rem 1rem', fontSize: 9, fontWeight: 600, letterSpacing: '0.1em',
-    color: '#3A3A58', textAlign: 'left', textTransform: 'uppercase' as const,
+    color: 'var(--text-mute)', textAlign: 'left', textTransform: 'uppercase' as const,
   }
   const TD: React.CSSProperties = {
     padding: '0.75rem 1rem', verticalAlign: 'middle',
@@ -178,16 +178,16 @@ export default function UsersPage() {
 
       {/* Table header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+        <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           Usuários
         </span>
         <button
           onClick={() => setShowAdd(true)}
           style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '0.45rem 1rem',
-            background: '#7C3AED', border: 'none', borderRadius: 5, cursor: 'pointer',
+            background: 'var(--purple)', border: 'none', borderRadius: 5, cursor: 'pointer',
             fontFamily: 'inherit', fontSize: 12, fontWeight: 600, color: 'white',
-            boxShadow: '0 0 18px rgba(124,58,237,0.35)',
+            boxShadow: '0 0 18px var(--purple-glow-strong)',
           }}
         >
           {UserPlusIco()} Adicionar usuário
@@ -195,15 +195,15 @@ export default function UsersPage() {
       </div>
 
       {error && (
-        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444', padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: 12 }}>
+        <div style={{ background: 'color-mix(in srgb, var(--critical) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--critical) 30%, transparent)', color: 'var(--critical)', padding: '0.5rem 0.75rem', borderRadius: 8, fontSize: 12 }}>
           {error}
         </div>
       )}
 
       {loading ? (
-        <div style={{ color: '#3A3A58', padding: '2rem', fontSize: 12, letterSpacing: '0.1em' }}>CARREGANDO...</div>
+        <div style={{ color: 'var(--text-mute)', padding: '2rem', fontSize: 12, letterSpacing: '0.1em' }}>CARREGANDO...</div>
       ) : (
-        <div style={{ background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.13)', borderRadius: 8, overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px 160px 80px 80px 68px' }}>
             {/* Header */}
             {['NOME', 'EMAIL', 'ROLE', 'PROVIDER', 'ÚLTIMO LOGIN', 'CRIADO EM', ''].map((h, i) => (
@@ -211,7 +211,7 @@ export default function UsersPage() {
             ))}
             {/* Rows */}
             {users.map((u, idx) => (
-              <>
+              <Fragment key={u.id}>
                 <div key={`${u.id}-name`} style={{ ...TD, animation: `rowIn 0.3s ease both`, animationDelay: `${idx * 50}ms` }}>
                   {editId === u.id ? (
                     <input style={{ ...inputStyle, width: 140 }} value={editName} onChange={(ev) => setEditName(ev.target.value)} />
@@ -219,18 +219,18 @@ export default function UsersPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{
                         width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                        background: 'rgba(124,58,237,0.10)', border: '1px solid rgba(124,58,237,0.28)',
+                        background: 'var(--purple-dim)', border: '1px solid var(--border-mid)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 9, fontWeight: 700, color: '#A78BFA',
+                        fontSize: 9, fontWeight: 700, color: 'var(--purple-light)',
                       }}>
                         {initials(u.name)}
                       </div>
-                      <span style={{ color: '#E2E8F0', fontWeight: 600, fontSize: 12 }}>{u.name}</span>
+                      <span style={{ color: 'var(--text)', fontWeight: 600, fontSize: 12 }}>{u.name}</span>
                     </div>
                   )}
                 </div>
                 <div key={`${u.id}-email`} style={{ ...TD }}>
-                  <span style={{ color: '#94A3B8', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{u.email}</span>
+                  <span style={{ color: 'var(--muted)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{u.email}</span>
                 </div>
                 <div key={`${u.id}-role`} style={{ ...TD }}>
                   {editId === u.id ? (
@@ -242,9 +242,9 @@ export default function UsersPage() {
                     <span style={{
                       display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10,
                       padding: '2px 8px', borderRadius: 99,
-                      background: u.role === 'admin' ? 'rgba(124,58,237,0.10)' : 'rgba(28,28,52,0.6)',
-                      border: `1px solid ${u.role === 'admin' ? 'rgba(124,58,237,0.28)' : 'rgba(50,50,80,0.4)'}`,
-                      color: u.role === 'admin' ? '#A78BFA' : '#94A3B8',
+                      background: u.role === 'admin' ? 'var(--purple-dim)' : 'rgba(28,28,52,0.6)',
+                      border: `1px solid ${u.role === 'admin' ? 'var(--border-mid)' : 'rgba(50,50,80,0.4)'}`,
+                      color: u.role === 'admin' ? 'var(--purple-light)' : 'var(--muted)',
                     }}>
                       {u.role === 'admin' ? CircleIco(10, 'currentColor') : UserIco(10, 'currentColor')}
                       {u.role}
@@ -256,9 +256,9 @@ export default function UsersPage() {
                     <span style={{
                       display: 'inline-flex', alignItems: 'center', gap: 5,
                       padding: '3px 9px', borderRadius: 99, fontSize: 10,
-                      background: 'rgba(124,58,237,0.10)',
-                      border: '1px solid rgba(124,58,237,0.28)',
-                      color: '#A78BFA',
+                      background: 'var(--purple-dim)',
+                      border: '1px solid var(--border-mid)',
+                      color: 'var(--purple-light)',
                     }}>
                       <MicrosoftLogo />
                       Microsoft SSO
@@ -269,55 +269,55 @@ export default function UsersPage() {
                       padding: '3px 9px', borderRadius: 99, fontSize: 10,
                       background: 'rgba(28,28,52,0.6)',
                       border: '1px solid rgba(50,50,80,0.4)',
-                      color: '#94A3B8',
+                      color: 'var(--muted)',
                     }}>
                       Local
                     </span>
                   )}
                 </div>
-                <div key={`${u.id}-last`} style={{ ...TD, fontSize: 11, color: '#94A3B8' }}>{formatDate(u.lastLogin)}</div>
-                <div key={`${u.id}-created`} style={{ ...TD, fontSize: 11, color: '#94A3B8' }}>{formatDate(u.createdAt)}</div>
+                <div key={`${u.id}-last`} style={{ ...TD, fontSize: 11, color: 'var(--muted)' }}>{formatDate(u.lastLogin)}</div>
+                <div key={`${u.id}-created`} style={{ ...TD, fontSize: 11, color: 'var(--muted)' }}>{formatDate(u.createdAt)}</div>
                 <div key={`${u.id}-actions`} style={{ ...TD, textAlign: 'right' }}>
                   {deleteId === u.id ? (
                     <span style={{ display: 'flex', gap: 5, justifyContent: 'flex-end', alignItems: 'center' }}>
-                      <span style={{ color: '#94A3B8', fontSize: 10, marginRight: 2 }}>Confirmar?</span>
-                      <ActionBtn onClick={() => handleDelete(u.id)} bg="rgba(239,68,68,0.15)" border="rgba(239,68,68,0.5)" color="#EF4444">
+                      <span style={{ color: 'var(--muted)', fontSize: 10, marginRight: 2 }}>Confirmar?</span>
+                      <ActionBtn onClick={() => handleDelete(u.id)} bg="color-mix(in srgb, var(--critical) 15%, transparent)" border="color-mix(in srgb, var(--critical) 50%, transparent)" color="var(--critical)">
                         {CheckIco(12, 'currentColor')}
                       </ActionBtn>
-                      <ActionBtn onClick={() => setDeleteId(null)} bg="rgba(124,58,237,0.1)" border="rgba(124,58,237,0.3)" color="#A78BFA">
+                      <ActionBtn onClick={() => setDeleteId(null)} bg="var(--purple-dim)" border="var(--border-mid)" color="var(--purple-light)">
                         {XIco(12, 'currentColor')}
                       </ActionBtn>
                     </span>
                   ) : editId === u.id ? (
                     <span style={{ display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
-                      <ActionBtn onClick={() => handleEditSave(u.id)} bg="rgba(34,197,94,0.12)" border="rgba(34,197,94,0.4)" color="#22C55E">
+                      <ActionBtn onClick={() => handleEditSave(u.id)} bg="color-mix(in srgb, var(--low) 12%, transparent)" border="color-mix(in srgb, var(--low) 40%, transparent)" color="var(--low)">
                         {CheckIco(12, 'currentColor')}
                       </ActionBtn>
-                      <ActionBtn onClick={() => setEditId(null)} bg="rgba(124,58,237,0.1)" border="rgba(124,58,237,0.3)" color="#A78BFA">
+                      <ActionBtn onClick={() => setEditId(null)} bg="var(--purple-dim)" border="var(--border-mid)" color="var(--purple-light)">
                         {XIco(12, 'currentColor')}
                       </ActionBtn>
                     </span>
                   ) : (
                     <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                      <ActionBtn onClick={() => startEdit(u)} title="Editar" bg="rgba(124,58,237,0.14)" border="rgba(124,58,237,0.38)" color="#A78BFA">
+                      <ActionBtn onClick={() => startEdit(u)} title="Editar" bg="color-mix(in srgb, var(--purple) 14%, transparent)" border="color-mix(in srgb, var(--purple) 38%, transparent)" color="var(--purple-light)">
                         {PencilIco(12, 'currentColor')}
                       </ActionBtn>
                       {u.provider === 'local' && (
                         <ActionBtn
                           onClick={() => { setResetId(u.id); setResetPwd(''); setResetErr(''); setResetOk(false) }}
                           title="Redefinir senha"
-                          bg="rgba(124,58,237,0.14)" border="rgba(124,58,237,0.38)" color="#A78BFA"
+                          bg="color-mix(in srgb, var(--purple) 14%, transparent)" border="color-mix(in srgb, var(--purple) 38%, transparent)" color="var(--purple-light)"
                         >
                           {KeyIco(12, 'currentColor')}
                         </ActionBtn>
                       )}
-                      <ActionBtn onClick={() => setDeleteId(u.id)} title="Remover" bg="rgba(239,68,68,0.1)" border="rgba(239,68,68,0.36)" color="#EF4444">
+                      <ActionBtn onClick={() => setDeleteId(u.id)} title="Remover" bg="color-mix(in srgb, var(--critical) 10%, transparent)" border="color-mix(in srgb, var(--critical) 36%, transparent)" color="var(--critical)">
                         {TrashIco(12, 'currentColor')}
                       </ActionBtn>
                     </span>
                   )}
                 </div>
-              </>
+              </Fragment>
             ))}
           </div>
         </div>
@@ -327,23 +327,23 @@ export default function UsersPage() {
       {resetId && (
         <Modal onClose={() => { setResetId(null); setResetPwd(''); setResetErr(''); setResetOk(false) }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: '#E2E8F0', fontSize: 13 }}>
-              {KeyIco(14, '#A78BFA')} Redefinir senha
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: 'var(--text)', fontSize: 13 }}>
+              {KeyIco(14, 'var(--purple-light)')} Redefinir senha
             </span>
-            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: 2, display: 'flex', alignItems: 'center' }}
+            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 2, display: 'flex', alignItems: 'center' }}
               onClick={() => { setResetId(null); setResetPwd(''); setResetErr(''); setResetOk(false) }}>
-              {XIco(16, '#94A3B8')}
+              {XIco(16, 'var(--muted)')}
             </button>
           </div>
           {resetOk ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '1rem 0' }}>
-              {CheckIco(28, '#22C55E')}
-              <span style={{ color: '#22C55E', fontSize: 13, fontWeight: 600 }}>Senha redefinida com sucesso</span>
+              {CheckIco(28, 'var(--low)')}
+              <span style={{ color: 'var(--low)', fontSize: 13, fontWeight: 600 }}>Senha redefinida com sucesso</span>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
-                <label htmlFor="reset-pwd" style={{ fontSize: 10, color: '#3A3A58', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Nova senha</label>
+                <label htmlFor="reset-pwd" style={{ fontSize: 10, color: 'var(--text-mute)', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Nova senha</label>
                 <input
                   id="reset-pwd"
                   style={inputStyle}
@@ -354,19 +354,19 @@ export default function UsersPage() {
                   onChange={(e) => { setResetPwd(e.target.value); setResetErr('') }}
                   onKeyDown={(e) => e.key === 'Enter' && handleResetPassword(resetId)}
                 />
-                <span style={{ fontSize: 10, color: '#3A3A58', marginTop: 3, display: 'block' }}>Mínimo 6 caracteres</span>
+                <span style={{ fontSize: 10, color: 'var(--text-mute)', marginTop: 3, display: 'block' }}>Mínimo 6 caracteres</span>
               </div>
               {resetErr && <ErrorMsg>{resetErr}</ErrorMsg>}
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                 <button type="button" onClick={() => handleResetPassword(resetId)} style={{
-                  flex: 1, background: '#7C3AED', color: '#fff', border: 'none',
+                  flex: 1, background: 'var(--purple)', color: '#fff', border: 'none',
                   borderRadius: 5, padding: '0.5rem', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                 }}>
                   Redefinir
                 </button>
                 <button type="button" onClick={() => { setResetId(null); setResetPwd(''); setResetErr(''); setResetOk(false) }} style={{
-                  flex: 1, background: 'transparent', color: '#94A3B8',
-                  border: '1px solid rgba(124,58,237,0.2)', borderRadius: 5, padding: '0.5rem',
+                  flex: 1, background: 'transparent', color: 'var(--muted)',
+                  border: '1px solid var(--border-mid)', borderRadius: 5, padding: '0.5rem',
                   fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
                 }}>
                   Cancelar
@@ -381,10 +381,10 @@ export default function UsersPage() {
       {showAdd && (
         <Modal onClose={() => { setShowAdd(false); setAddError('') }} width={400}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <span style={{ fontWeight: 600, color: '#E2E8F0', fontSize: 13 }}>Adicionar usuário</span>
-            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', padding: 2, display: 'flex', alignItems: 'center' }}
+            <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: 13 }}>Adicionar usuário</span>
+            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 2, display: 'flex', alignItems: 'center' }}
               onClick={() => { setShowAdd(false); setAddError('') }}>
-              {XIco(16, '#94A3B8')}
+              {XIco(16, 'var(--muted)')}
             </button>
           </div>
           <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -392,7 +392,7 @@ export default function UsersPage() {
               const label = { nome: 'Nome', email: 'Email', senha: 'Senha', role: 'Role' }[field]
               return (
                 <div key={field}>
-                  <label htmlFor={`add-user-${field}`} style={{ fontSize: 10, color: '#3A3A58', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</label>
+                  <label htmlFor={`add-user-${field}`} style={{ fontSize: 10, color: 'var(--text-mute)', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</label>
                   {field === 'role' ? (
                     <select id={`add-user-${field}`} style={inputStyle} value={addForm.role} onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as 'admin' | 'user' }))}>
                       <option value="user">user</option>
@@ -418,14 +418,14 @@ export default function UsersPage() {
             {addError && <ErrorMsg>{addError}</ErrorMsg>}
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
               <button type="submit" disabled={addLoading} style={{
-                flex: 1, background: '#7C3AED', color: '#fff', border: 'none',
+                flex: 1, background: 'var(--purple)', color: '#fff', border: 'none',
                 borderRadius: 5, padding: '0.5rem', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
               }}>
                 {addLoading ? 'Criando...' : 'Criar usuário'}
               </button>
               <button type="button" onClick={() => { setShowAdd(false); setAddError('') }} style={{
-                flex: 1, background: 'transparent', color: '#94A3B8',
-                border: '1px solid rgba(124,58,237,0.2)', borderRadius: 5, padding: '0.5rem',
+                flex: 1, background: 'transparent', color: 'var(--muted)',
+                border: '1px solid var(--border-mid)', borderRadius: 5, padding: '0.5rem',
                 fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
               }}>
                 Cancelar
@@ -456,7 +456,7 @@ function Modal({ children, onClose, width = 360 }: { children: React.ReactNode; 
         aria-modal="true"
         tabIndex={-1}
         style={{
-          background: '#0C0C1A', border: '1px solid rgba(124,58,237,0.2)',
+          background: 'var(--surface)', border: '1px solid var(--border-mid)',
           borderRadius: 8, padding: '1.5rem', width,
         }}
         onClick={(e) => e.stopPropagation()}
@@ -469,7 +469,7 @@ function Modal({ children, onClose, width = 360 }: { children: React.ReactNode; 
 
 function ErrorMsg({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444', padding: '0.4rem 0.65rem', borderRadius: 5, fontSize: 11 }}>
+    <div style={{ background: 'color-mix(in srgb, var(--critical) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--critical) 30%, transparent)', color: 'var(--critical)', padding: '0.4rem 0.65rem', borderRadius: 5, fontSize: 11 }}>
       {children}
     </div>
   )

@@ -102,7 +102,7 @@ export default function VazamentosPage() {
             placeholder="penso.com.br" style={{ ...inputStyle, width: '100%', paddingLeft: 38 }} />
         </div>
         <button onClick={doSearch} disabled={searching || !query.trim()}
-          style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '10px 20px', background: 'var(--purple)', border: 'none', borderRadius: 8, color: 'white', fontSize: 13.5, fontWeight: 700, cursor: searching ? 'default' : 'pointer', opacity: searching || !query.trim() ? 0.6 : 1, fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow)' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '10px 20px', background: 'var(--purple)', border: 'none', borderRadius: 8, color: 'white', fontSize: 13.5, fontWeight: 700, cursor: searching ? 'default' : 'pointer', opacity: searching || !query.trim() ? 0.6 : 1, fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow-strong)' }}>
           {searching ? <Loader2 size={15} className="spin" /> : <Search size={15} />} Buscar
         </button>
       </div>
@@ -129,7 +129,7 @@ export default function VazamentosPage() {
               return (
                 <div key={s.id} {...clickableDivProps(() => router.push(`/vazamentos/${encodeURIComponent(s.domain)}`))}
                   onMouseEnter={() => setHovered(s.id)} onMouseLeave={() => setHovered(null)}
-                  style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none' }}>
+                  style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px var(--purple-glow-strong)' : 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.domain}</div>
                     <div style={{ textAlign: 'center', flexShrink: 0 }}>

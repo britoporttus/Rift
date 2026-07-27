@@ -24,8 +24,8 @@ function TopBar({ pageName }: { pageName: string }) {
   return (
     <div style={{
       height: 52, flexShrink: 0,
-      background: '#050510',
-      borderBottom: '1px solid rgba(124,58,237,0.13)',
+      background: 'var(--panel)',
+      borderBottom: '1px solid var(--border)',
       display: 'flex', alignItems: 'center',
       padding: '0 1.75rem',
       gap: 12,
@@ -33,11 +33,11 @@ function TopBar({ pageName }: { pageName: string }) {
     }}>
       {/* Breadcrumb */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 11, color: '#3A3A58', letterSpacing: '0.04em' }}>Rift</span>
+        <span style={{ fontSize: 11, color: 'var(--text-mute)', letterSpacing: '0.04em' }}>Rift</span>
         {pageName && (
           <>
-            <span style={{ fontSize: 11, color: '#3A3A58' }}>›</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#E2E8F0' }}>{pageName}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-mute)' }}>›</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{pageName}</span>
           </>
         )}
       </div>
@@ -46,11 +46,11 @@ function TopBar({ pageName }: { pageName: string }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
-            width: 5, height: 5, borderRadius: '50%', background: '#22C55E',
+            width: 5, height: 5, borderRadius: '50%', background: 'var(--low)',
             animation: 'pulse 2.5s ease-in-out infinite',
-            boxShadow: '0 0 5px rgba(34,197,94,0.6)',
+            boxShadow: '0 0 5px color-mix(in srgb, var(--low) 60%, transparent)',
           }} />
-          <span style={{ fontSize: 10.5, color: '#3A3A58', letterSpacing: '0.06em' }}>Sistema online</span>
+          <span style={{ fontSize: 10.5, color: 'var(--text-mute)', letterSpacing: '0.06em' }}>Sistema online</span>
         </div>
       </div>
     </div>
@@ -73,7 +73,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100vh', background: '#080810', color: '#3A3A58', fontSize: 12,
+        height: '100vh', background: 'var(--bg)', color: 'var(--text-mute)', fontSize: 12,
         letterSpacing: '0.1em',
       }}>
         LOADING...
@@ -84,7 +84,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#080810', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
       <Sidebar
         user={user}
         collapsed={collapsed}

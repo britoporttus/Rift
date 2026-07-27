@@ -5,19 +5,21 @@ import { User } from '@/lib/api'
 import { SI } from '@/components/ui/SI'
 
 const C = {
-  bg: '#080810',
-  surface: '#050510',
-  panel: '#050510',
-  border: 'rgba(124,58,237,0.13)',
-  borderMid: 'rgba(124,58,237,0.28)',
-  purple: '#7C3AED',
-  purpleL: '#A78BFA',
-  purpleDim: 'rgba(124,58,237,0.10)',
-  text: '#E2E8F0',
-  textSub: '#94A3B8',
-  textMute: '#3A3A58',
-  green: '#22C55E',
-  red: '#EF4444',
+  bg: 'var(--bg)',
+  surface: 'var(--panel)',
+  panel: 'var(--panel)',
+  border: 'var(--border)',
+  borderMid: 'var(--border-mid)',
+  purple: 'var(--purple)',
+  purpleD: 'var(--purple-dark)',
+  purpleL: 'var(--purple-light)',
+  purpleDim: 'var(--purple-dim)',
+  purpleGlowStrong: 'var(--purple-glow-strong)',
+  text: 'var(--text)',
+  textSub: 'var(--muted)',
+  textMute: 'var(--text-mute)',
+  green: 'var(--low)',
+  red: 'var(--critical)',
 }
 
 const Ico = {
@@ -88,9 +90,9 @@ export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
         {/* Crosshair icon box */}
         <div style={{
           width: 28, height: 28, borderRadius: 7,
-          background: C.purple,
+          background: `linear-gradient(140deg, ${C.purple}, ${C.purpleD})`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
+          flexShrink: 0, boxShadow: `0 0 14px ${C.purpleGlowStrong}`,
         }}>
           {Ico.crosshair(16, 'white')}
         </div>
