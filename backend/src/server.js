@@ -25,6 +25,7 @@ const settingsRouter = require('./api/settings')
 const domainsRouter = require('./api/domains')
 const leaksRouter = require('./api/leaks')
 const graphRouter = require('./api/graph')
+const internalNetworksRouter = require('./api/internal-networks')
 const asmScanner = require('./asm/scanner')
 const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
@@ -143,6 +144,9 @@ app.use(cors({
   },
   credentials: true,
 }))
+// A coleta do agente de rede interna (scan de /24) é maior que o teto padrão.
+// Parser dedicado ANTES do global — express.json não re-parseia se já parseado.
+app.use('/api/internal-networks/ingest', express.json({ limit: process.env.INTERNAL_INGEST_LIMIT || '8mb' }))
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
 
@@ -158,6 +162,7 @@ app.use('/api/settings', settingsRouter)
 app.use('/api/domains', domainsRouter)
 app.use('/api/leaks', leaksRouter)
 app.use('/api/graph', graphRouter)
+app.use('/api/internal-networks', internalNetworksRouter)
 
 // REL-1: 404 de API + middleware de erro global (DEPOIS das rotas). Sem o error
 // handler, a rejeição async capturada por express-async-errors não teria destino.

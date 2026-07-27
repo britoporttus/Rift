@@ -27,6 +27,7 @@ const Ico = {
   grid:      (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></SI>,
   globe:     (s?: number, c?: string) => <SI s={s || 14} c={c}><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" /></SI>,
   database:  (s?: number, c?: string) => <SI s={s || 14} c={c}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></SI>,
+  network:   (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="9" y="2" width="6" height="6" rx="1" /><rect x="2" y="16" width="6" height="6" rx="1" /><rect x="16" y="16" width="6" height="6" rx="1" /><path d="M12 8v4" /><path d="M12 12H5v4" /><path d="M12 12h7v4" /></SI>,
   share2:    (s?: number, c?: string) => <SI s={s || 14} c={c}><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></SI>,
   alert:     (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></SI>,
   file:      (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></SI>,
@@ -40,6 +41,7 @@ const Ico = {
 const NAV_ALL = [
   { href: '/dashboard',   icon: 'grid'     as const, label: 'Dashboard',  adminOnly: false },
   { href: '/dominios',    icon: 'globe'    as const, label: 'Domínios',   adminOnly: false },
+  { href: '/rede-interna', icon: 'network' as const, label: 'Rede Interna', adminOnly: false },
   { href: '/vazamentos',  icon: 'database' as const, label: 'Vazamentos', adminOnly: false },
   { href: '/mapa',        icon: 'share2'   as const, label: 'Mapa',       adminOnly: false },
   { href: '/findings',    icon: 'alert'    as const, label: 'Findings',   adminOnly: false },

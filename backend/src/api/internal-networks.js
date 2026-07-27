@@ -1,0 +1,149 @@
+const { Router } = require('express')
+const fs = require('fs')
+const path = require('path')
+const crypto = require('crypto')
+const { requireAuth } = require('../auth')
+const InternalNetwork = require('../models/InternalNetwork')
+const InternalHost = require('../models/InternalHost')
+const InternalScan = require('../models/InternalScan')
+const { ingestReport } = require('../internal/ingest')
+
+const router = Router()
+
+// Script do agente carregado 1x (sem segredo embutido — o token vai por env).
+const AGENT_SCRIPT = (() => {
+  try { return fs.readFileSync(path.join(__dirname, '..', 'internal', 'agent-template.py'), 'utf8') }
+  catch { return '# agente indisponível\n' }
+})()
+
+function toDto(d) {
+  const o = d.toObject ? d.toObject() : d
+  const dto = { ...o, id: o._id, _id: undefined }
+  delete dto.enrollToken   // NUNCA expor o token nos DTOs normais — só via /agent-command (admin)
+  return dto
+}
+
+// ── Rotas do AGENTE — auth por TOKEN (não cookie). ANTES do requireAuth global ──
+// O agente roda dentro da rede do cliente e não tem sessão; autentica pelo
+// enrollToken da rede. O parser JSON grande desta rota é montado no server.js.
+router.post('/ingest', async (req, res) => {
+  const token = String(req.headers['x-rift-agent-token'] || '')
+  if (!token) return res.status(401).json({ error: 'token ausente' })
+  const net = await InternalNetwork.findOne({ enrollToken: token })
+  if (!net) return res.status(401).json({ error: 'token inválido' })
+  if (!net.authorized) return res.status(403).json({ error: 'rede não autorizada — autorize no painel antes de coletar' })
+
+  try {
+    const result = await ingestReport(net._id, req.body || {}, { trigger: req.body?.trigger })
+    res.status(202).json({ ok: true, ...result })
+  } catch (err) {
+    console.error('[internal:ingest]', err?.message)
+    res.status(500).json({ error: 'falha ao processar coleta' })
+  }
+})
+
+// Script do agente — público (não contém segredo; o token vai separado por env).
+router.get('/agent-script', (_req, res) => {
+  res.type('text/x-python').send(AGENT_SCRIPT)
+})
+
+// ── Daqui pra baixo: auth por cookie (operador logado) ──────────────────────────
+router.use(requireAuth())
+
+router.get('/', async (_req, res) => {
+  const list = await InternalNetwork.find().sort({ updatedAt: -1 }).lean()
+  res.json(list.map((d) => { const { enrollToken, ...rest } = d; return { ...rest, id: d._id } }))
+})
+
+router.post('/', async (req, res) => {
+  const name = (req.body?.name || '').toString().trim().slice(0, 120)
+  if (!name) return res.status(400).json({ error: 'Nome da rede é obrigatório' })
+  const kind = ['lan', 'dmz', 'cloud', 'other'].includes(req.body?.kind) ? req.body.kind : 'lan'
+  const authorized = req.body?.authorized === true
+  const created = await InternalNetwork.create({
+    name, kind,
+    description: req.body?.description ? String(req.body.description).slice(0, 500) : null,
+    authorized,
+    authorizedBy: authorized ? (req.user?.name || req.user?.email || 'operador') : null,
+    authorizedAt: authorized ? new Date() : null,
+    authorizationNote: req.body?.authorizationNote ? String(req.body.authorizationNote).slice(0, 300) : null,
+  })
+  res.status(201).json(toDto(created))
+})
+
+router.get('/:id', async (req, res) => {
+  const d = await InternalNetwork.findById(req.params.id)
+  if (!d) return res.status(404).json({ error: 'not found' })
+  res.json(toDto(d))
+})
+
+router.patch('/:id', async (req, res) => {
+  const patch = {}
+  if (req.body?.name != null) patch.name = String(req.body.name).slice(0, 120)
+  if (['lan', 'dmz', 'cloud', 'other'].includes(req.body?.kind)) patch.kind = req.body.kind
+  if (req.body?.description != null) patch.description = String(req.body.description).slice(0, 500)
+  const d = await InternalNetwork.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
+  if (!d) return res.status(404).json({ error: 'not found' })
+  res.json(toDto(d))
+})
+
+router.delete('/:id', requireAuth(['admin']), async (req, res) => {
+  const d = await InternalNetwork.findByIdAndDelete(req.params.id)
+  if (!d) return res.status(404).json({ error: 'not found' })
+  await Promise.all([
+    InternalHost.deleteMany({ networkId: req.params.id }),
+    InternalScan.deleteMany({ networkId: req.params.id }),
+  ])
+  res.status(204).end()
+})
+
+// Gate legal — o operador confirma que tem permissão de escanear a rede.
+router.patch('/:id/authorization', requireAuth(['admin']), async (req, res) => {
+  const authorized = !!req.body?.authorized
+  const patch = {
+    authorized,
+    authorizedBy: authorized ? (req.user?.name || req.user?.email || 'admin') : null,
+    authorizedAt: authorized ? new Date() : null,
+    authorizationNote: req.body?.note ? String(req.body.note).slice(0, 300) : null,
+  }
+  const d = await InternalNetwork.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
+  if (!d) return res.status(404).json({ error: 'not found' })
+  res.json(toDto(d))
+})
+
+router.get('/:id/hosts', async (req, res) => {
+  const list = await InternalHost.find({ networkId: req.params.id }).sort({ severity: 1, ip: 1 }).lean()
+  res.json(list.map((h) => ({ ...h, id: h._id })))
+})
+
+router.get('/:id/history', async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200)
+  const list = await InternalScan.find({ networkId: req.params.id }).sort({ ranAt: -1 }).limit(limit).lean()
+  res.json(list.map((s) => ({ ...s, id: s._id })))
+})
+
+// Regera o token (invalida o agente antigo) — admin.
+router.post('/:id/regenerate-token', requireAuth(['admin']), async (req, res) => {
+  const token = crypto.randomBytes(24).toString('hex')
+  const d = await InternalNetwork.findByIdAndUpdate(req.params.id, { $set: { enrollToken: token } }, { new: true })
+  if (!d) return res.status(404).json({ error: 'not found' })
+  res.json({ ok: true, token })
+})
+
+// Comando do agente (com token em claro) — só admin pode ver o token.
+router.get('/:id/agent-command', requireAuth(['admin']), async (req, res) => {
+  const d = await InternalNetwork.findById(req.params.id)
+  if (!d) return res.status(404).json({ error: 'not found' })
+  // Origem que o operador acessou (respeita proxy do Next) → URL correta no comando.
+  const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0]
+  const host = (req.headers['x-forwarded-host'] || req.headers.host || 'localhost')
+  const base = `${proto}://${host}`
+  res.json({
+    token: d.enrollToken,
+    scriptUrl: `${base}/api/internal-networks/agent-script`,
+    command: `curl -s ${base}/api/internal-networks/agent-script -o rift-agente.py && RIFT_URL=${base} RIFT_TOKEN=${d.enrollToken} sudo -E python3 rift-agente.py`,
+    watchHint: `# contínuo (a cada 15 min): acrescente --watch 900 ao final`,
+  })
+})
+
+module.exports = router
