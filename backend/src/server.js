@@ -29,6 +29,7 @@ const asmScanner = require('./asm/scanner')
 const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
 const scheduler = require('./scheduler')
+const asmScheduler = require('./asm-scheduler')
 const jobsWorker = require('./jobs-worker')
 const { getEngagement, updateEngagement, appendUsage, sumUsageUsd, countFindings } = require('./store')
 const { deriveRunOutcome } = require('./run-outcome')
@@ -873,6 +874,9 @@ connect()
     scheduler.start()
     // Worker de Jobs: o único a despachar runs agendados/headless (lê a fila a cada ~2s).
     jobsWorker.start()
+    // Monitoramento contínuo do ASM (re-scan recorrente de domínios) — sem fila,
+    // ver asm-scheduler.js.
+    asmScheduler.start()
   })
   .catch((err) => {
     console.error('[db] falha ao conectar MongoDB:', err.message)

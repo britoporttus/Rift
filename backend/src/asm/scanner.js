@@ -17,6 +17,7 @@ const DomainAsset = require('../models/DomainAsset')
 const LeakedCredential = require('../models/LeakedCredential')
 const { runTool, hasBin } = require('./binaries')
 const { computeScore } = require('./score')
+const { computeAssetDiff } = require('./diff')
 const { isBlockedIp } = require('../net-guard')
 
 const MAX_PROBE_HOSTS = Number(process.env.ASM_MAX_HOSTS) || 400
@@ -169,6 +170,15 @@ async function runScan(domainId, { userName } = {}) {
   const domain = dom.domain
   const authorized = !!dom.authorized
 
+  // Snapshot ANTES de tocar em qualquer coisa — baseline do diff de superfície
+  // (ver asm/diff.js). `scopedTypes` decide quais tipos este scan de fato vai
+  // re-verificar (espelha exatamente o gating de stageHttp/stageNuclei abaixo).
+  const previousScore = dom.riskScore || 0
+  const previousAssets = await DomainAsset.find({ domainId }).select('type value fingerprint severity').lean()
+  const scopedTypes = ['subdomain']
+  if (authorized) scopedTypes.push('web')
+  if (authorized && NUCLEI_ENABLED) scopedTypes.push('exposure')
+
   await Domain.findByIdAndUpdate(domainId, { $set: {
     scanState: 'scanning', scanStep: 'subdomains', scanError: null,
     scanStartedAt: new Date(), lastScanBy: userName || null,
@@ -203,10 +213,15 @@ async function runScan(domainId, { userName } = {}) {
     // 4) score + contadores (o sinal de vazamento vem do módulo Vazamentos, por
     //    string de domínio — não rodamos leak aqui; ASM = superfície).
     await setStep(domainId, 'scoring')
-    await recomputeDomain(domainId)
+    const { score } = await recomputeDomain(domainId)
+
+    // 5) diff de superfície vs. o scan anterior (novo/sumido + Δscore).
+    const currentAssets = await DomainAsset.find({ domainId }).select('type value fingerprint severity').lean()
+    const diff = computeAssetDiff({ previousAssets, currentAssets, scopedTypes })
 
     await Domain.findByIdAndUpdate(domainId, { $set: {
       scanState: 'done', scanStep: 'done', lastScanAt: new Date(),
+      lastDiff: { ...diff, computedAt: new Date(), scoreDelta: score - previousScore },
     } })
   } catch (err) {
     await Domain.findByIdAndUpdate(domainId, { $set: {
