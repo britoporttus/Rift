@@ -322,7 +322,7 @@ export interface DomainAsset {
 // ── Módulo Rede Interna ───────────────────────────────────────────────────────
 export type InternalNetworkKind = 'lan' | 'dmz' | 'cloud' | 'other'
 export type DeviceType =
-  | 'server' | 'workstation' | 'router' | 'switch' | 'firewall' | 'printer'
+  | 'server' | 'workstation' | 'hypervisor' | 'router' | 'switch' | 'firewall' | 'printer'
   | 'camera' | 'iot' | 'nas' | 'voip' | 'mobile' | 'unknown'
 export type RiskLevel = 'critical' | 'high' | 'medium' | 'low' | 'info'
 
@@ -383,6 +383,8 @@ export interface InternalHost {
   protocols: string[]
   severity: RiskLevel
   labels: string[]
+  status?: 'online' | 'gone'
+  goneSince?: string | null
   source?: string
   firstSeen?: string | null
   lastSeen?: string | null

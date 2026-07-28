@@ -8,6 +8,7 @@ import { SEV_COLOR } from '@/lib/severity'
 import { ScoreSlider } from '@/components/ui/charts/ScoreSlider'
 import { AgentSetup } from '@/components/rede-interna/AgentSetup'
 import { NetworkTopology } from '@/components/rede-interna/NetworkTopology'
+import { NetworkDiagram } from '@/components/rede-interna/NetworkDiagram'
 import { deviceColor, deviceLabel, deviceIcon, DEVICE_ORDER } from '@/components/rede-interna/deviceMeta'
 import {
   ArrowLeft, Network, Loader2, ShieldCheck, Lock, Check, Trash2, Info, History,
@@ -43,6 +44,7 @@ export default function RedeInternaDetailPage() {
   const [loading, setLoading] = useState(true)
   const [authNote, setAuthNote] = useState('')
   const [authOpen, setAuthOpen] = useState(false)
+  const [view, setView] = useState<'estrutura' | 'radial'>('estrutura')
 
   const load = useCallback(() => {
     return Promise.all([api.internalNetworks.get(id), api.internalNetworks.hosts(id), api.internalNetworks.history(id, 30)])
@@ -170,10 +172,24 @@ export default function RedeInternaDetailPage() {
         </div>
       ) : (
         <>
-          {/* Topologia */}
+          {/* Topologia — duas visões: estruturada (por segmento) e radial */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <SectionTitle icon={<Workflow size={13} />} color="var(--purple-light)">Topologia da rede</SectionTitle>
-            <NetworkTopology hosts={hosts} networkName={net.name} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <SectionTitle icon={<Workflow size={13} />} color="var(--purple-light)">Topologia da rede</SectionTitle>
+              <div style={{ display: 'flex', background: 'var(--bg)', border: '1px solid var(--border-mid)', borderRadius: 8, padding: 2 }}>
+                {(['estrutura', 'radial'] as const).map((v) => (
+                  <button key={v} onClick={() => setView(v)} style={{
+                    fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700, padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                    textTransform: 'capitalize',
+                    background: view === v ? 'var(--purple)' : 'transparent',
+                    color: view === v ? '#fff' : 'var(--muted)',
+                  }}>{v === 'estrutura' ? 'Estrutura' : 'Radial'}</button>
+                ))}
+              </div>
+            </div>
+            {view === 'estrutura'
+              ? <NetworkDiagram hosts={hosts} networkName={net.name} />
+              : <NetworkTopology hosts={hosts} networkName={net.name} />}
           </div>
 
           {/* Achados de segurança */}
