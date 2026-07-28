@@ -29,10 +29,18 @@ const networkSchema = new mongoose.Schema({
   lastImportAt: { type: Date, default: null },
   lastImportBy: { type: String, default: null },
   agent: {                                     // metadados do último agente que reportou
-    hostname: { type: String, default: null },
-    os:       { type: String, default: null },
-    version:  { type: String, default: null },
+    hostname:   { type: String, default: null },
+    os:         { type: String, default: null },
+    version:    { type: String, default: null },
+    privileged: { type: Boolean, default: false },  // rodou como root/admin (ARP + OS detection)
   },
+  // CIDRs cobertos pela última coleta — define o escopo em que hosts podem ser
+  // marcados como sumidos (ver internal/cidr.js).
+  lastScannedCidrs: { type: [String], default: [] },
+  // Avisos do coletor (rodou em WSL, sem root, ninguém respondeu). Ficam visíveis
+  // no painel: a v1 aceitava coleta degradada em silêncio e ela passava por
+  // inventário legítimo, com score de risco e tudo.
+  lastWarnings: { type: [String], default: [] },
 
   // --- Contadores derivados (recomputados a cada import) ---
   hostCount:  { type: Number, default: 0 },

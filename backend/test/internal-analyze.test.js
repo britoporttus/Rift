@@ -40,6 +40,28 @@ test('host limpo → info, sem rótulos', () => {
   assert.deepEqual(r.labels, [])
 })
 
+// ── Hypervisor ──────────────────────────────────────────────────────────────
+test('SLP em hypervisor → high (vetor ESXiArgs/CVE-2021-21974)', () => {
+  const r = analyzeHost({ deviceType: 'hypervisor', openPorts: P(427, 443) })
+  assert.equal(r.severity, 'high')
+  assert.ok(r.labels.some((l) => /ESXiArgs/.test(l)))
+})
+
+test('SLP em host comum NÃO vira high — a regra é específica de hypervisor', () => {
+  const r = analyzeHost({ deviceType: 'server', openPorts: P(427) })
+  assert.notEqual(r.severity, 'high')
+})
+
+test('gerência de hypervisor exposta → medium', () => {
+  const r = analyzeHost({ deviceType: 'hypervisor', openPorts: P(443, 902) })
+  assert.equal(r.severity, 'medium')
+  assert.ok(r.labels.some((l) => /ger[êe]ncia de hypervisor/i.test(l)))
+})
+
+test('CIM (5989) → medium em qualquer host', () => {
+  assert.equal(analyzeHost({ openPorts: P(5989) }).severity, 'medium')
+})
+
 test('computeNetworkScore: sem hosts → 0/info/[]', () => {
   const r = computeNetworkScore({ hosts: [] })
   assert.equal(r.score, 0)

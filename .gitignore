@@ -61,3 +61,7 @@ Relatorio-Pentest-*.html
 
 # Core dumps
 core.[0-9]*
+
+# Agente de rede interna baixado ao rodar (artefato, não fonte)
+/rift-agente.py
+/rift-agente.ps1

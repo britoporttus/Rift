@@ -62,6 +62,35 @@ test('entrada malformada não lança (degrada pra vazio)', () => {
   assert.deepEqual(normalizeAgentReport({ hosts: 'nope' }).hosts, [])
 })
 
+// ── Escopo da coleta + avisos (agente v2) ───────────────────────────────────
+test('normaliza scannedCidrs e warnings', () => {
+  const r = normalizeAgentReport({
+    scannedCidrs: ['192.168.0.0/24', '10.0.0.0/8'],
+    warnings: ['rodando em WSL'],
+    agent: { privileged: true },
+    hosts: [],
+  })
+  assert.deepEqual(r.scannedCidrs, ['192.168.0.0/24', '10.0.0.0/8'])
+  assert.deepEqual(r.warnings, ['rodando em WSL'])
+  assert.equal(r.agent.privileged, true)
+})
+
+test('descarta CIDR malformado (não pode virar escopo de exclusão)', () => {
+  const { scannedCidrs } = normalizeAgentReport({
+    scannedCidrs: ['192.168.0.0/24', 'nope', '', null, '10.0.0.1', 'DROP TABLE'],
+  })
+  assert.deepEqual(scannedCidrs, ['192.168.0.0/24'])
+})
+
+test('relatório do agente v1 (sem escopo) → escopo vazio, não avisos falsos', () => {
+  // Invariante de compatibilidade: sem scannedCidrs o ingest não marca nada
+  // como sumido. Escopo vazio é o sinal disso.
+  const r = normalizeAgentReport({ agent: { hostname: 'x' }, hosts: [{ ip: '10.0.0.1' }] })
+  assert.deepEqual(r.scannedCidrs, [])
+  assert.deepEqual(r.warnings, [])
+  assert.equal(r.agent.privileged, false)
+})
+
 test('respeita o cap de hosts (não estoura memória com relatório gigante)', () => {
   const many = Array.from({ length: 6000 }, (_, i) => ({ ip: `10.0.${Math.floor(i / 256)}.${i % 256}` }))
   const { hosts } = normalizeAgentReport({ hosts: many })

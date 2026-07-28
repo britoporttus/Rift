@@ -46,6 +46,44 @@ test('NAS: fabricante Synology', () => {
   assert.equal(classifyDevice({ macVendor: 'Synology', openPorts: P(5000) }).deviceType, 'nas')
 })
 
+// ── Hypervisor: precisa vencer "servidor", senão o alvo mais valioso da rede
+// interna some no meio dos servidores genéricos.
+test('ESXi: porta 902 (vSphere authd) + 443 → hypervisor, não servidor', () => {
+  assert.equal(classifyDevice({ openPorts: P(22, 443, 902) }).deviceType, 'hypervisor')
+})
+
+test('ESXi: banner do serviço', () => {
+  assert.equal(classifyDevice({ openPorts: P({ port: 443, service: 'vmware-auth' }) }).deviceType, 'hypervisor')
+})
+
+test('ESXi: OS reportado pelo nmap', () => {
+  assert.equal(classifyDevice({ os: 'VMware ESXi 7.0', openPorts: P(443) }).deviceType, 'hypervisor')
+})
+
+test('vCenter: VAMI (5480)', () => {
+  assert.equal(classifyDevice({ openPorts: P(443, 5480) }).deviceType, 'hypervisor')
+})
+
+test('Proxmox: porta 8006', () => {
+  assert.equal(classifyDevice({ openPorts: P(22, 8006) }).deviceType, 'hypervisor')
+})
+
+test('Hyper-V: porta 2179 (VMConnect)', () => {
+  assert.equal(classifyDevice({ openPorts: P(3389, 2179) }).deviceType, 'hypervisor')
+})
+
+test('hypervisor por hostname', () => {
+  assert.equal(classifyDevice({ hostname: 'esx-01.corp.local', openPorts: P(443) }).deviceType, 'hypervisor')
+})
+
+test('servidor Linux comum NÃO vira hypervisor', () => {
+  assert.equal(classifyDevice({ os: 'Linux 5.4 (Ubuntu Server)', openPorts: P(22, 80, 443) }).deviceType, 'server')
+})
+
+test('impressora ainda vence hypervisor (regra mais específica vem antes)', () => {
+  assert.equal(classifyDevice({ openPorts: P(9100, 443, 902) }).deviceType, 'printer')
+})
+
 test('desconhecido: sem sinais úteis', () => {
   assert.equal(classifyDevice({ openPorts: [] }).deviceType, 'unknown')
 })

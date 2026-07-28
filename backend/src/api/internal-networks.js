@@ -10,11 +10,17 @@ const { ingestReport } = require('../internal/ingest')
 
 const router = Router()
 
-// Script do agente carregado 1x (sem segredo embutido — o token vai por env).
-const AGENT_SCRIPT = (() => {
-  try { return fs.readFileSync(path.join(__dirname, '..', 'internal', 'agent-template.py'), 'utf8') }
+// Scripts do agente carregados 1x (sem segredo embutido — o token vai por env).
+// Duas plataformas: Python/nmap para Linux/macOS, PowerShell para Windows (que é
+// a superfície mais comum dentro de rede de cliente e não tem Python garantido).
+function loadAgent(file) {
+  try { return fs.readFileSync(path.join(__dirname, '..', 'internal', file), 'utf8') }
   catch { return '# agente indisponível\n' }
-})()
+}
+const AGENT_SCRIPTS = {
+  linux: { body: loadAgent('agent-template.py'), type: 'text/x-python' },
+  windows: { body: loadAgent('agent-template.ps1'), type: 'text/plain' },
+}
 
 function toDto(d) {
   const o = d.toObject ? d.toObject() : d
@@ -43,8 +49,11 @@ router.post('/ingest', async (req, res) => {
 })
 
 // Script do agente — público (não contém segredo; o token vai separado por env).
-router.get('/agent-script', (_req, res) => {
-  res.type('text/x-python').send(AGENT_SCRIPT)
+// ?platform=windows serve o PowerShell; sem parâmetro, o Python (compatível com
+// os comandos já distribuídos).
+router.get('/agent-script', (req, res) => {
+  const p = req.query.platform === 'windows' ? 'windows' : 'linux'
+  res.type(AGENT_SCRIPTS[p].type).send(AGENT_SCRIPTS[p].body)
 })
 
 // ── Daqui pra baixo: auth por cookie (operador logado) ──────────────────────────
@@ -111,8 +120,13 @@ router.patch('/:id/authorization', requireAuth(['admin']), async (req, res) => {
   res.json(toDto(d))
 })
 
+// ?status=online devolve só os presentes na última coleta que cobriu o CIDR
+// deles; sem o filtro vêm todos (os sumidos com status='gone'), pra o painel
+// poder mostrar o histórico do que deixou a rede.
 router.get('/:id/hosts', async (req, res) => {
-  const list = await InternalHost.find({ networkId: req.params.id }).sort({ severity: 1, ip: 1 }).lean()
+  const q = { networkId: req.params.id }
+  if (req.query.status === 'online') q.status = { $ne: 'gone' }
+  const list = await InternalHost.find(q).sort({ status: 1, severity: 1, ip: 1 }).lean()
   res.json(list.map((h) => ({ ...h, id: h._id })))
 })
 
@@ -141,8 +155,13 @@ router.get('/:id/agent-command', requireAuth(['admin']), async (req, res) => {
   res.json({
     token: d.enrollToken,
     scriptUrl: `${base}/api/internal-networks/agent-script`,
+    // Linux: precisa de root (ARP ping + detecção de OS). Windows: PowerShell
+    // como Administrador, mesmo motivo.
     command: `curl -s ${base}/api/internal-networks/agent-script -o rift-agente.py && RIFT_URL=${base} RIFT_TOKEN=${d.enrollToken} sudo -E python3 rift-agente.py`,
-    watchHint: `# contínuo (a cada 15 min): acrescente --watch 900 ao final`,
+    commandWindows: `$env:RIFT_URL='${base}'; $env:RIFT_TOKEN='${d.enrollToken}'; ` +
+      `iwr '${base}/api/internal-networks/agent-script?platform=windows' -OutFile rift-agente.ps1; ` +
+      `powershell -ExecutionPolicy Bypass -File .\\rift-agente.ps1`,
+    watchHint: `# contínuo (a cada 15 min): acrescente --watch 900 (Linux) ou -Watch 900 (Windows) ao final`,
   })
 })
 

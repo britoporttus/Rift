@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-# Rift — agente de descoberta de rede interna.
+# Rift — agente de descoberta de rede interna (Linux/macOS).
 #
 # Roda DENTRO da rede do cliente (o VPS do Rift não a alcança), escaneia com nmap
 # e reporta os resultados para a plataforma automaticamente. Só depende de nmap +
-# Python 3 (stdlib). Rode como root para detecção de OS/MAC completa.
+# Python 3 (stdlib). Rode como root: sem privilégio não há ARP ping nem detecção
+# de OS/MAC, e a cobertura despenca em rede com endpoint endurecido.
 #
 # Uso:
-#   RIFT_URL=https://rift.exemplo RIFT_TOKEN=xxxx sudo -E python3 agente.py [CIDR ...]
+#   RIFT_URL=https://rift.exemplo RIFT_TOKEN=xxxx sudo -E python3 rift-agente.py [CIDR ...]
 #   # contínuo (re-escaneia a cada 15 min):
-#   RIFT_URL=... RIFT_TOKEN=... sudo -E python3 agente.py --watch 900 192.168.0.0/24
+#   RIFT_URL=... RIFT_TOKEN=... sudo -E python3 rift-agente.py --watch 900 192.168.0.0/24
 #
-# Sem CIDR, detecta as sub-redes locais automaticamente.
+# Sem CIDR, detecta as sub-redes locais automaticamente — descartando redes
+# virtuais (WSL, Hyper-V, Docker, VPN), que não são a rede do cliente.
 import os
+import re
 import sys
 import time
 import json
@@ -21,9 +24,28 @@ import subprocess
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.0"
+VERSION = "2.0"
 RIFT_URL = os.environ.get("RIFT_URL", "").rstrip("/")
 RIFT_TOKEN = os.environ.get("RIFT_TOKEN", "")
+
+# Portas varridas. Lista EXPLÍCITA em vez de --top-ports: cada porta aqui existe
+# porque alguma regra de classificação (classify.js) ou de risco (analyze.js) do
+# Rift depende dela. --top-ports 1000 não contém 5480/8006/2179/5989 e fazia o
+# painel perder hypervisor — o alvo mais valioso de um pentest interno.
+PORT_SPEC = (
+    "1-1024,"                          # bem-conhecidas (inclui 22,23,80,443,445,515,554,902...)
+    "1433,1521,2179,3306,3389,5432,"   # bancos, RDP, Hyper-V VMConnect
+    "5480,5900-5902,5989,6379,"        # VAMI, VNC, CIM, redis
+    "8000,8006,8080,8443,"             # http alt, Proxmox, https alt
+    "9100,9200,9443,27017"             # jetdirect, elastic, vSphere UI, mongo
+)
+
+# Interfaces que nunca são a rede do cliente: bridges de container, VPN, switches
+# virtuais de hipervisor, loopback do túnel de DNS do WSL.
+VIRTUAL_IFACE_RE = re.compile(
+    r"^(lo|docker|br-|veth|virbr|vboxnet|vmnet|vnic|tun|tap|wg|zt|tailscale|utun|loopback)",
+    re.IGNORECASE,
+)
 
 
 def die(msg):
@@ -31,47 +53,156 @@ def die(msg):
     sys.exit(1)
 
 
-def local_cidrs():
-    """Descobre as sub-redes /24 locais a partir dos IPs das interfaces."""
-    cidrs = set()
+def warn(msg):
+    print(f"[agente] AVISO: {msg}", file=sys.stderr)
+
+
+def is_root():
+    return (os.geteuid() == 0) if hasattr(os, "geteuid") else False
+
+
+def is_wsl():
+    """WSL não alcança a LAN em modo NAT (o padrão) — só as redes virtuais do host."""
+    if os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop"):
+        return True
+    try:
+        with open("/proc/version") as f:
+            v = f.read().lower()
+        return "microsoft" in v or "wsl" in v
+    except OSError:
+        return False
+
+
+def gateway_is_hypervisor_switch(net):
+    """True se o .1 da sub-rede resolve pra *.mshome.net — assinatura do switch
+    virtual Hyper-V/WSL. É o sinal que distingue 'LAN real 172.18.x' de 'NAT do WSL'."""
+    try:
+        gw = str(next(ipaddress.ip_network(net).hosts()))
+        name = socket.gethostbyaddr(gw)[0].lower()
+        return name.endswith(".mshome.net")
+    except Exception:
+        return False
+
+
+def iter_interfaces():
+    """[(nome_da_interface, cidr), ...] a partir de `ip addr` (Linux) ou `ifconfig` (macOS)."""
     try:
         out = subprocess.check_output(["ip", "-o", "-4", "addr", "show"], text=True)
-        for line in out.splitlines():
-            parts = line.split()
-            for p in parts:
-                if "/" in p and not p.startswith("127."):
-                    try:
-                        net = ipaddress.ip_network(p, strict=False)
-                        if net.prefixlen < 24:  # limita a /24 pra não escanear /8 sem querer
-                            net = ipaddress.ip_network(f"{net.network_address}/24", strict=False)
-                        if net.is_private:
-                            cidrs.add(str(net))
-                    except ValueError:
-                        pass
     except Exception:
-        # fallback: IP do socket de saída
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            cidrs.add(str(ipaddress.ip_network(ip + "/24", strict=False)))
+            return _parse_ifconfig(subprocess.check_output(["ifconfig"], text=True))
         except Exception:
-            pass
-    return sorted(cidrs)
+            return []
+    found = []
+    for line in out.splitlines():  # "2: eth0    inet 192.168.0.5/24 brd ..."
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        iface = parts[1]
+        for p in parts:
+            if re.match(r"^\d+\.\d+\.\d+\.\d+/\d+$", p):
+                found.append((iface, p))
+                break
+    return found
 
 
-def run_nmap(targets):
-    """Roda nmap com detecção de serviço/OS e devolve o XML."""
-    is_root = (os.geteuid() == 0) if hasattr(os, "geteuid") else False
-    args = ["nmap", "-oX", "-", "--top-ports", "1000", "-sV", "-T4",
-            "--host-timeout", "90s", "--max-retries", "2"]
-    if is_root:
-        args += ["-O", "-sS"]  # OS detection + SYN scan exigem root
+def _parse_ifconfig(out):
+    """macOS/BSD: 'inet 192.168.0.5 netmask 0xffffff00' → (iface, cidr)."""
+    found, iface = [], None
+    for line in out.splitlines():
+        if line and not line[0].isspace():
+            iface = line.split(":")[0]
+        m = re.search(r"inet (\d+\.\d+\.\d+\.\d+) netmask (0x[0-9a-fA-F]+)", line)
+        if m and iface:
+            bits = bin(int(m.group(2), 16)).count("1")
+            found.append((iface, f"{m.group(1)}/{bits}"))
+    return found
+
+
+def local_cidrs():
+    """Sub-redes locais reais → (cidrs, avisos). Descarta virtuais em vez de
+    escaneá-las: reportar a rede do WSL como se fosse a LAN do cliente produz um
+    inventário falso, que é pior que inventário nenhum."""
+    cidrs, warnings, skipped = set(), [], []
+
+    for iface, addr in iter_interfaces():
+        if addr.startswith("127."):
+            continue
+        try:
+            net = ipaddress.ip_network(addr, strict=False)
+        except ValueError:
+            continue
+        if not net.is_private or net.is_loopback or net.is_link_local:
+            continue
+        if VIRTUAL_IFACE_RE.match(iface):
+            skipped.append(f"{iface}={net} (interface virtual)")
+            continue
+        if net.prefixlen == 32:
+            skipped.append(f"{iface}={net} (endereço /32, não é sub-rede)")
+            continue
+        if net.prefixlen < 24:  # limita a /24 pra não escanear /8 sem querer
+            net = ipaddress.ip_network(f"{net.network_address}/24", strict=False)
+        if gateway_is_hypervisor_switch(net):
+            skipped.append(f"{iface}={net} (switch virtual Hyper-V/WSL)")
+            continue
+        cidrs.add(str(net))
+
+    for s in skipped:
+        warn(f"ignorando {s}")
+    if is_wsl():
+        warnings.append(
+            "Agente rodando dentro do WSL. Em modo NAT (padrão) o WSL não alcança a LAN — "
+            "só as redes virtuais do próprio Windows. Use networkingMode=mirrored no .wslconfig, "
+            "rode o agente PowerShell no Windows, ou rode de uma máquina Linux na rede."
+        )
+    if skipped and not cidrs:
+        warnings.append("Nenhuma sub-rede real encontrada — só interfaces virtuais: " + "; ".join(skipped))
+    return sorted(cidrs), warnings
+
+
+def discover_hosts(cidr):
+    """Fase 1: quem está vivo. ARP ping (-PR) quando root, que é layer 2 e passa
+    por firewall de endpoint — Defender/Intune bloqueia ICMP e portas, mas o
+    Windows PRECISA responder ARP pra existir na rede. Sem root, cai pra sondas
+    ICMP/TCP/UDP variadas, bem menos confiáveis."""
+    if is_root():
+        args = ["nmap", "-sn", "-PR", "-n", "--max-retries", "2", "-oX", "-", cidr]
     else:
-        print("[agente] aviso: sem root — sem detecção de OS/MAC. Rode com sudo p/ inventário completo.", file=sys.stderr)
-    args += targets
-    print(f"[agente] nmap {' '.join(targets)} ...", file=sys.stderr)
+        args = ["nmap", "-sn", "-PE", "-PS443,22,3389,445,80", "-PA80", "-PU161",
+                "-n", "--max-retries", "2", "-oX", "-", cidr]
+    try:
+        xml_text = subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        die("nmap não encontrado. Instale: apt install nmap")
+    except subprocess.CalledProcessError as e:
+        xml_text = e.output or ""
+    ips = []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return ips
+    for h in root.findall("host"):
+        st = h.find("status")
+        if st is not None and st.get("state") != "up":
+            continue
+        for addr in h.findall("address"):
+            if addr.get("addrtype") == "ipv4":
+                ips.append(addr.get("addr"))
+    return ips
+
+
+def scan_ports(ips):
+    """Fase 2: portas/serviços/OS só dos hosts vivos. -Pn é obrigatório aqui — a
+    descoberta já aconteceu na fase 1, e sem -Pn o nmap re-sondaria e descartaria
+    justamente os hosts endurecidos que o ARP tinha encontrado."""
+    if not ips:
+        return ""
+    args = ["nmap", "-oX", "-", "-Pn", "-p", PORT_SPEC, "-sV", "--version-intensity", "2",
+            "-T4", "--host-timeout", "180s", "--max-retries", "2",
+            "--script", "smb-protocols", "--script-timeout", "30s"]
+    if is_root():
+        args += ["-O", "--osscan-limit", "-sS"]  # detecção de OS + SYN scan exigem root
+    args += ips
     try:
         return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL)
     except FileNotFoundError:
@@ -106,23 +237,28 @@ def parse_nmap(xml_text):
         if osmatch is not None:
             os_name = osmatch.get("name")
         ports = []
-        protocols = []
         for p in h.findall("ports/port"):
             st = p.find("state")
             if st is None or st.get("state") != "open":
                 continue
             svc = p.find("service")
-            entry = {
+            ports.append({
                 "port": int(p.get("portid")),
                 "proto": p.get("protocol", "tcp"),
                 "service": svc.get("name") if svc is not None else None,
                 "product": svc.get("product") if svc is not None else None,
                 "version": svc.get("version") if svc is not None else None,
-            }
-            ports.append(entry)
-            # marca SMBv1 se o script detectar (best-effort)
-            if svc is not None and (svc.get("name") or "").startswith("microsoft-ds"):
-                protocols.append("smb")
+            })
+        # SMBv1 REAL, via script smb-protocols. A versão anterior gravava o rótulo
+        # "smb" só por ver a porta 445 — e o Rift testa "smbv1", então a regra de
+        # severidade alta nunca disparava.
+        protocols = []
+        for s in h.findall("hostscript/script"):
+            if s.get("id") != "smb-protocols":
+                continue
+            out = (s.get("output") or "").lower()
+            if "smbv1" in out or "nt lm 0.12" in out:
+                protocols.append("smbv1")
         if not ip:
             continue
         hosts.append({
@@ -132,10 +268,15 @@ def parse_nmap(xml_text):
     return hosts
 
 
-def report(hosts, trigger):
+def report(hosts, trigger, scanned_cidrs, warnings):
     payload = {
         "trigger": trigger,
-        "agent": {"hostname": socket.gethostname(), "os": sys.platform, "version": VERSION},
+        "agent": {"hostname": socket.gethostname(), "os": sys.platform,
+                  "version": VERSION, "privileged": is_root()},
+        # O backend só marca host como "sumido" dentro dos CIDRs que ESTA coleta
+        # varreu — sem isto, um agente cobrindo uma sub-rede apagaria as outras.
+        "scannedCidrs": scanned_cidrs,
+        "warnings": warnings,
         "hosts": hosts,
     }
     data = json.dumps(payload).encode()
@@ -153,9 +294,8 @@ def report(hosts, trigger):
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            body = r.read().decode()
-            print(f"[agente] enviado: {len(hosts)} host(s) → {r.status} {body}", file=sys.stderr)
+        with urllib.request.urlopen(req, timeout=60) as r:
+            print(f"[agente] enviado: {len(hosts)} host(s) → {r.status} {r.read().decode()}", file=sys.stderr)
     except urllib.error.HTTPError as e:
         detail = e.read().decode()[:200]
         if e.code == 403 and "1010" in detail:
@@ -165,19 +305,28 @@ def report(hosts, trigger):
         print(f"[agente] falha no envio: {e}", file=sys.stderr)
 
 
-def scan_once(targets, trigger):
-    all_hosts = []
+def scan_once(targets, trigger, warnings):
+    alive = []
     for t in targets:
-        all_hosts.extend(parse_nmap(run_nmap([t])))
-    # dedup por IP
+        print(f"[agente] descobrindo hosts em {t} ...", file=sys.stderr)
+        found = discover_hosts(t)
+        print(f"[agente]   {len(found)} host(s) vivos", file=sys.stderr)
+        alive.extend(found)
+    alive = sorted(set(alive))
+    run_warnings = list(warnings)
+    if not alive:
+        run_warnings.append("Nenhum host respondeu. Rede com isolamento de cliente "
+                            "(Wi-Fi corporativo) ou agente fora do segmento?")
+    print(f"[agente] varrendo portas de {len(alive)} host(s) ...", file=sys.stderr)
+    hosts = parse_nmap(scan_ports(alive))
     seen, uniq = set(), []
-    for h in all_hosts:
+    for h in hosts:
         if h["ip"] in seen:
             continue
         seen.add(h["ip"])
         uniq.append(h)
-    print(f"[agente] {len(uniq)} host(s) descobertos", file=sys.stderr)
-    report(uniq, trigger)
+    print(f"[agente] {len(uniq)} host(s) inventariados", file=sys.stderr)
+    report(uniq, trigger, targets, run_warnings)
 
 
 def main():
@@ -192,19 +341,37 @@ def main():
         except (IndexError, ValueError):
             die("--watch precisa de um intervalo em segundos, ex.: --watch 900")
         del args[i:i + 2]
-    targets = args or local_cidrs()
+    allow_virtual = "--allow-virtual" in args
+    if allow_virtual:
+        args.remove("--allow-virtual")
+
+    explicit = [a for a in args if not a.startswith("-")]
+    if explicit:
+        targets, warnings = explicit, []
+    else:
+        targets, warnings = local_cidrs()
+
     if not targets:
-        die("nenhuma sub-rede local detectada; passe um CIDR, ex.: 192.168.0.0/24")
+        die("nenhuma sub-rede local real detectada. " +
+            (warnings[0] if warnings else "Passe um CIDR explícito, ex.: 192.168.0.0/24"))
+    if warnings and is_wsl() and not explicit and not allow_virtual:
+        # Falhar alto é proposital: um inventário da rede virtual do WSL entra no
+        # painel parecendo legítimo, com score de risco e tudo. Melhor não coletar.
+        die(warnings[0] + "\n  Para coletar assim mesmo: --allow-virtual")
+
+    if not is_root():
+        warn("sem root — sem ARP ping nem detecção de OS/MAC. A cobertura cai muito. Use sudo -E.")
+    print(f"[agente] alvos: {', '.join(targets)}", file=sys.stderr)
 
     if watch:
         print(f"[agente] modo contínuo: re-escaneando a cada {watch}s. Ctrl+C para parar.", file=sys.stderr)
         first = True
         while True:
-            scan_once(targets, "agent" if first else "watch")
+            scan_once(targets, "agent" if first else "watch", warnings)
             first = False
             time.sleep(watch)
     else:
-        scan_once(targets, "agent")
+        scan_once(targets, "agent", warnings)
 
 
 if __name__ == "__main__":

@@ -50,6 +50,16 @@ function classifyDevice({ os = '', openPorts = [], macVendor = '', hostname = ''
   if (vendorIs(macVendor, 'nas') || /nas|synology|qnap|diskstation/.test(host) || (has(445, 139, 2049, 111) && svc('iscsi', 'nfs'))) {
     return { deviceType: 'nas', confidence: 'medium' }
   }
+  // Hypervisor (ESXi/vCenter/Proxmox/Hyper-V/XenServer) — ANTES de "servidor",
+  // senão um ESXi (22+443 abertos) cairia como servidor genérico e o operador
+  // perderia o alvo mais valioso da rede. Portas de gerência são específicas:
+  // 902 = vSphere authd, 5989 = CIM, 5480 = VAMI, 8006 = Proxmox, 2179 = Hyper-V.
+  if (has(902, 5989, 5480, 8006, 2179) ||
+      svc('vmware-auth', 'vmware', 'esxi', 'vcenter', 'proxmox') ||
+      /esxi|vcenter|vsphere|vmware|proxmox|\bpve\b|xenserver|hyper-?v/.test(osl) ||
+      /esx|vcenter|vsphere|proxmox|\bpve\d?\b|\bhv\d/.test(host)) {
+    return { deviceType: 'hypervisor', confidence: 'high' }
+  }
   // Firewall.
   if (vendorIs(macVendor, 'firewall') || /firewall|fortigate|palo|asa|pfsense|sonicwall/.test(host)) {
     return { deviceType: 'firewall', confidence: 'high' }

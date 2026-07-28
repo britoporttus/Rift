@@ -2,18 +2,18 @@
 // KIND_COLOR de dominios; NÃO sobrecarrega severity.ts (que é sobre severidade).
 import {
   Server, Monitor, Router, Network, ShieldAlert, Printer, Video, Cpu,
-  HardDrive, Phone, Smartphone, HelpCircle, type LucideIcon,
+  HardDrive, Phone, Smartphone, HelpCircle, Layers, type LucideIcon,
 } from 'lucide-react'
 import type { DeviceType } from '@/lib/api'
 
 export const DEVICE_LABEL: Record<DeviceType, string> = {
-  server: 'Servidor', workstation: 'Estação', router: 'Roteador', switch: 'Switch',
+  server: 'Servidor', workstation: 'Estação', hypervisor: 'Hypervisor', router: 'Roteador', switch: 'Switch',
   firewall: 'Firewall', printer: 'Impressora', camera: 'Câmera IP', iot: 'IoT',
   nas: 'NAS', voip: 'VoIP', mobile: 'Móvel', unknown: 'Desconhecido',
 }
 
 export const DEVICE_ICON: Record<DeviceType, LucideIcon> = {
-  server: Server, workstation: Monitor, router: Router, switch: Network,
+  server: Server, workstation: Monitor, hypervisor: Layers, router: Router, switch: Network,
   firewall: ShieldAlert, printer: Printer, camera: Video, iot: Cpu,
   nas: HardDrive, voip: Phone, mobile: Smartphone, unknown: HelpCircle,
 }
@@ -21,7 +21,8 @@ export const DEVICE_ICON: Record<DeviceType, LucideIcon> = {
 export const DEVICE_COLOR: Record<DeviceType, string> = {
   server: '#7C3AED',      // roxo (accent) — o coração da rede
   workstation: '#3B82F6', // azul
-  router: '#22D3EE',      // ciano
+  hypervisor: '#22D3EE',  // ciano vivo — alvo de maior valor, destaca
+  router: '#38BDF8',      // azul-céu
   switch: '#2DD4BF',      // teal
   firewall: '#F5892E',    // laranja
   printer: '#A78BFA',     // roxo claro
@@ -34,7 +35,7 @@ export const DEVICE_COLOR: Record<DeviceType, string> = {
 }
 
 export const DEVICE_ORDER: DeviceType[] = [
-  'server', 'firewall', 'router', 'switch', 'nas', 'workstation',
+  'hypervisor', 'server', 'firewall', 'router', 'switch', 'nas', 'workstation',
   'printer', 'camera', 'voip', 'iot', 'mobile', 'unknown',
 ]
 

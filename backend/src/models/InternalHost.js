@@ -14,7 +14,7 @@ const portSchema = new mongoose.Schema({
 }, { _id: false })
 
 const DEVICE_TYPES = [
-  'server', 'workstation', 'router', 'switch', 'firewall', 'printer',
+  'server', 'workstation', 'hypervisor', 'router', 'switch', 'firewall', 'printer',
   'camera', 'iot', 'nas', 'voip', 'mobile', 'unknown',
 ]
 
@@ -35,6 +35,14 @@ const hostSchema = new mongoose.Schema({
   // Análise de segurança (analyze.js)
   severity: { type: String, enum: ['critical', 'high', 'medium', 'low', 'info'], default: 'info' },
   labels:   { type: [String], default: [] },     // flags: "Telnet exposto", "não identificado"...
+
+  // `online` = visto na última coleta que cobriu o CIDR dele; `gone` = o CIDR foi
+  // varrido e ele não respondeu. Sem isto um host que saiu da rede ficaria "vivo"
+  // pra sempre e inflaria hostCount/score indefinidamente. Só hosts DENTRO do
+  // escopo varrido são marcados como `gone` — coleta parcial (um agente por
+  // sub-rede) não pode apagar o que ela nunca olhou.
+  status:      { type: String, enum: ['online', 'gone'], default: 'online', index: true },
+  goneSince:   { type: Date, default: null },
 
   source:      { type: String, default: 'agent' },
   fingerprint: { type: String, index: true, unique: true, sparse: true },  // `${networkId}:${mac||ip}`
