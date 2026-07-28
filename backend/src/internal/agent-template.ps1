@@ -1,0 +1,289 @@
+# Rift - agente de descoberta de rede interna (Windows).
+#
+# Roda DENTRO da rede do cliente e reporta para a plataforma. Sem dependencia:
+# usa so o que existe em qualquer Windows 10/11 e Server 2016+ (PowerShell 5.1).
+# Se o nmap estiver instalado, usa ele para enriquecer (versao de servico +
+# deteccao de OS); se nao estiver, degrada para varredura nativa em vez de falhar.
+#
+# Uso (PowerShell COMO ADMINISTRADOR):
+#   $env:RIFT_URL='https://rift.exemplo'; $env:RIFT_TOKEN='xxxx'
+#   .\rift-agente.ps1
+#   .\rift-agente.ps1 -Watch 900 192.168.0.0/24
+#
+# Sem CIDR, detecta as sub-redes locais automaticamente - descartando adaptadores
+# virtuais (Hyper-V, WSL, VMware, VirtualBox, VPN), que nao sao a rede do cliente.
+[CmdletBinding()]
+param(
+    [Parameter(ValueFromRemainingArguments = $true)] [string[]] $Cidrs,
+    [int] $Watch = 0,
+    [switch] $AllowVirtual
+)
+
+$ErrorActionPreference = 'Stop'
+$VERSION = '2.0'
+$RIFT_URL = ($env:RIFT_URL -replace '/+$', '')
+$RIFT_TOKEN = $env:RIFT_TOKEN
+
+# Portas da varredura nativa. Lista curada, nao 1-1024: em PowerShell puro cada
+# porta custa uma conexao TCP, entao aqui entra so o que alguma regra do Rift
+# (classify.js / analyze.js) realmente usa. Com nmap disponivel a varredura e mais ampla.
+$PORTS = @(
+    21, 22, 23, 25, 53, 69, 80, 88, 110, 111, 135, 139, 143, 161, 389, 427, 443, 445,
+    465, 512, 513, 514, 515, 554, 587, 631, 636, 902, 993, 995,
+    1433, 1521, 2049, 2179, 3306, 3389, 5060, 5061, 5432, 5480, 5900, 5901, 5985, 5986,
+    5989, 6379, 8000, 8006, 8080, 8443, 9100, 9200, 9443, 27017
+)
+
+# Adaptadores que nunca sao a rede do cliente.
+$VIRTUAL_ADAPTER_RE = 'Hyper-V|Virtual (Ethernet|Adapter)|VMware|VirtualBox|VBox|Loopback|WSL|TAP-|OpenVPN|WireGuard|Bluetooth|WAN Miniport|Npcap'
+
+function Write-Log($msg) { Write-Host "[agente] $msg" -ForegroundColor DarkGray }
+function Write-Warn($msg) { Write-Host "[agente] AVISO: $msg" -ForegroundColor Yellow }
+function Die($msg) { Write-Host "[agente] ERRO: $msg" -ForegroundColor Red; exit 1 }
+
+function Test-Admin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-LocalSubnets {
+    <# Sub-redes reais -> @{ cidrs; warnings }. Descarta virtuais em vez de
+       escanea-las: reportar a rede do WSL/Hyper-V como se fosse a LAN do cliente
+       produz um inventario falso, que e pior que inventario nenhum. #>
+    $cidrs = New-Object System.Collections.Generic.HashSet[string]
+    $warnings = @()
+    $skipped = @()
+
+    $addrs = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+             Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' }
+    foreach ($a in $addrs) {
+        $adapter = Get-NetAdapter -InterfaceIndex $a.InterfaceIndex -ErrorAction SilentlyContinue
+        $desc = if ($adapter) { "$($adapter.InterfaceDescription) $($adapter.Name)" } else { $a.InterfaceAlias }
+        if ($desc -match $VIRTUAL_ADAPTER_RE) {
+            $skipped += "$($a.InterfaceAlias)=$($a.IPAddress) (adaptador virtual)"
+            continue
+        }
+        if ($adapter -and $adapter.Status -ne 'Up') { continue }
+        $prefix = [int]$a.PrefixLength
+        if ($prefix -lt 24) { $prefix = 24 }   # nao escanear /8 sem querer
+        if ($prefix -ge 32) {
+            $skipped += "$($a.InterfaceAlias)=$($a.IPAddress)/32 (nao e sub-rede)"
+            continue
+        }
+        $octets = $a.IPAddress.Split('.')
+        # Só suportamos rede base /24 aqui; prefixos entre 24 e 31 sao tratados
+        # como o /24 que os contem, igual ao agente Linux.
+        $null = $cidrs.Add("$($octets[0]).$($octets[1]).$($octets[2]).0/24")
+    }
+
+    foreach ($s in $skipped) { Write-Warn "ignorando $s" }
+    if ($skipped.Count -gt 0 -and $cidrs.Count -eq 0) {
+        $warnings += "Nenhuma sub-rede real encontrada - so adaptadores virtuais: $($skipped -join '; ')"
+    }
+    return @{ cidrs = @($cidrs | Sort-Object); warnings = $warnings }
+}
+
+function Invoke-ArpSweep($cidr) {
+    <# Descoberta layer 2. Um ping sweep popula a tabela ARP; depois lemos a
+       tabela. O truque: mesmo host que IGNORA o ping (Defender/Intune bloqueia
+       ICMP por padrao no perfil de dominio) precisa responder ARP para existir
+       na rede - entao ele aparece em Get-NetNeighbor mesmo sem responder ao ping.
+       E o equivalente nativo do `nmap -PR`. #>
+    $base = $cidr -replace '\.0/24$', ''
+    Write-Log "descobrindo hosts em $cidr (ARP sweep)..."
+
+    $pings = @()
+    foreach ($i in 1..254) {
+        $p = New-Object System.Net.NetworkInformation.Ping
+        $pings += [pscustomobject]@{ Task = $p.SendPingAsync("$base.$i", 500); Ping = $p }
+    }
+    try { [Threading.Tasks.Task]::WaitAll(@($pings.Task), 8000) | Out-Null } catch {}
+    foreach ($p in $pings) { $p.Ping.Dispose() }
+
+    $found = @{}
+    Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.State -in @('Reachable', 'Stale', 'Delay', 'Probe', 'Permanent') } |
+        Where-Object { $_.IPAddress -like "$base.*" } |
+        ForEach-Object {
+            $mac = if ($_.LinkLayerAddress -and $_.LinkLayerAddress -ne '00-00-00-00-00-00') {
+                $_.LinkLayerAddress.ToUpper().Replace('-', ':')
+            } else { $null }
+            $found[$_.IPAddress] = $mac
+        }
+    Write-Log "  $($found.Count) host(s) vivos"
+    return $found
+}
+
+function Invoke-NativePortScan($ip) {
+    <# Conexoes TCP assincronas. Nao usa Test-NetConnection: ele serializa e
+       levaria minutos por host. #>
+    $open = @()
+    $tries = @()
+    foreach ($port in $PORTS) {
+        $c = New-Object System.Net.Sockets.TcpClient
+        $tries += [pscustomobject]@{ Port = $port; Client = $c; Task = $c.ConnectAsync($ip, $port) }
+    }
+    Start-Sleep -Milliseconds 1200
+    foreach ($t in $tries) {
+        if ($t.Task.Status -eq 'RanToCompletion' -and $t.Client.Connected) {
+            $open += @{ port = $t.Port; proto = 'tcp'; service = $null; product = $null; version = $null }
+        }
+        try { $t.Client.Close() } catch {}
+    }
+    return $open
+}
+
+function Resolve-HostName($ip) {
+    try { return [System.Net.Dns]::GetHostEntry($ip).HostName } catch { return $null }
+}
+
+function Get-NmapPath {
+    $c = Get-Command nmap -ErrorAction SilentlyContinue
+    if ($c) { return $c.Source }
+    foreach ($p in @("$env:ProgramFiles\Nmap\nmap.exe", "${env:ProgramFiles(x86)}\Nmap\nmap.exe")) {
+        if (Test-Path $p) { return $p }
+    }
+    return $null
+}
+
+function Invoke-NmapScan($nmap, $ips) {
+    <# Enriquecimento opcional: versao de servico, OS e SMBv1 real (script
+       smb-protocols). -Pn porque a descoberta ja aconteceu no ARP sweep. #>
+    $spec = '1-1024,1433,1521,2179,3306,3389,5432,5480,5900-5902,5989,6379,8000,8006,8080,8443,9100,9200,9443,27017'
+    $tmp = [IO.Path]::GetTempFileName()
+    $args = @('-oX', $tmp, '-Pn', '-p', $spec, '-sV', '--version-intensity', '2', '-T4',
+              '--host-timeout', '180s', '--max-retries', '2',
+              '--script', 'smb-protocols', '--script-timeout', '30s')
+    if (Test-Admin) { $args += @('-O', '--osscan-limit') }
+    $args += $ips
+    Write-Log "nmap encontrado - enriquecendo $($ips.Count) host(s)..."
+    try {
+        & $nmap @args 2>$null | Out-Null
+        [xml]$xml = Get-Content $tmp -Raw
+    } catch {
+        Write-Warn "nmap falhou ($($_.Exception.Message)) - seguindo so com a varredura nativa"
+        return @{}
+    } finally {
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+    }
+
+    $byIp = @{}
+    foreach ($h in $xml.nmaprun.host) {
+        if ($h.status.state -ne 'up') { continue }
+        $ip = ($h.address | Where-Object { $_.addrtype -eq 'ipv4' } | Select-Object -First 1).addr
+        if (-not $ip) { continue }
+        $ports = @()
+        foreach ($p in $h.ports.port) {
+            if ($p.state.state -ne 'open') { continue }
+            $ports += @{
+                port = [int]$p.portid; proto = $p.protocol
+                service = $p.service.name; product = $p.service.product; version = $p.service.version
+            }
+        }
+        $protocols = @()
+        foreach ($s in $h.hostscript.script) {
+            if ($s.id -eq 'smb-protocols' -and ($s.output -match '(?i)SMBv1|NT LM 0\.12')) { $protocols += 'smbv1' }
+        }
+        $byIp[$ip] = @{
+            ports = $ports; protocols = $protocols
+            os = ($h.os.osmatch | Select-Object -First 1).name
+            mac = ($h.address | Where-Object { $_.addrtype -eq 'mac' } | Select-Object -First 1).addr
+            macVendor = ($h.address | Where-Object { $_.addrtype -eq 'mac' } | Select-Object -First 1).vendor
+        }
+    }
+    return $byIp
+}
+
+function Send-Report($hosts, $trigger, $scannedCidrs, $warnings) {
+    $payload = @{
+        trigger = $trigger
+        agent = @{ hostname = $env:COMPUTERNAME; os = 'win32'; version = $VERSION; privileged = (Test-Admin) }
+        # O backend so marca host como "sumido" dentro dos CIDRs que ESTA coleta
+        # varreu - sem isto, um agente cobrindo uma sub-rede apagaria as outras.
+        scannedCidrs = @($scannedCidrs)
+        warnings = @($warnings)
+        hosts = @($hosts)
+    } | ConvertTo-Json -Depth 8 -Compress
+
+    $headers = @{
+        'X-Rift-Agent-Token' = $RIFT_TOKEN
+        # User-Agent de navegador: sem isto o Cloudflare na frente do Rift bloqueia
+        # a requisicao (403 "error code: 1010") por parecer bot.
+        'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+        'Accept' = 'application/json'
+    }
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $r = Invoke-RestMethod -Uri "$RIFT_URL/api/internal-networks/ingest" -Method Post `
+             -Body ([Text.Encoding]::UTF8.GetBytes($payload)) -ContentType 'application/json' `
+             -Headers $headers -TimeoutSec 60
+        Write-Log "enviado: $($hosts.Count) host(s) -> $($r | ConvertTo-Json -Compress)"
+    } catch {
+        Write-Warn "falha no envio: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-ScanOnce($targets, $trigger, $warnings) {
+    $alive = @{}
+    foreach ($t in $targets) {
+        foreach ($kv in (Invoke-ArpSweep $t).GetEnumerator()) { $alive[$kv.Key] = $kv.Value }
+    }
+    $runWarnings = @($warnings)
+    if ($alive.Count -eq 0) {
+        $runWarnings += 'Nenhum host respondeu. Rede com isolamento de cliente (Wi-Fi corporativo) ou agente fora do segmento?'
+    }
+
+    $ips = @($alive.Keys | Sort-Object)
+    $nmap = Get-NmapPath
+    $enrich = if ($nmap -and $ips.Count -gt 0) { Invoke-NmapScan $nmap $ips } else { @{} }
+    if (-not $nmap) { Write-Log 'nmap nao encontrado - varredura nativa (sem versao de servico nem deteccao de OS)' }
+
+    $hosts = @()
+    foreach ($ip in $ips) {
+        $e = $enrich[$ip]
+        $ports = if ($e -and $e.ports.Count -gt 0) { $e.ports } else { Invoke-NativePortScan $ip }
+        $hosts += @{
+            ip = $ip
+            mac = if ($alive[$ip]) { $alive[$ip] } elseif ($e) { $e.mac } else { $null }
+            macVendor = if ($e) { $e.macVendor } else { $null }
+            hostname = Resolve-HostName $ip
+            os = if ($e) { $e.os } else { $null }
+            openPorts = @($ports)
+            protocols = if ($e) { @($e.protocols) } else { @() }
+        }
+    }
+    Write-Log "$($hosts.Count) host(s) inventariados"
+    Send-Report $hosts $trigger $targets $runWarnings
+}
+
+# ── main ────────────────────────────────────────────────────────────────────
+if (-not $RIFT_URL -or -not $RIFT_TOKEN) { Die 'defina RIFT_URL e RIFT_TOKEN (variaveis de ambiente).' }
+if (-not (Test-Admin)) {
+    Write-Warn 'sem privilegio de Administrador - a tabela ARP e a deteccao de OS ficam limitadas. Reabra o PowerShell como Administrador.'
+}
+
+$explicit = @($Cidrs | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+/\d+$' })
+if ($explicit.Count -gt 0) {
+    $targets = $explicit; $warnings = @()
+} else {
+    $detected = Get-LocalSubnets
+    $targets = $detected.cidrs; $warnings = $detected.warnings
+}
+
+if ($targets.Count -eq 0) {
+    Die ("nenhuma sub-rede local real detectada. " + $(if ($warnings.Count) { $warnings[0] } else { 'Passe um CIDR explicito, ex.: 192.168.0.0/24' }))
+}
+Write-Log "alvos: $($targets -join ', ')"
+
+if ($Watch -gt 0) {
+    Write-Log "modo continuo: re-escaneando a cada ${Watch}s. Ctrl+C para parar."
+    $first = $true
+    while ($true) {
+        Invoke-ScanOnce $targets $(if ($first) { 'agent' } else { 'watch' }) $warnings
+        $first = $false
+        Start-Sleep -Seconds $Watch
+    }
+} else {
+    Invoke-ScanOnce $targets 'agent' $warnings
+}

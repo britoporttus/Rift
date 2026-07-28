@@ -6,6 +6,14 @@
 const RULES = [
   { sev: 'high',   label: 'Telnet exposto (texto claro)',        test: (c) => c.ports.has(23) || c.svc('telnet') },
   { sev: 'high',   label: 'SMBv1 habilitado',                    test: (c) => c.protocols.has('smbv1') },
+  // SLP em ESXi é o vetor do ESXiArgs (CVE-2021-21974): ransomware que cifrou
+  // milhares de hosts em 2023 sem autenticação. Vale high sozinho.
+  { sev: 'high',   label: 'SLP exposto em hypervisor (vetor ESXiArgs/CVE-2021-21974)',
+    test: (c) => c.isHypervisor && (c.ports.has(427) || c.svc('slp', 'svrloc')) },
+  { sev: 'medium', label: 'Interface de gerência de hypervisor exposta na rede',
+    test: (c) => c.isHypervisor && [443, 5480, 8006, 9443].some((p) => c.ports.has(p)) },
+  { sev: 'medium', label: 'CIM/gerência de hardware exposta (5989)',
+    test: (c) => c.ports.has(5989) },
   { sev: 'high',   label: 'rlogin/rsh/rexec exposto',            test: (c) => c.ports.has(513) || c.ports.has(514) || c.ports.has(512) },
   { sev: 'medium', label: 'FTP exposto (texto claro)',           test: (c) => c.ports.has(21) || c.svc('ftp') },
   { sev: 'medium', label: 'RDP exposto',                         test: (c) => c.ports.has(3389) || c.svc('ms-wbt', 'rdp') },
@@ -27,6 +35,7 @@ function analyzeHost(host = {}) {
   const protocols = new Set((host.protocols || []).map((s) => String(s).toLowerCase()))
   const ctx = {
     ports, protocols,
+    isHypervisor: host.deviceType === 'hypervisor',
     svc: (...names) => services.some((s) => names.some((n) => s.includes(n))),
   }
 
