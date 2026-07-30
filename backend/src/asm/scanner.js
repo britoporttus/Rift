@@ -321,7 +321,9 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
       let providerFor = null
       if (ownIps.length) {
         try {
-          const r = await lookupNetblocks(ownIps, { targetDomain: domain, maxPrefixIps: ASN_MAX_PREFIX_IPS })
+          // maxIps alto: precisa classificar TODOS os IPs escaneados (rótulo SaaS),
+          // não só uns poucos. As chamadas RIPEstat rodam em paralelo (asn.js).
+          const r = await lookupNetblocks(ownIps, { targetDomain: domain, maxPrefixIps: ASN_MAX_PREFIX_IPS, maxIps: 80 })
           cidrs = r.cidrs
           await Domain.findByIdAndUpdate(domainId, { $set: { asnInfo: r.asns } }).catch(() => {})
           providerFor = (ip) => classifyProvider(r.ipMap[ip] && r.ipMap[ip].holder)

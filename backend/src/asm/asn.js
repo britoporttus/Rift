@@ -74,38 +74,52 @@ async function httpJson(url, { timeoutMs = 12000, fetchFn } = {}) {
   } catch { return null } finally { clearTimeout(t) }
 }
 
-// ips: string[] (IPs públicos já net-guard-safe do stageDns). `targetDomain` é o
-// domínio sendo escaneado — usado para decidir se o alvo POSSUI a faixa.
-// Retorna { asns: [{asn, holder, prefix, tooLarge, owned}], cidrs: [expansíveis] }.
-// `cidrs` só contém prefixos owned && !tooLarge (os que é seguro/legítimo expandir).
-async function lookupNetblocks(ips, { targetDomain = null, maxIps = 5, maxPrefixIps = 1024, fetchFn } = {}) {
-  const distinct = []
-  const seen = new Set()
-  for (const ip of Array.isArray(ips) ? ips : []) {
-    if (seen.has(ip)) continue
-    seen.add(ip); distinct.push(ip)
-    if (distinct.length >= maxIps) break
-  }
+// Roda `fn` sobre `items` com no máximo `size` em paralelo (pool). Mantém as
+// chamadas RIPEstat rápidas mesmo com dezenas de IPs.
+async function mapPool(items, size, fn) {
+  const out = []
+  let i = 0
+  await Promise.all(Array.from({ length: Math.min(size, items.length) || 0 }, async () => {
+    while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx]) }
+  }))
+  return out
+}
 
-  const asns = []
-  const cidrs = new Set()
-  const ipMap = {}           // ip → { asn, holder } (pra rotular a porta por provedor)
-  const holderCache = {}
-  for (const ip of distinct) {
+// ips: string[] (IPs públicos já net-guard-safe do stageDns). `targetDomain` é o
+// domínio sendo escaneado — usado para decidir se o alvo POSSUI a faixa. Precisa
+// cobrir TODOS os IPs escaneados (não só uns poucos): o ipMap rotula a porta por
+// provedor, então maxIps é alto e as chamadas rodam em paralelo.
+// Retorna { asns: [{asn, holder, prefix, tooLarge, owned}], cidrs, ipMap }.
+async function lookupNetblocks(ips, { targetDomain = null, maxIps = 64, maxPrefixIps = 1024, fetchFn } = {}) {
+  const distinct = [...new Set((Array.isArray(ips) ? ips : []).filter(Boolean))].slice(0, maxIps)
+
+  // 1) network-info (IP → prefixo + ASN) em paralelo.
+  const infos = await mapPool(distinct, 12, async (ip) => {
     const ni = await httpJson(`${RIPESTAT}/network-info/data.json?resource=${encodeURIComponent(ip)}`, { fetchFn })
     const prefix = ni?.data?.prefix
     const asn = Array.isArray(ni?.data?.asns) && ni.data.asns.length ? ni.data.asns[0] : null
+    return { ip, prefix, asn }
+  })
+
+  // 2) holder por ASN ÚNICO (as-overview), também em paralelo, cacheado.
+  const uniqAsns = [...new Set(infos.map((x) => x.asn).filter((x) => x != null))]
+  const holders = {}
+  await mapPool(uniqAsns, 12, async (asn) => {
+    const ov = await httpJson(`${RIPESTAT}/as-overview/data.json?resource=AS${asn}`, { fetchFn })
+    holders[asn] = (ov && ov.data && ov.data.holder) || null
+  })
+
+  // 3) monta ipMap (todos os IPs), asns (dedup por prefixo) e cidrs (owned && !tooLarge).
+  const asns = []
+  const cidrs = new Set()
+  const ipMap = {}
+  for (const { ip, prefix, asn } of infos) {
     if (!prefix || asn == null) continue
     const c = parseCidrV4(prefix)
     if (!c) continue // prefixo IPv6 ou malformado → ignora (só fazemos v4)
     const size = Math.pow(2, 32 - c.prefix)
     const tooLarge = size > maxPrefixIps
-
-    if (holderCache[asn] === undefined) {
-      const ov = await httpJson(`${RIPESTAT}/as-overview/data.json?resource=AS${asn}`, { fetchFn })
-      holderCache[asn] = (ov && ov.data && ov.data.holder) || null
-    }
-    const holder = holderCache[asn]
+    const holder = holders[asn]
     ipMap[ip] = { asn: `AS${asn}`, holder }
     const owned = ownsRange(holder, targetDomain)
     // dedup por prefixo
