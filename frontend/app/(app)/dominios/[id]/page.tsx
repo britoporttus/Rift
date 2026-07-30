@@ -393,14 +393,21 @@ export default function DominioDetailPage() {
           <SectionTitle icon={<Network size={13} />} color="var(--purple-light)">Portas & serviços ({ports.length})</SectionTitle>
           {domain.asnInfo && domain.asnInfo.length > 0 && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
-              {domain.asnInfo.map((a, i) => (
-                <span key={i} title={a.tooLarge ? 'Prefixo grande (provedor cloud) — não expandido' : 'Netblock escaneado'} style={{
-                  fontSize: 10.5, fontFamily: 'var(--mono)', borderRadius: 99, padding: '3px 9px',
-                  background: 'var(--bg)', border: '1px solid var(--border-mid)', color: a.tooLarge ? 'var(--text-mute)' : 'var(--purple-light)',
-                }}>
-                  {a.asn}{a.holder ? ` · ${a.holder}` : ''} · {a.prefix}{a.tooLarge ? ' (cloud, não expandido)' : ''}
-                </span>
-              ))}
+              {domain.asnInfo.map((a, i) => {
+                const tag = a.owned ? 'próprio · escaneado' : a.tooLarge ? 'cloud · não escaneado' : 'hospedado · não escaneado'
+                const col = a.owned ? 'var(--purple-light)' : 'var(--text-mute)'
+                const title = a.owned
+                  ? 'Faixa própria do alvo (holder casa com o domínio) — vizinhos escaneados'
+                  : 'Faixa de provedor/hospedagem — só contexto; vizinhos são de terceiros, não escaneados'
+                return (
+                  <span key={i} title={title} style={{
+                    fontSize: 10.5, fontFamily: 'var(--mono)', borderRadius: 99, padding: '3px 9px',
+                    background: 'var(--bg)', border: `1px solid ${a.owned ? 'var(--border-hi)' : 'var(--border-mid)'}`, color: col,
+                  }}>
+                    {a.asn}{a.holder ? ` · ${a.holder}` : ''} · {a.prefix} · {tag}
+                  </span>
+                )
+              })}
             </div>
           )}
           {ports.length === 0 ? (

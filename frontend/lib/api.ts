@@ -293,6 +293,7 @@ export interface AsnInfo {
   holder?: string | null
   prefix: string
   tooLarge?: boolean
+  owned?: boolean
 }
 
 export interface DomainDetail extends DomainSummary {

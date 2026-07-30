@@ -307,11 +307,16 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
         .filter((ip) => !isBlockedIp(ip))
       await stagePortScan(domainId, ownIps, { fromNeighbor: false })
 
-      // Fase 2: expande o netblock que contém os IPs do alvo (só prefixo contido —
-      // asn.js pula ASN de cloud) e escaneia os vizinhos, filtrando IP a IP.
+      // Fase 2: expande o netblock SÓ quando o alvo demonstravelmente POSSUI a
+      // faixa (holder do ASN casa com o domínio) E ela é de tamanho contido.
+      // Provedor/hospedagem (IDC19/MailChimp/cloud) vira só contexto — nunca
+      // escaneamos os vizinhos, que são de terceiros. Ver asn.js ownsRange().
       if (ASN_ENABLED && ownIps.length) {
         try {
-          const { asns, cidrs } = await lookupNetblocks(ownIps, { maxPrefixIps: ASN_MAX_PREFIX_IPS })
+          // Limpa scans de vizinho antigos: se a faixa deixou de ser expandida
+          // (ex.: era um /24 de hosting), os "vizinhos" de terceiros somem.
+          await DomainAsset.deleteMany({ domainId, type: 'port', fromNeighbor: true }).catch(() => {})
+          const { asns, cidrs } = await lookupNetblocks(ownIps, { targetDomain: domain, maxPrefixIps: ASN_MAX_PREFIX_IPS })
           await Domain.findByIdAndUpdate(domainId, { $set: { asnInfo: asns } }).catch(() => {})
           if (cidrs.length) {
             const ownSet = new Set(ownIps)
