@@ -35,6 +35,14 @@ const domainSchema = new mongoose.Schema({
   aliveCount:  { type: Number, default: 0 },
   leakCount:   { type: Number, default: 0 },
   exposureCount: { type: Number, default: 0 },
+  portCount:   { type: Number, default: 0 },
+
+  // --- ASN / netblock (descoberto via RIPEstat na Fase 2). `tooLarge` = prefixo
+  //     grande de cloud, não expandido. Guardado só para exibição/contexto. ---
+  asnInfo: {
+    type: [{ asn: String, holder: String, prefix: String, tooLarge: Boolean }],
+    default: [],
+  },
 
   // --- Risco (transparente: guardamos os motivos) ---
   riskScore:  { type: Number, default: 0 },   // 0-100

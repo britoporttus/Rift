@@ -288,18 +288,27 @@ export interface DomainScanRecord {
   scoreDelta: number
 }
 
+export interface AsnInfo {
+  asn: string
+  holder?: string | null
+  prefix: string
+  tooLarge?: boolean
+}
+
 export interface DomainDetail extends DomainSummary {
   notes?: string | null
   authorizedBy?: string | null
   authorizedAt?: string | null
   authorizationNote?: string | null
   lastDiff?: DomainDiff
+  portCount?: number
+  asnInfo?: AsnInfo[]
 }
 
 export interface DomainAsset {
   id: string
   domainId: string
-  type: 'subdomain' | 'web' | 'url' | 'exposure'
+  type: 'subdomain' | 'web' | 'url' | 'exposure' | 'port'
   value: string
   ips: string[]
   cname?: string | null
@@ -315,6 +324,14 @@ export interface DomainAsset {
   label?: string | null
   cveId?: string | null
   source?: string | null
+  // type === 'port'
+  ip?: string | null
+  port?: number | null
+  proto?: string | null
+  service?: string | null
+  product?: string | null
+  version?: string | null
+  fromNeighbor?: boolean
   firstSeen?: string | null
   lastSeen?: string | null
 }

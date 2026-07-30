@@ -44,4 +44,64 @@ function isBlockedIp(ip) {
   return true
 }
 
-module.exports = { isIpLiteral, isBlockedIp }
+// ── Faixas de IP (CIDR) — usado ao expandir ranges de ASN (asnmap) para o port
+// scan (naabu). Só IPv4. A regra de ouro do ASM: NUNCA passar uma faixa crua a
+// uma ferramenta ativa; expandir aqui, filtrar CADA IP por isBlockedIp, e limitar
+// o total (uma /16 são 65k IPs). Isso é o guarda anti-SSRF para faixas.
+function ipv4ToInt(ip) {
+  const p = ip.split('.').map(Number)
+  if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null
+  return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]
+}
+function intToIpv4(n) {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.')
+}
+
+// Parseia "a.b.c.d/nn" → { base:int, prefix, first:int, last:int } ou null.
+function parseCidrV4(cidr) {
+  const m = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/.exec(String(cidr || '').trim())
+  if (!m) return null
+  const base = ipv4ToInt(m[1])
+  const prefix = Number(m[2])
+  if (base === null || prefix < 0 || prefix > 32) return null
+  const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0
+  const first = (base & mask) >>> 0
+  const last = (first | (~mask >>> 0)) >>> 0
+  return { base: first, prefix, first, last }
+}
+
+function ipInCidr(ip, cidr) {
+  const c = parseCidrV4(cidr)
+  const n = ipv4ToInt(String(ip || ''))
+  if (!c || n === null) return false
+  return n >= c.first && n <= c.last
+}
+
+function ipInAnyCidr(ip, cidrs) {
+  if (!Array.isArray(cidrs)) return false
+  return cidrs.some((c) => ipInCidr(ip, c))
+}
+
+// Expande uma lista de CIDRs em IPs escaneáveis: só IPv4, pula prefixos absurdos
+// (< /minPrefix), remove rede/broadcast, FILTRA cada IP por isBlockedIp (privado/
+// metadata nunca entra) e corta no total `maxIps`. Devolve { ips, truncated }.
+function expandCidrsV4(cidrs, { maxIps = 4096, minPrefix = 16 } = {}) {
+  const ips = []
+  let truncated = false
+  for (const cidr of Array.isArray(cidrs) ? cidrs : []) {
+    const c = parseCidrV4(cidr)
+    if (!c || c.prefix < minPrefix) continue // faixa inválida ou grande demais
+    // /31 e /32 não têm rede/broadcast reserváveis; senão pula os dois extremos.
+    const start = c.prefix >= 31 ? c.first : (c.first + 1) >>> 0
+    const end = c.prefix >= 31 ? c.last : (c.last - 1) >>> 0
+    for (let n = start; n <= end; n = (n + 1) >>> 0) {
+      if (ips.length >= maxIps) { truncated = true; return { ips, truncated } }
+      const ip = intToIpv4(n)
+      if (!isBlockedIp(ip)) ips.push(ip)
+      if (n === end) break // guarda contra overflow do >>>0 no último
+    }
+  }
+  return { ips, truncated }
+}
+
+module.exports = { isIpLiteral, isBlockedIp, parseCidrV4, ipInCidr, ipInAnyCidr, expandCidrsV4 }

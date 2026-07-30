@@ -12,7 +12,7 @@ import type { DomainScanRecord } from '@/lib/api'
 import {
   ArrowLeft, Globe, Radar, Loader2, ShieldCheck, ShieldAlert, Lock,
   AlertTriangle, Trash2, Check, Info, ChevronRight, Share2, Target, Plus, Workflow,
-  Radio, History, TrendingUp, TrendingDown, Minus, Bug,
+  Radio, History, TrendingUp, TrendingDown, Minus, Bug, Network,
 } from 'lucide-react'
 
 function fmtDate(d?: string | null) {
@@ -101,6 +101,8 @@ export default function DominioDetailPage() {
   if (loading || !domain) return <div style={{ padding: '3rem', color: 'var(--text-mute)', fontSize: 12, letterSpacing: '0.1em' }}>CARREGANDO...</div>
 
   const exposures = assets.filter((a) => a.type === 'exposure')
+  const ports = assets.filter((a) => a.type === 'port')
+    .sort((a, b) => (SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(b.severity)) || String(a.ip).localeCompare(String(b.ip)))
 
   return (
     <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1180, margin: '0 auto', width: '100%' }}>
@@ -385,6 +387,28 @@ export default function DominioDetailPage() {
         </div>
       )}
 
+      {/* Portas & serviços (naabu) + faixas de netblock (ASN) */}
+      {(ports.length > 0 || (domain.asnInfo && domain.asnInfo.length > 0)) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <SectionTitle icon={<Network size={13} />} color="var(--purple-light)">Portas & serviços ({ports.length})</SectionTitle>
+          {domain.asnInfo && domain.asnInfo.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
+              {domain.asnInfo.map((a, i) => (
+                <span key={i} title={a.tooLarge ? 'Prefixo grande (provedor cloud) — não expandido' : 'Netblock escaneado'} style={{
+                  fontSize: 10.5, fontFamily: 'var(--mono)', borderRadius: 99, padding: '3px 9px',
+                  background: 'var(--bg)', border: '1px solid var(--border-mid)', color: a.tooLarge ? 'var(--text-mute)' : 'var(--purple-light)',
+                }}>
+                  {a.asn}{a.holder ? ` · ${a.holder}` : ''} · {a.prefix}{a.tooLarge ? ' (cloud, não expandido)' : ''}
+                </span>
+              ))}
+            </div>
+          )}
+          {ports.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-mute)' }}>Nenhuma porta aberta detectada.</div>
+          ) : ports.map((a) => <PortRow key={a.id} a={a} />)}
+        </div>
+      )}
+
       {/* Árvore interativa de subdomínios/vulnerabilidades vive no Mapa (evita
           duplicar o mesmo componente em dois lugares) */}
       <Link href={`/mapa?domain=${id}`} style={{ textDecoration: 'none' }}>
@@ -402,7 +426,7 @@ export default function DominioDetailPage() {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>Ver mapa interativo</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-mute)', marginTop: 2 }}>
-              Árvore de {assets.length - exposures.length} subdomínio(s), com vulnerabilidades e engagements correlacionados — expanda, colapse e clique pra ver detalhe.
+              Árvore de {assets.length - exposures.length - ports.length} subdomínio(s), com vulnerabilidades e engagements correlacionados — expanda, colapse e clique pra ver detalhe.
             </div>
           </div>
           <ChevronRight size={16} color="var(--text-mute)" />
@@ -468,6 +492,30 @@ function AssetRow({ a }: { a: DomainAsset }) {
       {a.firstSeen && (
         <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6 }}>visto desde {fmtDate(a.firstSeen)}</div>
       )}
+    </div>
+  )
+}
+
+function PortRow({ a }: { a: DomainAsset }) {
+  const sc = a.severity !== 'info' ? (SEV_COLOR[a.severity] || SEV_COLOR.info) : null
+  const svc = [a.service, a.product, a.version].filter(Boolean).join(' ')
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderLeft: `3px solid ${sc || 'var(--border-mid)'}`, borderRadius: 8, padding: '0.6rem 0.9rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 13, color: 'var(--text)', fontFamily: 'var(--mono)' }}>
+            {a.ip}<span style={{ color: 'var(--purple-light)' }}>:{a.port}</span>
+            {svc && <span style={{ color: 'var(--text-mute)' }}> · {svc}</span>}
+          </div>
+          {a.label && a.severity !== 'info' && (
+            <div style={{ fontSize: 11, color: sc || 'var(--muted)', marginTop: 2 }}>{a.label}</div>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {a.fromNeighbor && <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--text-mute)', border: '1px solid var(--border-mid)', borderRadius: 99, padding: '1px 7px' }}>vizinho</span>}
+          {a.severity !== 'info' && <span style={{ width: 7, height: 7, borderRadius: '50%', background: sc || 'var(--text-dim)' }} />}
+        </div>
+      </div>
     </div>
   )
 }

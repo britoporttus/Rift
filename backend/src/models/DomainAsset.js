@@ -7,8 +7,17 @@ const crypto = require('crypto')
 const assetSchema = new mongoose.Schema({
   _id:       { type: String, default: () => crypto.randomUUID() },
   domainId:  { type: String, required: true, index: true },
-  type:      { type: String, enum: ['subdomain', 'web', 'url', 'exposure'], default: 'subdomain' },
-  value:     { type: String, required: true },   // ex. api.fornecedor.com  ou  https://.../swagger.json
+  type:      { type: String, enum: ['subdomain', 'web', 'url', 'exposure', 'port'], default: 'subdomain' },
+  value:     { type: String, required: true },   // ex. api.fornecedor.com | https://.../swagger.json | 203.0.113.5:22
+
+  // Porta/serviço (type === 'port', descoberto por naabu + fingerprint de serviço)
+  ip:        { type: String, default: null },    // IP escaneado
+  port:      { type: Number, default: null },    // porta aberta
+  proto:     { type: String, default: 'tcp' },
+  service:   { type: String, default: null },    // ssh, rdp, telnet, mysql...
+  product:   { type: String, default: null },
+  version:   { type: String, default: null },
+  fromNeighbor: { type: Boolean, default: false }, // achado por expansão de netblock (não host próprio)
 
   // Resolução / probe
   ips:       { type: [String], default: [] },
