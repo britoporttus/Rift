@@ -176,15 +176,31 @@ function Invoke-NmapScan($nmap, $ips) {
     if (Test-Admin) { $args += @('-O', '--osscan-limit', '--max-os-tries', '1') }
     $args += $ips
     Write-Log "nmap encontrado - enriquecendo $($ips.Count) host(s)..."
-    try {
-        & $nmap @args 2>$null | Out-Null
-        [xml]$xml = Get-Content $tmp -Raw
-    } catch {
-        Write-Warn "nmap falhou ($($_.Exception.Message)) - seguindo so com a varredura nativa"
-        return @{}
-    } finally {
+    # Sucesso do nmap se julga pelo CODIGO DE SAIDA (0 = ok, mesmo com warnings),
+    # nao por ter escrito no stderr. Com ErrorActionPreference='Stop' (topo do
+    # script), qualquer WARNING do nmap no stderr — ex.: "Service X had already
+    # soft-matched rtsp, but now soft-matched sip", comum em gateway/camera —
+    # viraria erro terminante e descartaria um XML perfeitamente valido, caindo
+    # pro scan nativo (degradado) sem necessidade. 'Continue' local evita isso.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $code = $null
+    try { & $nmap @args 2>$null | Out-Null; $code = $LASTEXITCODE }
+    catch { $code = -1 }
+    finally { $ErrorActionPreference = $prevEAP }
+
+    if ($code -ne 0 -or -not (Test-Path $tmp) -or (Get-Item $tmp).Length -eq 0) {
+        Write-Warn "nmap nao completou (codigo $code) - seguindo so com a varredura nativa"
         Remove-Item $tmp -ErrorAction SilentlyContinue
+        return @{}
     }
+    try { [xml]$xml = Get-Content $tmp -Raw }
+    catch {
+        Write-Warn "nmap: XML invalido - seguindo so com a varredura nativa"
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+        return @{}
+    }
+    Remove-Item $tmp -ErrorAction SilentlyContinue
 
     $byIp = @{}
     foreach ($h in $xml.nmaprun.host) {
