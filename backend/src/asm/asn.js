@@ -30,6 +30,36 @@ function ownsRange(holder, targetDomain) {
   return labels.some((l) => h.includes(compact(l)))
 }
 
+// Provedores de SaaS / e-mail / CDN cujos IPs são INFRA COMPARTILHADA, não o
+// servidor do alvo. Quando um subdomínio (mail/mktg/autodiscover) aponta pra cá,
+// as portas são do provedor (ex.: mail do Microsoft 365), não exposição do alvo —
+// então rotulamos e rebaixamos a severidade. NÃO inclui hospedagem dedicada
+// (IDC19/Locaweb/OVH/DigitalOcean), onde o alvo tem servidor próprio.
+const SAAS_PROVIDERS = [
+  [/microsoft|office ?365|exchange online|outlook/i, 'Microsoft 365'],
+  [/\bgoogle\b|gmail|google workspace/i, 'Google'],
+  [/mailchimp|rocket ?science group/i, 'MailChimp'],
+  [/cloudflare/i, 'Cloudflare'],
+  [/akamai/i, 'Akamai'],
+  [/fastly/i, 'Fastly'],
+  [/sendgrid|twilio/i, 'SendGrid'],
+  [/mailgun/i, 'Mailgun'],
+  [/mimecast/i, 'Mimecast'],
+  [/proofpoint/i, 'Proofpoint'],
+  [/sendinblue|brevo/i, 'Brevo'],
+  [/\bzoho\b/i, 'Zoho'],
+  [/hubspot/i, 'HubSpot'],
+  [/salesforce/i, 'Salesforce'],
+  [/\brd ?station\b/i, 'RD Station'],
+]
+
+// classifyProvider(holder) → { thirdParty, name }. name é o rótulo amigável.
+function classifyProvider(holder) {
+  const h = String(holder || '')
+  for (const [re, name] of SAAS_PROVIDERS) if (re.test(h)) return { thirdParty: true, name }
+  return { thirdParty: false, name: null }
+}
+
 const RIPESTAT = 'https://stat.ripe.net/data'
 
 async function httpJson(url, { timeoutMs = 12000, fetchFn } = {}) {
@@ -44,37 +74,53 @@ async function httpJson(url, { timeoutMs = 12000, fetchFn } = {}) {
   } catch { return null } finally { clearTimeout(t) }
 }
 
-// ips: string[] (IPs públicos já net-guard-safe do stageDns). `targetDomain` é o
-// domínio sendo escaneado — usado para decidir se o alvo POSSUI a faixa.
-// Retorna { asns: [{asn, holder, prefix, tooLarge, owned}], cidrs: [expansíveis] }.
-// `cidrs` só contém prefixos owned && !tooLarge (os que é seguro/legítimo expandir).
-async function lookupNetblocks(ips, { targetDomain = null, maxIps = 5, maxPrefixIps = 1024, fetchFn } = {}) {
-  const distinct = []
-  const seen = new Set()
-  for (const ip of Array.isArray(ips) ? ips : []) {
-    if (seen.has(ip)) continue
-    seen.add(ip); distinct.push(ip)
-    if (distinct.length >= maxIps) break
-  }
+// Roda `fn` sobre `items` com no máximo `size` em paralelo (pool). Mantém as
+// chamadas RIPEstat rápidas mesmo com dezenas de IPs.
+async function mapPool(items, size, fn) {
+  const out = []
+  let i = 0
+  await Promise.all(Array.from({ length: Math.min(size, items.length) || 0 }, async () => {
+    while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx]) }
+  }))
+  return out
+}
 
-  const asns = []
-  const cidrs = new Set()
-  const holderCache = {}
-  for (const ip of distinct) {
+// ips: string[] (IPs públicos já net-guard-safe do stageDns). `targetDomain` é o
+// domínio sendo escaneado — usado para decidir se o alvo POSSUI a faixa. Precisa
+// cobrir TODOS os IPs escaneados (não só uns poucos): o ipMap rotula a porta por
+// provedor, então maxIps é alto e as chamadas rodam em paralelo.
+// Retorna { asns: [{asn, holder, prefix, tooLarge, owned}], cidrs, ipMap }.
+async function lookupNetblocks(ips, { targetDomain = null, maxIps = 64, maxPrefixIps = 1024, fetchFn } = {}) {
+  const distinct = [...new Set((Array.isArray(ips) ? ips : []).filter(Boolean))].slice(0, maxIps)
+
+  // 1) network-info (IP → prefixo + ASN) em paralelo.
+  const infos = await mapPool(distinct, 12, async (ip) => {
     const ni = await httpJson(`${RIPESTAT}/network-info/data.json?resource=${encodeURIComponent(ip)}`, { fetchFn })
     const prefix = ni?.data?.prefix
     const asn = Array.isArray(ni?.data?.asns) && ni.data.asns.length ? ni.data.asns[0] : null
+    return { ip, prefix, asn }
+  })
+
+  // 2) holder por ASN ÚNICO (as-overview), também em paralelo, cacheado.
+  const uniqAsns = [...new Set(infos.map((x) => x.asn).filter((x) => x != null))]
+  const holders = {}
+  await mapPool(uniqAsns, 12, async (asn) => {
+    const ov = await httpJson(`${RIPESTAT}/as-overview/data.json?resource=AS${asn}`, { fetchFn })
+    holders[asn] = (ov && ov.data && ov.data.holder) || null
+  })
+
+  // 3) monta ipMap (todos os IPs), asns (dedup por prefixo) e cidrs (owned && !tooLarge).
+  const asns = []
+  const cidrs = new Set()
+  const ipMap = {}
+  for (const { ip, prefix, asn } of infos) {
     if (!prefix || asn == null) continue
     const c = parseCidrV4(prefix)
     if (!c) continue // prefixo IPv6 ou malformado → ignora (só fazemos v4)
     const size = Math.pow(2, 32 - c.prefix)
     const tooLarge = size > maxPrefixIps
-
-    if (holderCache[asn] === undefined) {
-      const ov = await httpJson(`${RIPESTAT}/as-overview/data.json?resource=AS${asn}`, { fetchFn })
-      holderCache[asn] = (ov && ov.data && ov.data.holder) || null
-    }
-    const holder = holderCache[asn]
+    const holder = holders[asn]
+    ipMap[ip] = { asn: `AS${asn}`, holder }
     const owned = ownsRange(holder, targetDomain)
     // dedup por prefixo
     if (!asns.some((a) => a.prefix === prefix)) {
@@ -84,7 +130,7 @@ async function lookupNetblocks(ips, { targetDomain = null, maxIps = 5, maxPrefix
     // grande de cloud vira só contexto — nunca escaneamos os vizinhos.
     if (owned && !tooLarge) cidrs.add(prefix)
   }
-  return { asns, cidrs: [...cidrs] }
+  return { asns, cidrs: [...cidrs], ipMap }
 }
 
-module.exports = { lookupNetblocks, ownsRange }
+module.exports = { lookupNetblocks, ownsRange, classifyProvider }

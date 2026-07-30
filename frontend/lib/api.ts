@@ -333,6 +333,8 @@ export interface DomainAsset {
   product?: string | null
   version?: string | null
   fromNeighbor?: boolean
+  thirdParty?: boolean
+  provider?: string | null
   firstSeen?: string | null
   lastSeen?: string | null
 }

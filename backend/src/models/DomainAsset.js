@@ -18,6 +18,8 @@ const assetSchema = new mongoose.Schema({
   product:   { type: String, default: null },
   version:   { type: String, default: null },
   fromNeighbor: { type: Boolean, default: false }, // achado por expansão de netblock (não host próprio)
+  thirdParty: { type: Boolean, default: false },   // IP de provedor SaaS/e-mail/CDN (infra de terceiro, não do alvo)
+  provider:   { type: String, default: null },     // rótulo do provedor (ex.: "Microsoft 365")
 
   // Resolução / probe
   ips:       { type: [String], default: [] },
