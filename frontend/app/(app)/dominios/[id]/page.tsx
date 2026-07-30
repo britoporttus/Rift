@@ -519,6 +519,7 @@ function PortRow({ a }: { a: DomainAsset }) {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {a.thirdParty && a.provider && <span title="IP de provedor SaaS/e-mail — infra de terceiro, não exposição sua" style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--info)', background: 'color-mix(in srgb, var(--info) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--info) 30%, transparent)', borderRadius: 99, padding: '1px 7px' }}>SaaS · {a.provider}</span>}
           {a.fromNeighbor && <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--text-mute)', border: '1px solid var(--border-mid)', borderRadius: 99, padding: '1px 7px' }}>vizinho</span>}
           {a.severity !== 'info' && <span style={{ width: 7, height: 7, borderRadius: '50%', background: sc || 'var(--text-dim)' }} />}
         </div>

@@ -1,7 +1,23 @@
 // lookupNetblocks (asm/asn.js) — RIPEstat keyless + guarda anti-cloud. fetch stubado.
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { lookupNetblocks, ownsRange } = require('../src/asm/asn')
+const { lookupNetblocks, ownsRange, classifyProvider } = require('../src/asm/asn')
+
+// ── classifyProvider (IP é de SaaS/e-mail de terceiro?) ───────────────────────
+test('classifyProvider: SaaS/e-mail/CDN → thirdParty com nome', () => {
+  assert.equal(classifyProvider('Microsoft Corporation').thirdParty, true)
+  assert.equal(classifyProvider('Microsoft Corporation').name, 'Microsoft 365')
+  assert.equal(classifyProvider('THEROCKETSCIENCEGROUP - MailChimp').name, 'MailChimp')
+  assert.equal(classifyProvider('Cloudflare, Inc.').name, 'Cloudflare')
+  assert.equal(classifyProvider('Google LLC').name, 'Google')
+})
+
+test('classifyProvider: hospedagem dedicada NÃO é terceiro (é servidor do alvo)', () => {
+  assert.equal(classifyProvider('IDC19 SOLUCOES EM TECNOLOGIA DA INFORMACAO LTDA').thirdParty, false)
+  assert.equal(classifyProvider('Locaweb Servicos de Internet S/A').thirdParty, false)
+  assert.equal(classifyProvider('Hostinger International').thirdParty, false)
+  assert.equal(classifyProvider(null).thirdParty, false)
+})
 
 // ── ownsRange (o alvo POSSUI a faixa? holder do ASN casa com o domínio) ────────
 test('ownsRange: provedor/hospedagem NÃO é dono (trustsis em IDC19/MailChimp)', () => {

@@ -30,6 +30,36 @@ function ownsRange(holder, targetDomain) {
   return labels.some((l) => h.includes(compact(l)))
 }
 
+// Provedores de SaaS / e-mail / CDN cujos IPs são INFRA COMPARTILHADA, não o
+// servidor do alvo. Quando um subdomínio (mail/mktg/autodiscover) aponta pra cá,
+// as portas são do provedor (ex.: mail do Microsoft 365), não exposição do alvo —
+// então rotulamos e rebaixamos a severidade. NÃO inclui hospedagem dedicada
+// (IDC19/Locaweb/OVH/DigitalOcean), onde o alvo tem servidor próprio.
+const SAAS_PROVIDERS = [
+  [/microsoft|office ?365|exchange online|outlook/i, 'Microsoft 365'],
+  [/\bgoogle\b|gmail|google workspace/i, 'Google'],
+  [/mailchimp|rocket ?science group/i, 'MailChimp'],
+  [/cloudflare/i, 'Cloudflare'],
+  [/akamai/i, 'Akamai'],
+  [/fastly/i, 'Fastly'],
+  [/sendgrid|twilio/i, 'SendGrid'],
+  [/mailgun/i, 'Mailgun'],
+  [/mimecast/i, 'Mimecast'],
+  [/proofpoint/i, 'Proofpoint'],
+  [/sendinblue|brevo/i, 'Brevo'],
+  [/\bzoho\b/i, 'Zoho'],
+  [/hubspot/i, 'HubSpot'],
+  [/salesforce/i, 'Salesforce'],
+  [/\brd ?station\b/i, 'RD Station'],
+]
+
+// classifyProvider(holder) → { thirdParty, name }. name é o rótulo amigável.
+function classifyProvider(holder) {
+  const h = String(holder || '')
+  for (const [re, name] of SAAS_PROVIDERS) if (re.test(h)) return { thirdParty: true, name }
+  return { thirdParty: false, name: null }
+}
+
 const RIPESTAT = 'https://stat.ripe.net/data'
 
 async function httpJson(url, { timeoutMs = 12000, fetchFn } = {}) {
@@ -59,6 +89,7 @@ async function lookupNetblocks(ips, { targetDomain = null, maxIps = 5, maxPrefix
 
   const asns = []
   const cidrs = new Set()
+  const ipMap = {}           // ip → { asn, holder } (pra rotular a porta por provedor)
   const holderCache = {}
   for (const ip of distinct) {
     const ni = await httpJson(`${RIPESTAT}/network-info/data.json?resource=${encodeURIComponent(ip)}`, { fetchFn })
@@ -75,6 +106,7 @@ async function lookupNetblocks(ips, { targetDomain = null, maxIps = 5, maxPrefix
       holderCache[asn] = (ov && ov.data && ov.data.holder) || null
     }
     const holder = holderCache[asn]
+    ipMap[ip] = { asn: `AS${asn}`, holder }
     const owned = ownsRange(holder, targetDomain)
     // dedup por prefixo
     if (!asns.some((a) => a.prefix === prefix)) {
@@ -84,7 +116,7 @@ async function lookupNetblocks(ips, { targetDomain = null, maxIps = 5, maxPrefix
     // grande de cloud vira só contexto — nunca escaneamos os vizinhos.
     if (owned && !tooLarge) cidrs.add(prefix)
   }
-  return { asns, cidrs: [...cidrs] }
+  return { asns, cidrs: [...cidrs], ipMap }
 }
 
-module.exports = { lookupNetblocks, ownsRange }
+module.exports = { lookupNetblocks, ownsRange, classifyProvider }
