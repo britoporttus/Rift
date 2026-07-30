@@ -8,7 +8,7 @@ const InternalScan = require('../models/InternalScan')
 const { classifyDevice } = require('./classify')
 const { analyzeHost, computeNetworkScore } = require('./analyze')
 const { computeHostDiff } = require('./diff')
-const { ipInAnyCidr } = require('./cidr')
+const { ipInAnyCidr, isNetworkOrBroadcast, isNonHostIp } = require('./cidr')
 
 const MAX_HOSTS = 5000
 const MAX_PORTS_PER_HOST = 200
@@ -45,6 +45,13 @@ function normalizeAgentReport(raw = {}) {
   for (const h of inHosts) {
     const ip = str(h?.ip, 45)
     if (!ip) continue // sem IP não dá pra fazer fingerprint útil
+    // Descarta o que não é host real: multicast/link-local/global broadcast, o
+    // endereço de rede/broadcast dos CIDRs varridos (a tabela ARP às vezes devolve
+    // o .255 de uma /24), e o MAC de broadcast. Sem isto, esses "fantasmas" entram
+    // no inventário como dispositivo e ainda inflam o host count e o score.
+    if (isNonHostIp(ip) || isNetworkOrBroadcast(ip, scannedCidrs)) continue
+    const mac = str(h?.mac, 32)
+    if (mac && /^ff:ff:ff:ff:ff:ff$/i.test(mac)) continue
     const openPorts = (Array.isArray(h?.openPorts) ? h.openPorts : []).slice(0, MAX_PORTS_PER_HOST).map((p) => ({
       port:    Number(p?.port) || null,
       proto:   str(p?.proto, 8) || 'tcp',
@@ -54,7 +61,7 @@ function normalizeAgentReport(raw = {}) {
     })).filter((p) => p.port)
     hosts.push({
       ip,
-      mac:       str(h?.mac, 32),
+      mac,
       macVendor: str(h?.macVendor, 80),
       hostname:  str(h?.hostname, 120),
       os:        str(h?.os, 160),

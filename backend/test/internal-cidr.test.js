@@ -2,7 +2,7 @@
 // ingest pode marcar host como sumido; um falso positivo aqui apaga inventário.
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { ipInCidr, ipInAnyCidr, ipToInt } = require('../src/internal/cidr')
+const { ipInCidr, ipInAnyCidr, ipToInt, isNetworkOrBroadcast, isNonHostIp } = require('../src/internal/cidr')
 
 test('IP dentro e fora de um /24', () => {
   assert.equal(ipInCidr('192.168.0.5', '192.168.0.0/24'), true)
@@ -45,4 +45,31 @@ test('ipInAnyCidr: escopo vazio nunca contém nada', () => {
   assert.equal(ipInAnyCidr('10.0.0.1', []), false)
   assert.equal(ipInAnyCidr('10.0.0.1', null), false)
   assert.equal(ipInAnyCidr('10.0.0.1', ['192.168.0.0/24', '10.0.0.0/8']), true)
+})
+
+test('isNetworkOrBroadcast: rede e broadcast de /24, host normal fica', () => {
+  const cidrs = ['10.22.138.0/24']
+  assert.equal(isNetworkOrBroadcast('10.22.138.0', cidrs), true)    // rede
+  assert.equal(isNetworkOrBroadcast('10.22.138.255', cidrs), true)  // broadcast (o caso real)
+  assert.equal(isNetworkOrBroadcast('10.22.138.16', cidrs), false)  // host de verdade
+  assert.equal(isNetworkOrBroadcast('10.22.139.255', cidrs), false) // broadcast de OUTRA sub-rede
+})
+
+test('isNetworkOrBroadcast: máscara não-octeto e /31,/32 não têm broadcast', () => {
+  assert.equal(isNetworkOrBroadcast('10.0.0.127', ['10.0.0.0/25']), true)  // broadcast do /25
+  assert.equal(isNetworkOrBroadcast('10.0.0.128', ['10.0.0.0/25']), false) // já é a próxima rede
+  // /31 e /32 não têm endereço de rede/broadcast reservado — não filtra host aí.
+  assert.equal(isNetworkOrBroadcast('10.0.0.0', ['10.0.0.0/31']), false)
+  assert.equal(isNetworkOrBroadcast('10.0.0.5', ['10.0.0.5/32']), false)
+  // Sem escopo, nada é rede/broadcast (não dá pra saber a máscara).
+  assert.equal(isNetworkOrBroadcast('10.0.0.255', []), false)
+})
+
+test('isNonHostIp: multicast, broadcast global, link-local e inválidos', () => {
+  for (const bad of ['0.0.0.0', '255.255.255.255', '224.0.0.1', '239.1.2.3', '169.254.10.5', 'nope', '', null]) {
+    assert.equal(isNonHostIp(bad), true, `${bad} deveria ser não-host`)
+  }
+  for (const ok of ['10.22.138.16', '192.168.0.5', '172.16.9.9', '8.8.8.8']) {
+    assert.equal(isNonHostIp(ok), false, `${ok} é host válido`)
+  }
 })

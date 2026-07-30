@@ -173,44 +173,61 @@ function Get-NmapPath {
     return $null
 }
 
+function Test-Npcap {
+    <# Npcap presente? No Windows, -O (deteccao de OS) e -sS (SYN) exigem captura
+       de pacote cru (Npcap). Sem Npcap, o nmap so faz connect scan (-sT) — que
+       ainda entrega versao de servico e SMBv1 (script NSE), mas nao OS. #>
+    if (Get-Service -Name npcap -ErrorAction SilentlyContinue) { return $true }
+    foreach ($p in @("$env:SystemRoot\System32\Npcap\wpcap.dll", "$env:SystemRoot\System32\wpcap.dll")) {
+        if (Test-Path $p) { return $true }
+    }
+    return $false
+}
+
 function Invoke-NmapScan($nmap, $ips) {
-    <# Enriquecimento opcional: versao de servico, OS e SMBv1 real (script
-       smb-protocols). -Pn porque a descoberta ja aconteceu no ARP sweep. #>
-    # Otimizacao de tempo (a lentidao vinha daqui): usa a MESMA lista curada do scan
-    # nativo (~54 portas) em vez de 1-1024 — o -sV sobre 1024 portas era ~20x mais
-    # trabalho sem ganho de classificacao. Somado a host-timeout 120s (era 180),
+    <# Enriquecimento opcional: versao de servico, SMBv1 real (script smb-protocols)
+       e OS. -Pn porque a descoberta ja aconteceu no ARP sweep. Retorna
+       @{ ByIp = <hash ip->dados>; Warn = <aviso pro painel ou $null> }. #>
+    # Lista curada (~54 portas) em vez de 1-1024: o -sV sobre 1024 portas era ~20x
+    # mais trabalho sem ganho de classificacao. Somado a host-timeout 120s,
     # max-retries 1 e min-hostgroup 32 (varre os hosts em paralelo).
     $spec = ($PORTS -join ',')
     $tmp = [IO.Path]::GetTempFileName()
-    $args = @('-oX', $tmp, '-Pn', '-p', $spec, '-sV', '--version-intensity', '2', '-T4',
-              '--host-timeout', '120s', '--max-retries', '1', '--min-hostgroup', '32',
-              '--script', 'smb-protocols', '--script-timeout', '20s')
-    if (Test-Admin) { $args += @('-O', '--osscan-limit', '--max-os-tries', '1') }
-    $args += $ips
-    Write-Log "nmap encontrado - enriquecendo $($ips.Count) host(s)..."
-    # Sucesso do nmap se julga pelo CODIGO DE SAIDA (0 = ok, mesmo com warnings),
-    # nao por ter escrito no stderr. Com ErrorActionPreference='Stop' (topo do
-    # script), qualquer WARNING do nmap no stderr — ex.: "Service X had already
-    # soft-matched rtsp, but now soft-matched sip", comum em gateway/camera —
-    # viraria erro terminante e descartaria um XML perfeitamente valido, caindo
-    # pro scan nativo (degradado) sem necessidade. 'Continue' local evita isso.
+    $hasNpcap = Test-Npcap
+    # -sT (connect) SEMPRE: como Administrador o nmap defaultaria pra -sS (SYN), que
+    # EXIGE Npcap; numa maquina sem Npcap ele sai com erro e a gente perdia ate o
+    # -sV/SMBv1 que o connect scan consegue sem driver nenhum. Connect scan cobre
+    # versao de servico + NSE; so a deteccao de OS fica de fora sem Npcap.
+    $nmapArgs = @('-oX', $tmp, '-Pn', '-sT', '-p', $spec, '-sV', '--version-intensity', '2', '-T4',
+                  '--host-timeout', '120s', '--max-retries', '1', '--min-hostgroup', '32',
+                  '--script', 'smb-protocols', '--script-timeout', '20s')
+    # OS detection so quando ha Npcap (pacote cru) + privilegio. Sem isto, o nmap
+    # tentaria -O, falharia, e o codigo de saida != 0 derrubava o resto do resultado.
+    if ($hasNpcap -and (Test-Admin)) { $nmapArgs += @('-O', '--osscan-limit', '--max-os-tries', '1') }
+    $nmapArgs += $ips
+    $modo = if ($hasNpcap) { '' } else { ' (sem Npcap: connect scan, sem OS)' }
+    Write-Log "nmap ($nmap) enriquecendo $($ips.Count) host(s)$modo..."
+    # Sucesso se julga pelo CODIGO DE SAIDA (0 = ok, mesmo com warnings), nao por ter
+    # escrito no stderr. 'Continue' local evita que um WARNING do nmap (comum em -sV,
+    # ex.: "soft-matched rtsp/sip" em gateway/camera) vire erro terminante sob o
+    # ErrorActionPreference='Stop' do topo do script e descarte um XML valido.
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $code = $null
-    try { & $nmap @args 2>$null | Out-Null; $code = $LASTEXITCODE }
+    try { & $nmap @nmapArgs 2>$null | Out-Null; $code = $LASTEXITCODE }
     catch { $code = -1 }
     finally { $ErrorActionPreference = $prevEAP }
 
     if ($code -ne 0 -or -not (Test-Path $tmp) -or (Get-Item $tmp).Length -eq 0) {
         Write-Warn "nmap nao completou (codigo $code) - seguindo so com a varredura nativa"
         Remove-Item $tmp -ErrorAction SilentlyContinue
-        return @{}
+        return [pscustomobject]@{ ByIp = @{}; Warn = "nmap encontrado ($nmap) mas falhou (codigo $code) - inventario caiu pra varredura nativa (sem versao de servico/OS/SMBv1). Verifique a instalacao do nmap e do Npcap." }
     }
     try { [xml]$xml = Get-Content $tmp -Raw }
     catch {
         Write-Warn "nmap: XML invalido - seguindo so com a varredura nativa"
         Remove-Item $tmp -ErrorAction SilentlyContinue
-        return @{}
+        return [pscustomobject]@{ ByIp = @{}; Warn = "nmap encontrado ($nmap) devolveu XML invalido - inventario caiu pra varredura nativa." }
     }
     Remove-Item $tmp -ErrorAction SilentlyContinue
 
@@ -238,7 +255,12 @@ function Invoke-NmapScan($nmap, $ips) {
             macVendor = ($h.address | Where-Object { $_.addrtype -eq 'mac' } | Select-Object -First 1).vendor
         }
     }
-    return $byIp
+    # Sem Npcap o inventario e bom (servico + SMBv1) mas nao tem OS/MAC-vendor:
+    # avisa como chegar la, sem tratar como falha (o resultado ja e util).
+    $warn = if (-not $hasNpcap) {
+        'nmap sem Npcap: versoes de servico e SMBv1 OK, mas SEM deteccao de OS nem fabricante do MAC. Instale o Npcap (https://npcap.com) para OS/ARP/SYN.'
+    } else { $null }
+    return [pscustomobject]@{ ByIp = $byIp; Warn = $warn }
 }
 
 function Send-Report($hosts, $trigger, $scannedCidrs, $warnings) {
@@ -282,7 +304,12 @@ function Invoke-ScanOnce($targets, $trigger, $warnings) {
 
     $ips = @($alive.Keys | Sort-Object)
     $nmap = Get-NmapPath
-    $enrich = if ($nmap -and $ips.Count -gt 0) { Invoke-NmapScan $nmap $ips } else { @{} }
+    $enrich = @{}
+    if ($nmap -and $ips.Count -gt 0) {
+        $res = Invoke-NmapScan $nmap $ips
+        $enrich = $res.ByIp
+        if ($res.Warn) { $runWarnings += $res.Warn }
+    }
     if (-not $nmap) {
         # Igual ao agente Python: coleta degradada vira aviso VISIVEL no painel, nao
         # so log local - inventario sem nmap nao pode passar por inventario completo.
