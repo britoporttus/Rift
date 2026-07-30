@@ -62,6 +62,29 @@ test('entrada malformada não lança (degrada pra vazio)', () => {
   assert.deepEqual(normalizeAgentReport({ hosts: 'nope' }).hosts, [])
 })
 
+test('filtra fantasmas: broadcast do CIDR, MAC de broadcast, multicast', () => {
+  const { hosts } = normalizeAgentReport({
+    scannedCidrs: ['10.22.138.0/24'],
+    hosts: [
+      { ip: '10.22.138.16', mac: '00:50:56:8D:E8:33' },   // host real → fica
+      { ip: '10.22.138.255', mac: 'FF:FF:FF:FF:FF:FF' },  // broadcast da /24 → fora
+      { ip: '10.22.138.0' },                              // endereço de rede → fora
+      { ip: '224.0.0.251', mac: 'AA:BB:CC:DD:EE:FF' },    // mDNS multicast → fora
+      { ip: '10.22.138.9', mac: 'FF:FF:FF:FF:FF:FF' },    // IP ok mas MAC broadcast → fora
+    ],
+  })
+  assert.deepEqual(hosts.map((h) => h.ip), ['10.22.138.16'])
+})
+
+test('sem escopo, ainda filtra multicast/broadcast global mas mantém .255 (máscara desconhecida)', () => {
+  // Sem scannedCidrs não dá pra saber que .255 é broadcast de uma /24 — então ele
+  // fica (errar pra "não apagar"), mas multicast/global broadcast caem sempre.
+  const { hosts } = normalizeAgentReport({
+    hosts: [{ ip: '10.0.0.255' }, { ip: '255.255.255.255' }, { ip: '239.0.0.1' }],
+  })
+  assert.deepEqual(hosts.map((h) => h.ip), ['10.0.0.255'])
+})
+
 // ── Escopo da coleta + avisos (agente v2) ───────────────────────────────────
 test('normaliza scannedCidrs e warnings', () => {
   const r = normalizeAgentReport({
