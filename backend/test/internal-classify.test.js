@@ -84,7 +84,30 @@ test('impressora ainda vence hypervisor (regra mais específica vem antes)', () 
   assert.equal(classifyDevice({ openPorts: P(9100, 443, 902) }).deviceType, 'printer')
 })
 
-test('desconhecido: sem sinais úteis', () => {
+// ── Fallback por hostname/mDNS (endpoint atrás de firewall, sem porta/OS) ──────
+test('notebook por hostname (sem portas) → workstation, não desconhecido', () => {
+  assert.equal(classifyDevice({ hostname: 'MARCIOO-NOTEBOO', openPorts: [] }).deviceType, 'workstation')
+  assert.equal(classifyDevice({ hostname: 'Bassan-Notebook.local', openPorts: [] }).deviceType, 'workstation')
+})
+
+test('mDNS .local sem outro sinal → workstation (Mac/dispositivo de usuário)', () => {
+  assert.equal(classifyDevice({ hostname: 'Manzarek.local', openPorts: [] }).deviceType, 'workstation')
+  assert.equal(classifyDevice({ hostname: 'M1-Audio-Setup.local', openPorts: [] }).deviceType, 'workstation')
+})
+
+test('PC-* por hostname → workstation', () => {
+  assert.equal(classifyDevice({ hostname: 'PC-MARIA', openPorts: [] }).deviceType, 'workstation')
+})
+
+test('fallback de hostname NÃO rouba de regra específica (impressora .local ainda é impressora)', () => {
+  assert.equal(classifyDevice({ hostname: 'HP-Printer.local', openPorts: P(9100) }).deviceType, 'printer')
+})
+
+test('servidor por hostname continua vencendo o fallback de estação', () => {
+  assert.equal(classifyDevice({ hostname: 'dc01.corp.local', openPorts: P(88, 389) }).deviceType, 'server')
+})
+
+test('desconhecido: sem sinais úteis (sem porta, sem hostname)', () => {
   assert.equal(classifyDevice({ openPorts: [] }).deviceType, 'unknown')
 })
 

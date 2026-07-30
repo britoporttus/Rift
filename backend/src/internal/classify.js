@@ -92,6 +92,21 @@ function classifyDevice({ os = '', openPorts = [], macVendor = '', hostname = ''
     return { deviceType: 'workstation', confidence: 'medium' }
   }
 
+  // Fallback por HOSTNAME/mDNS — endpoints de usuário atrás de firewall
+  // (Windows/macOS endurecido) respondem ARP mas não expõem porta nem OS
+  // detectável; o nome revela o tipo. Só chega aqui quem não casou com nenhuma
+  // regra específica (impressora/câmera/servidor/etc já teriam vencido antes),
+  // então o risco de falso-positivo é baixo — por isso confiança 'low'.
+  if (/noteb|laptop|macbook|imac|desktop|workstation|\bpc\b|-pc\d*$|\bnb\d|\bwks?\b/.test(host)) {
+    return { deviceType: 'workstation', confidence: 'low' }
+  }
+  // mDNS/Bonjour (.local) num host que não casou com nada mais específico é, na
+  // esmagadora maioria, um dispositivo de usuário (Mac/iPhone) — impressora/câmera
+  // que anunciam mDNS já teriam casado pelas portas.
+  if (/\.local$/.test(host)) {
+    return { deviceType: 'workstation', confidence: 'low' }
+  }
+
   return { deviceType: 'unknown', confidence: 'low' }
 }
 
