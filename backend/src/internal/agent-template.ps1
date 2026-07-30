@@ -2,8 +2,10 @@
 #
 # Roda DENTRO da rede do cliente e reporta para a plataforma. Sem dependencia:
 # usa so o que existe em qualquer Windows 10/11 e Server 2016+ (PowerShell 5.1).
-# Se o nmap estiver instalado, usa ele para enriquecer (versao de servico +
-# deteccao de OS); se nao estiver, degrada para varredura nativa em vez de falhar.
+# Se o nmap estiver disponivel, usa ele para enriquecer (versao de servico +
+# deteccao de OS + SMBv1 real); se nao, degrada para varredura nativa em vez de
+# falhar. nmap e OPCIONAL: instalar nao e obrigatorio - basta $env:RIFT_NMAP
+# apontando pro binario, ou um nmap.exe portatil largado na pasta deste script.
 #
 # Uso (PowerShell COMO ADMINISTRADOR):
 #   $env:RIFT_URL='https://rift.exemplo'; $env:RIFT_TOKEN='xxxx'
@@ -20,7 +22,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$VERSION = '2.0'
+$VERSION = '2.1'
 $RIFT_URL = ($env:RIFT_URL -replace '/+$', '')
 $RIFT_TOKEN = $env:RIFT_TOKEN
 
@@ -153,6 +155,16 @@ function Resolve-HostName($ip) {
 }
 
 function Get-NmapPath {
+    <# Resolve o nmap ou retorna $null. Ordem: $env:RIFT_NMAP -> nmap.exe ao lado
+       deste script (portatil, sem instalacao) -> PATH -> local de instalacao
+       padrao. Largar um nmap.exe portatil na pasta do agente da cobertura
+       completa sem instalar nada (o nmap acha os dados na propria pasta do exe). #>
+    if ($env:RIFT_NMAP -and (Test-Path $env:RIFT_NMAP)) { return $env:RIFT_NMAP }
+    $here = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { $null }
+    if ($here) {
+        $bundled = Join-Path $here 'nmap.exe'
+        if (Test-Path $bundled) { return $bundled }
+    }
     $c = Get-Command nmap -ErrorAction SilentlyContinue
     if ($c) { return $c.Source }
     foreach ($p in @("$env:ProgramFiles\Nmap\nmap.exe", "${env:ProgramFiles(x86)}\Nmap\nmap.exe")) {
@@ -271,7 +283,13 @@ function Invoke-ScanOnce($targets, $trigger, $warnings) {
     $ips = @($alive.Keys | Sort-Object)
     $nmap = Get-NmapPath
     $enrich = if ($nmap -and $ips.Count -gt 0) { Invoke-NmapScan $nmap $ips } else { @{} }
-    if (-not $nmap) { Write-Log 'nmap nao encontrado - varredura nativa (sem versao de servico nem deteccao de OS)' }
+    if (-not $nmap) {
+        # Igual ao agente Python: coleta degradada vira aviso VISIVEL no painel, nao
+        # so log local - inventario sem nmap nao pode passar por inventario completo.
+        $msg = 'nmap nao encontrado - varredura nativa (TCP connect + tabela ARP). Sem versao de servico, deteccao de OS, fabricante do MAC nem SMBv1. Para cobertura completa: instale o nmap, aponte $env:RIFT_NMAP, ou largue um nmap.exe na pasta do agente.'
+        Write-Log $msg
+        $runWarnings += $msg
+    }
 
     $hosts = @()
     foreach ($ip in $ips) {
