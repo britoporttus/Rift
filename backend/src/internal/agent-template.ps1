@@ -164,12 +164,16 @@ function Get-NmapPath {
 function Invoke-NmapScan($nmap, $ips) {
     <# Enriquecimento opcional: versao de servico, OS e SMBv1 real (script
        smb-protocols). -Pn porque a descoberta ja aconteceu no ARP sweep. #>
-    $spec = '1-1024,1433,1521,2179,3306,3389,5432,5480,5900-5902,5989,6379,8000,8006,8080,8443,9100,9200,9443,27017'
+    # Otimizacao de tempo (a lentidao vinha daqui): usa a MESMA lista curada do scan
+    # nativo (~54 portas) em vez de 1-1024 — o -sV sobre 1024 portas era ~20x mais
+    # trabalho sem ganho de classificacao. Somado a host-timeout 120s (era 180),
+    # max-retries 1 e min-hostgroup 32 (varre os hosts em paralelo).
+    $spec = ($PORTS -join ',')
     $tmp = [IO.Path]::GetTempFileName()
     $args = @('-oX', $tmp, '-Pn', '-p', $spec, '-sV', '--version-intensity', '2', '-T4',
-              '--host-timeout', '180s', '--max-retries', '2',
-              '--script', 'smb-protocols', '--script-timeout', '30s')
-    if (Test-Admin) { $args += @('-O', '--osscan-limit') }
+              '--host-timeout', '120s', '--max-retries', '1', '--min-hostgroup', '32',
+              '--script', 'smb-protocols', '--script-timeout', '20s')
+    if (Test-Admin) { $args += @('-O', '--osscan-limit', '--max-os-tries', '1') }
     $args += $ips
     Write-Log "nmap encontrado - enriquecendo $($ips.Count) host(s)..."
     try {
