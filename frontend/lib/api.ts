@@ -192,7 +192,7 @@ export const api = {
     regenerateToken: (id: string) =>
       req<{ ok: boolean; token: string }>(`/internal-networks/${id}/regenerate-token`, { method: 'POST' }),
     agentCommand: (id: string) =>
-      req<{ token: string; scriptUrl: string; command: string; watchHint: string }>(`/internal-networks/${id}/agent-command`),
+      req<{ token: string; scriptUrl: string; command: string; commandWindows: string; watchHint: string }>(`/internal-networks/${id}/agent-command`),
   },
 }
 
