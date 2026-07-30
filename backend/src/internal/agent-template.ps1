@@ -116,17 +116,31 @@ function Invoke-ArpSweep($cidr) {
 }
 
 function Invoke-NativePortScan($ip) {
-    <# Conexoes TCP assincronas. Nao usa Test-NetConnection: ele serializa e
+    <# Conexoes TCP em paralelo. Usa BeginConnect, NAO ConnectAsync: a sobrecarga
+       ConnectAsync(string,int) nao resolve no .NET Framework do Windows PowerShell
+       5.1 ("nao foi possivel localizar uma sobrecarga para ConnectAsync"), enquanto
+       BeginConnect(string,int,AsyncCallback,Object) existe desde o .NET 2.0 e roda
+       em qualquer versao (5.1 e 7+). Nao usa Test-NetConnection: ele serializa e
        levaria minutos por host. #>
     $open = @()
     $tries = @()
     foreach ($port in $PORTS) {
         $c = New-Object System.Net.Sockets.TcpClient
-        $tries += [pscustomobject]@{ Port = $port; Client = $c; Task = $c.ConnectAsync($ip, $port) }
+        try {
+            $iar = $c.BeginConnect($ip, [int]$port, $null, $null)
+            $tries += [pscustomobject]@{ Port = $port; Client = $c; Result = $iar }
+        } catch { try { $c.Close() } catch {} }
     }
     Start-Sleep -Milliseconds 1200
     foreach ($t in $tries) {
-        if ($t.Task.Status -eq 'RanToCompletion' -and $t.Client.Connected) {
+        $isOpen = $false
+        try {
+            if ($t.Result.IsCompleted) {
+                $t.Client.EndConnect($t.Result)   # lanca se a porta esta fechada/sem resposta
+                $isOpen = $t.Client.Connected
+            }
+        } catch {}
+        if ($isOpen) {
             $open += @{ port = $t.Port; proto = 'tcp'; service = $null; product = $null; version = $null }
         }
         try { $t.Client.Close() } catch {}
