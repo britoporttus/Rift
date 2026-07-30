@@ -22,7 +22,7 @@ const { computeScore } = require('./score')
 const { computeAssetDiff } = require('./diff')
 const { analyzePort } = require('./ports')
 const { lookupNetblocks, classifyProvider } = require('./asn')
-const { isBlockedIp, expandCidrsV4 } = require('../net-guard')
+const { isBlockedIp, expandCidrsV4, ipInCidr } = require('../net-guard')
 
 const MAX_PROBE_HOSTS = Number(process.env.ASM_MAX_HOSTS) || 400
 // Default-ON: nuclei (exposições + CVEs) roda por padrão nos domínios
@@ -274,7 +274,10 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
   const scopedTypes = ['subdomain']
   if (authorized) scopedTypes.push('web')
   if (authorized && NUCLEI_ENABLED) scopedTypes.push('exposure')
-  if (authorized && PORTSCAN_ENABLED) scopedTypes.push('port')
+  // 'port' fica FORA do diff de superfície de propósito: os IPs de mail (Microsoft
+  // 365/MailChimp) rotacionam por round-robin, então portas entram/saem a cada
+  // scan e poluiriam o "novo/sumido". A lista de portas é um retrato do estado
+  // atual (re-derivada e limpa a cada scan), não um delta.
 
   await Domain.findByIdAndUpdate(domainId, { $set: {
     scanState: 'scanning', scanStep: 'subdomains', scanError: null,
@@ -314,6 +317,11 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
       const ownIps = [...new Set(resolved.filter((r) => r && r.resolves).flatMap((r) => r.ips || []))]
         .filter((ip) => !isBlockedIp(ip))
 
+      // Clean slate: portas são um retrato do estado ATUAL, re-derivado a cada
+      // scan. Apaga tudo antes de re-escanear — senão os IPs de mail que rotacionam
+      // (Microsoft 365/MailChimp) acumulam indefinidamente e ficam sem rótulo.
+      await DomainAsset.deleteMany({ domainId, type: 'port' }).catch(() => {})
+
       // ASN/holder por IP ANTES do scan: identifica quem é provedor SaaS/e-mail
       // (pra rotular a porta) e quais faixas o alvo possui (pra expandir). É só
       // RIPEstat (leitura, sem tocar o alvo), então roda mesmo com expansão off.
@@ -326,7 +334,14 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
           const r = await lookupNetblocks(ownIps, { targetDomain: domain, maxPrefixIps: ASN_MAX_PREFIX_IPS, maxIps: 80 })
           cidrs = r.cidrs
           await Domain.findByIdAndUpdate(domainId, { $set: { asnInfo: r.asns } }).catch(() => {})
-          providerFor = (ip) => classifyProvider(r.ipMap[ip] && r.ipMap[ip].holder)
+          // Classifica por IP exato E por PREFIXO: um único lookup de qualquer IP
+          // do bloco da Microsoft (52.96.0.0/14) classifica TODOS os 52.97.x, mesmo
+          // os que não foram consultados individualmente (robusto a lacunas do lookup).
+          providerFor = (ip) => {
+            let holder = r.ipMap[ip] && r.ipMap[ip].holder
+            if (!holder) { const hit = r.asns.find((a) => a.prefix && ipInCidr(ip, a.prefix)); holder = hit && hit.holder }
+            return classifyProvider(holder)
+          }
         } catch (e) { console.warn('[asm] lookup de ASN falhou:', e?.message) }
       }
 
@@ -335,8 +350,6 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
 
       // Fase 2: expande o netblock SÓ quando o alvo demonstravelmente POSSUI a
       // faixa (holder do ASN casa com o domínio) E ela é de tamanho contido.
-      // Limpa vizinhos antigos sempre (se a faixa deixou de ser expandida, somem).
-      await DomainAsset.deleteMany({ domainId, type: 'port', fromNeighbor: true }).catch(() => {})
       if (ASN_ENABLED && cidrs.length) {
         try {
           const ownSet = new Set(ownIps)
