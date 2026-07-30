@@ -40,7 +40,7 @@ const domainSchema = new mongoose.Schema({
   // --- ASN / netblock (descoberto via RIPEstat na Fase 2). `tooLarge` = prefixo
   //     grande de cloud, não expandido. Guardado só para exibição/contexto. ---
   asnInfo: {
-    type: [{ asn: String, holder: String, prefix: String, tooLarge: Boolean }],
+    type: [{ asn: String, holder: String, prefix: String, tooLarge: Boolean, owned: Boolean }],
     default: [],
   },
 

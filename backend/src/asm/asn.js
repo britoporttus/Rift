@@ -2,13 +2,33 @@
 // ProjectDiscovery passou a exigir chave PDCP; RIPEstat é aberto e cobre o que
 // precisamos: IP → ASN + prefixo anunciado, e o holder (organização) do ASN.
 //
-// GUARDA ANTI-CLOUD (crítico): a maioria dos alvos está hospedada em cloud
-// (AWS/Google/Cloudflare) — o ASN é do PROVEDOR, não do cliente, e tem milhões
-// de IPs. Escanear o ASN inteiro seria escanear o provedor todo. Por isso só
-// devolvemos o **prefixo que contém o IP do alvo** (ex.: o /24), e só se for de
-// tamanho contido (`maxPrefixIps`); prefixo grande de cloud é marcado `tooLarge`
-// e NÃO entra na expansão.
+// GUARDA ANTI-CLOUD + ANTI-HOSPEDAGEM (crítico): a maioria dos alvos está em
+// provedor (cloud, datacenter, SaaS de e-mail) — o ASN/bloco é do PROVEDOR, não
+// do cliente. Mesmo um /24 num datacenter é COMPARTILHADO: o alvo tem 1 IP lá, o
+// resto do bloco é de outros clientes. Escanear esses vizinhos = escanear
+// terceiros e atribuí-los ao alvo por engano.
+//
+// Por isso só expandimos um prefixo quando (a) ele é de tamanho contido
+// (`maxPrefixIps`, senão `tooLarge`) E (b) o alvo DEMONSTRAVELMENTE POSSUI a
+// faixa — o nome do holder do ASN casa com o nome do domínio (`owned`). IDC19,
+// MailChimp, Hostinger, Interserver etc. não casam → só viram contexto, não são
+// escaneados.
 const { parseCidrV4 } = require('../net-guard')
+
+// Normaliza para comparação: minúsculas, só alfanumérico, sem separadores.
+function compact(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '') }
+
+// O alvo "possui" a faixa se um rótulo significativo do domínio aparece no nome
+// do holder do ASN. Ex.: trustsis.com + "IDC19 SOLUCOES EM TECNOLOGIA" → NÃO
+// (provedor); trustsis.com + "TRUSTSIS LTDA" → SIM. Rótulos < 4 chars e TLDs são
+// ignorados (ruído). Conservador: na dúvida, NÃO possui → não expande.
+function ownsRange(holder, targetDomain) {
+  if (!holder || !targetDomain) return false
+  const h = compact(holder)
+  const labels = String(targetDomain).toLowerCase().split('.')
+    .filter((l) => l.length >= 4 && !['com', 'net', 'org', 'www', 'gov', 'edu', 'info'].includes(l))
+  return labels.some((l) => h.includes(compact(l)))
+}
 
 const RIPESTAT = 'https://stat.ripe.net/data'
 
@@ -24,9 +44,11 @@ async function httpJson(url, { timeoutMs = 12000, fetchFn } = {}) {
   } catch { return null } finally { clearTimeout(t) }
 }
 
-// ips: string[] (IPs públicos já net-guard-safe do stageDns).
-// Retorna { asns: [{asn, holder, prefix, tooLarge}], cidrs: [prefixos expansíveis] }.
-async function lookupNetblocks(ips, { maxIps = 5, maxPrefixIps = 1024, fetchFn } = {}) {
+// ips: string[] (IPs públicos já net-guard-safe do stageDns). `targetDomain` é o
+// domínio sendo escaneado — usado para decidir se o alvo POSSUI a faixa.
+// Retorna { asns: [{asn, holder, prefix, tooLarge, owned}], cidrs: [expansíveis] }.
+// `cidrs` só contém prefixos owned && !tooLarge (os que é seguro/legítimo expandir).
+async function lookupNetblocks(ips, { targetDomain = null, maxIps = 5, maxPrefixIps = 1024, fetchFn } = {}) {
   const distinct = []
   const seen = new Set()
   for (const ip of Array.isArray(ips) ? ips : []) {
@@ -52,13 +74,17 @@ async function lookupNetblocks(ips, { maxIps = 5, maxPrefixIps = 1024, fetchFn }
       const ov = await httpJson(`${RIPESTAT}/as-overview/data.json?resource=AS${asn}`, { fetchFn })
       holderCache[asn] = (ov && ov.data && ov.data.holder) || null
     }
+    const holder = holderCache[asn]
+    const owned = ownsRange(holder, targetDomain)
     // dedup por prefixo
     if (!asns.some((a) => a.prefix === prefix)) {
-      asns.push({ asn: `AS${asn}`, holder: holderCache[asn], prefix, tooLarge })
+      asns.push({ asn: `AS${asn}`, holder, prefix, tooLarge, owned })
     }
-    if (!tooLarge) cidrs.add(prefix)
+    // Só expande faixa PRÓPRIA e de tamanho contido. Provedor (não-owned) ou bloco
+    // grande de cloud vira só contexto — nunca escaneamos os vizinhos.
+    if (owned && !tooLarge) cidrs.add(prefix)
   }
   return { asns, cidrs: [...cidrs] }
 }
 
-module.exports = { lookupNetblocks }
+module.exports = { lookupNetblocks, ownsRange }
