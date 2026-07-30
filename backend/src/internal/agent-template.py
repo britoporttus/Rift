@@ -197,11 +197,14 @@ def scan_ports(ips):
     justamente os hosts endurecidos que o ARP tinha encontrado."""
     if not ips:
         return ""
+    # Otimização de tempo: host-timeout 120s (era 180 — cauda de latência com hosts
+    # filtrados), max-retries 1, e min-hostgroup 32 pra o nmap varrer os hosts em
+    # paralelo em vez de quase-serial. PORT_SPEC já é a lista curada (~54 portas).
     args = ["nmap", "-oX", "-", "-Pn", "-p", PORT_SPEC, "-sV", "--version-intensity", "2",
-            "-T4", "--host-timeout", "180s", "--max-retries", "2",
-            "--script", "smb-protocols", "--script-timeout", "30s"]
+            "-T4", "--host-timeout", "120s", "--max-retries", "1", "--min-hostgroup", "32",
+            "--script", "smb-protocols", "--script-timeout", "20s"]
     if is_root():
-        args += ["-O", "--osscan-limit", "-sS"]  # detecção de OS + SYN scan exigem root
+        args += ["-O", "--osscan-limit", "--max-os-tries", "1", "-sS"]  # OS + SYN exigem root
     args += ips
     try:
         return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL)
