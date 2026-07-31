@@ -17,7 +17,7 @@ const KIND_COLOR: Record<string, string> = {
 
 const STEP_LABEL: Record<string, string> = {
   subdomains: 'subdomínios', dns: 'DNS', http: 'probe web',
-  exposures: 'exposições', scoring: 'score', done: 'concluído',
+  exposures: 'exposições', takeover: 'takeover', ports: 'portas', scoring: 'score', done: 'concluído',
 }
 const KIND_LABEL: Record<string, string> = { vendor: 'Fornecedor', partner: 'Parceiro', internal: 'Interno', other: 'Outro' }
 

@@ -21,6 +21,7 @@ const { runTool, hasBin } = require('./binaries')
 const { computeScore } = require('./score')
 const { computeAssetDiff } = require('./diff')
 const { analyzePort } = require('./ports')
+const { detectTakeover } = require('./takeover')
 const { lookupNetblocks, classifyProvider } = require('./asn')
 const { isBlockedIp, expandCidrsV4, ipInCidr } = require('../net-guard')
 
@@ -34,6 +35,10 @@ const NUCLEI_ENABLED = process.env.ASM_NUCLEI !== '0'
 // Não usa naabu: naabu trava sob execFile sem TTY (enumeração de interface). Um
 // connect scan em Node é robusto, sem binário externo, e dá controle total de
 // concorrência/timeout. Lista curada = portas arriscadas (ports.js) + comuns.
+// Fase 3: subdomain takeover. Passivo (heurística de CNAME pendente) roda sempre
+// dentro do stageDns; a confirmação ATIVA (nuclei -tags takeover) só em domínio
+// autorizado. `ASM_TAKEOVER=0` desliga a passada ativa.
+const TAKEOVER_ENABLED = process.env.ASM_TAKEOVER !== '0'
 const PORTSCAN_ENABLED = process.env.ASM_PORTSCAN !== '0'
 const SCAN_PORTS = (process.env.ASM_PORTS ||
   '21,22,23,25,53,69,80,110,111,135,139,143,161,389,443,445,465,512,513,514,587,636,873,993,995,' +
@@ -115,8 +120,11 @@ function isProbeSafe(ips) {
 
 async function stageDns(domainId, hosts) {
   return mapPool(hosts, 24, async (host) => {
-    let ips = [], cname = null
-    try { ips = await dns.resolve4(host) } catch {}
+    let ips = [], cname = null, nxdomain = false
+    // Distingue NXDOMAIN (nome não existe → sinal de CNAME pendente/takeover) de
+    // falha transitória: só ENOTFOUND/NXDOMAIN conta como "não resolve de verdade".
+    try { ips = await dns.resolve4(host) }
+    catch (e) { if (e && (e.code === 'ENOTFOUND' || e.code === 'NXDOMAIN')) nxdomain = true }
     if (!ips.length) { try { const a = await dns.resolve('' + host); ips = Array.isArray(a) ? a : [] } catch {} }
     try { const c = await dns.resolveCname(host); if (c && c.length) cname = c[0] } catch {}
     const safe = isProbeSafe(ips)
@@ -125,7 +133,17 @@ async function stageDns(domainId, hosts) {
     await upsertAsset(domainId, `${domainId}:host:${host}`, {
       type: 'subdomain', value: host, ips, cname, source: 'subfinder+dns',
     })
-    return { host, ips, cname, resolves }
+    // Fase 3 (passivo): CNAME pendente → candidato a subdomain takeover. Puramente
+    // derivado do que o DNS já devolveu (zero pacote ao alvo) → roda mesmo sem
+    // autorização. A confirmação por corpo HTTP fica pro nuclei (stageTakeover).
+    const tk = detectTakeover({ host, cname, ips, nxdomain })
+    if (tk) {
+      await upsertAsset(domainId, `${domainId}:takeover:${host}`, {
+        type: 'exposure', value: host, severity: tk.severity,
+        label: tk.label, cname: tk.cname, source: 'dns-takeover',
+      })
+    }
+    return { host, ips, cname, resolves, nxdomain }
   })
 }
 
@@ -197,6 +215,42 @@ async function stageNuclei(domainId, aliveHosts) {
       type: 'exposure', value: matched, alive: true,
       severity: ['critical', 'high', 'medium', 'low'].includes(info.severity) ? info.severity : 'info',
       label: info.name || tid, cveId, source: 'nuclei',
+    })
+  }
+  return n
+}
+
+// Fase 3 (ativo): confirma subdomain takeover com os templates de takeover do
+// nuclei — casam a impressão digital do CORPO HTTP do serviço órfão ("There
+// isn't a GitHub Pages site here" etc.). Só em domínio autorizado (envia pacote).
+// Roda sobre TODOS os hosts que resolvem (não só os httpx-alive): um host
+// sequestrável pode responder algo que o httpx não marcou como "vivo".
+async function stageTakeover(domainId, hosts) {
+  if (!TAKEOVER_ENABLED || !hasBin('nuclei') || !hosts.length) return 0
+  const tmp = path.join(os.tmpdir(), `rift-asm-tko-${domainId}.txt`)
+  try { fs.writeFileSync(tmp, hosts.join('\n'), 'utf8') } catch { return 0 }
+  const r = await runTool('nuclei', [
+    '-l', tmp, '-jsonl', '-silent', '-no-color',
+    '-tags', 'takeover',
+    '-rate-limit', '50', '-timeout', '8',
+  ], { timeoutMs: 300000 })
+  try { fs.unlinkSync(tmp) } catch {}
+
+  let n = 0
+  for (const line of (r.stdout || '').split('\n')) {
+    const s = line.trim(); if (!s || s[0] !== '{') continue
+    let j; try { j = JSON.parse(s) } catch { continue }
+    const info = j.info || {}
+    const matched = get(j, 'matched-at', 'matched_at', 'host') || ''
+    const tid = get(j, 'template-id', 'templateID') || 'takeover'
+    const host = String(matched).replace(/^https?:\/\//, '').split(/[/:]/)[0].toLowerCase()
+    if (!host) continue
+    n++
+    // Confirmado é mais grave que o candidato passivo: no mínimo high.
+    const sev = ['critical', 'high', 'medium'].includes(info.severity) ? info.severity : 'high'
+    await upsertAsset(domainId, `${domainId}:takeover-ok:${host}:${tid}`, {
+      type: 'exposure', value: host, alive: true, severity: sev,
+      label: `Subdomain takeover confirmado — ${info.name || tid}`, source: 'nuclei-takeover',
     })
   }
   return n
@@ -308,6 +362,14 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
       await setStep(domainId, 'exposures')
       const aliveAssets = await DomainAsset.find({ domainId, type: 'web', alive: true }).select('value').lean()
       await stageNuclei(domainId, aliveAssets.map((a) => a.value))
+    }
+
+    // 3b-2) subdomain takeover confirmado (nuclei -tags takeover) — autorizado.
+    // Sobre os hosts que resolvem (a heurística passiva de CNAME pendente já rodou
+    // no stageDns, sem autorização). Ver Fase 3.
+    if (authorized && TAKEOVER_ENABLED) {
+      await setStep(domainId, 'takeover')
+      await stageTakeover(domainId, liveHosts)
     }
 
     // 3c) port scan (naabu) — só autorizado. Nos IPs PRÓPRios do domínio (os que

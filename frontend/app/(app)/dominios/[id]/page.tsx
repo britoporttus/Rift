@@ -42,7 +42,8 @@ const RS_BADGE: Record<string, { t: string; c: string }> = {
 
 const STEP_LABEL: Record<string, string> = {
   subdomains: 'enumerando subdomínios', dns: 'resolvendo DNS', http: 'sondando web (probe)',
-  exposures: 'checando exposições', scoring: 'calculando score',
+  exposures: 'checando exposições', takeover: 'checando subdomain takeover', ports: 'varrendo portas',
+  scoring: 'calculando score',
 }
 const KIND_LABEL: Record<string, string> = { vendor: 'Fornecedor', partner: 'Parceiro', internal: 'Interno', other: 'Outro' }
 function rc(level: string) { return SEV_COLOR[level] || SEV_COLOR.info }
