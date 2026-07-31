@@ -71,3 +71,9 @@ core.[0-9]*
 # Python bytecode (py_compile do agente)
 __pycache__/
 *.pyc
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+frontend/.ds-entry.tsx
