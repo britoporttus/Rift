@@ -78,6 +78,22 @@ test('computeNetworkScore: mais achados de alta severidade → score maior (mono
   assert.ok(alto.score > baixo.score)
 })
 
+test('computeNetworkScore: rede grande e LIMPA não tem risco (tamanho não é risco)', () => {
+  // Regressão da mudança de modelo: antes, 50 hosts limpos davam +6 só por existirem.
+  const hosts = Array.from({ length: 50 }, () => ({ severity: 'info', deviceType: 'server' }))
+  const r = computeNetworkScore({ hosts })
+  assert.equal(r.score, 0)
+  assert.equal(r.level, 'info')
+  assert.deepEqual(r.reasons, [])
+})
+
+test('computeNetworkScore: unknown conta 1x (como achado low), sem bônus de tamanho', () => {
+  // O host unknown tem severity 'low' via analyzeHost; deve valer só o peso de um
+  // achado low (3), sem contagem em dobro nem pontos por "estar na rede".
+  const r = computeNetworkScore({ hosts: [{ severity: 'low', deviceType: 'unknown' }] })
+  assert.equal(r.score, 3)
+})
+
 test('computeNetworkScore: nunca passa de 100 + reasons ≤ 8', () => {
   const hosts = Array.from({ length: 40 }, () => ({ severity: 'critical', deviceType: 'unknown' }))
   const r = computeNetworkScore({ hosts })

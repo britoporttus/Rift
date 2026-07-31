@@ -63,11 +63,15 @@ function levelFromScore(score) {
 }
 
 // computeNetworkScore({ hosts }) → { score, level, reasons } (transparente, 0-100).
+// O risco da rede é função exclusiva dos ACHADOS de segurança — NÃO do tamanho
+// dela. Uma rede grande e limpa não é arriscada; uma pequena com um banco exposto
+// é. Por isso não há mais bônus por "quantidade de hosts". O dispositivo não
+// identificado também não conta à parte: ele já entra aqui como achado `low` (via
+// analyzeHost), então somá-lo de novo seria contar o mesmo risco duas vezes.
 function computeNetworkScore({ hosts = [] } = {}) {
   let score = 0
   const reasons = []
 
-  // 1) Hosts com severidade > info (achados de segurança) — sinal mais forte.
   const bySev = { critical: 0, high: 0, medium: 0, low: 0 }
   for (const h of hosts) {
     if (h.severity && h.severity !== 'info' && bySev[h.severity] != null) bySev[h.severity]++
@@ -78,22 +82,6 @@ function computeNetworkScore({ hosts = [] } = {}) {
     const pts = Math.min(SEV_WEIGHT[sev] * n, SEV_WEIGHT[sev] * 3)  // teto por classe
     score += pts
     reasons.push(`${n} host(s) com achado ${sev} (+${pts})`)
-  }
-
-  // 2) Dispositivos não identificados (rogue candidatos).
-  const unknown = hosts.filter((h) => h.deviceType === 'unknown').length
-  if (unknown) {
-    const pts = Math.min(15, unknown * 3)
-    score += pts
-    reasons.push(`${unknown} dispositivo(s) não identificado(s) (+${pts})`)
-  }
-
-  // 3) Tamanho da superfície (mais hosts vivos = mais exposição).
-  const alive = hosts.length
-  if (alive) {
-    const pts = Math.min(10, Math.floor(alive / 10) + 1)
-    score += pts
-    reasons.push(`${alive} host(s) na rede (+${pts})`)
   }
 
   score = Math.max(0, Math.min(100, Math.round(score)))

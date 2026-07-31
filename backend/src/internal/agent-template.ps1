@@ -95,13 +95,20 @@ function Invoke-ArpSweep($cidr) {
     $base = $cidr -replace '\.0/24$', ''
     Write-Log "descobrindo hosts em $cidr (ARP sweep)..."
 
-    $pings = @()
-    foreach ($i in 1..254) {
-        $p = New-Object System.Net.NetworkInformation.Ping
-        $pings += [pscustomobject]@{ Task = $p.SendPingAsync("$base.$i", 500); Ping = $p }
+    # 2 rodadas com timeout folgado (1s). Dispositivo WiFi (celular/notebook) entra
+    # em power-save e IGNORA a primeira sonda — sem retry o ARP nunca resolve e ele
+    # some do inventario. Cada ping tambem popula o cache ARP mesmo com o ICMP dropado,
+    # entao 2 rodadas + um settle antes da leitura aumentam muito a cobertura em WiFi.
+    for ($round = 1; $round -le 2; $round++) {
+        $pings = @()
+        foreach ($i in 1..254) {
+            $p = New-Object System.Net.NetworkInformation.Ping
+            $pings += [pscustomobject]@{ Task = $p.SendPingAsync("$base.$i", 1000); Ping = $p }
+        }
+        try { [Threading.Tasks.Task]::WaitAll(@($pings.Task), 12000) | Out-Null } catch {}
+        foreach ($p in $pings) { $p.Ping.Dispose() }
+        Start-Sleep -Milliseconds 500   # deixa o cache ARP assentar antes de reler/repetir
     }
-    try { [Threading.Tasks.Task]::WaitAll(@($pings.Task), 8000) | Out-Null } catch {}
-    foreach ($p in $pings) { $p.Ping.Dispose() }
 
     $found = @{}
     Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue |
