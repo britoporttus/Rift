@@ -61,6 +61,7 @@ export default function DominioDetailPage() {
   const [scanning, setScanning] = useState(false)
   const [authNote, setAuthNote] = useState('')
   const [authOpen, setAuthOpen] = useState(false)
+  const [saasOpen, setSaasOpen] = useState(false)
   const [history, setHistory] = useState<DomainScanRecord[]>([])
 
   const load = useCallback(() => {
@@ -102,7 +103,27 @@ export default function DominioDetailPage() {
 
   const exposures = assets.filter((a) => a.type === 'exposure')
   const ports = assets.filter((a) => a.type === 'port')
-    .sort((a, b) => (SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(b.severity)) || String(a.ip).localeCompare(String(b.ip)))
+
+  // Agrupa as portas por IP (uma entrada por IP, não por porta) e amarra ao(s)
+  // subdomínio(s) que resolvem pra ele. Muito mais limpo que a lista plana.
+  const subsForIp = (ip?: string | null) => !ip ? [] :
+    assets.filter((a) => a.type === 'subdomain' && (a.ips || []).includes(ip)).map((a) => a.value)
+  const ipGroups = Array.from(
+    ports.reduce((m, p) => {
+      const ip = p.ip || p.value
+      if (!m.has(ip)) m.set(ip, { ip, thirdParty: !!p.thirdParty, provider: p.provider || null, ports: [] as DomainAsset[] })
+      m.get(ip)!.ports.push(p)
+      return m
+    }, new Map<string, { ip: string; thirdParty: boolean; provider: string | null; ports: DomainAsset[] }>()).values()
+  ).map((g) => ({
+    ...g,
+    subs: subsForIp(g.ip),
+    ports: g.ports.slice().sort((a, b) => (a.port || 0) - (b.port || 0)),
+    risky: g.ports.filter((p) => p.severity !== 'info'),
+  }))
+  const ownGroups = ipGroups.filter((g) => !g.thirdParty).sort((a, b) => b.risky.length - a.risky.length || a.ip.localeCompare(b.ip))
+  const saasGroups = ipGroups.filter((g) => g.thirdParty)
+  const findingGroups = ownGroups.filter((g) => g.risky.length > 0)
 
   return (
     <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1180, margin: '0 auto', width: '100%' }}>
@@ -390,7 +411,7 @@ export default function DominioDetailPage() {
       {/* Portas & serviços (naabu) + faixas de netblock (ASN) */}
       {(ports.length > 0 || (domain.asnInfo && domain.asnInfo.length > 0)) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <SectionTitle icon={<Network size={13} />} color="var(--purple-light)">Portas & serviços ({ports.length})</SectionTitle>
+          <SectionTitle icon={<Network size={13} />} color="var(--purple-light)">Portas & serviços · {ipGroups.length} IP(s)</SectionTitle>
           {domain.asnInfo && domain.asnInfo.length > 0 && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
               {domain.asnInfo.map((a, i) => {
@@ -410,9 +431,44 @@ export default function DominioDetailPage() {
               })}
             </div>
           )}
+
           {ports.length === 0 ? (
             <div style={{ fontSize: 12, color: 'var(--text-mute)' }}>Nenhuma porta aberta detectada.</div>
-          ) : ports.map((a) => <PortRow key={a.id} a={a} />)}
+          ) : (
+            <>
+              {/* Exposições reais: IPs de servidores seus com porta arriscada */}
+              {findingGroups.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 4 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--high)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Exposições nos seus servidores ({findingGroups.reduce((n, g) => n + g.risky.length, 0)})
+                  </div>
+                  {findingGroups.map((g) => <IpGroup key={`f-${g.ip}`} g={g} onlyRisky />)}
+                </div>
+              )}
+
+              {/* Inventário por IP — servidores próprios */}
+              {ownGroups.map((g) => <IpGroup key={g.ip} g={g} />)}
+
+              {/* SaaS de terceiro — colapsado (contexto, não exposição sua) */}
+              {saasGroups.length > 0 && (
+                <div style={{ marginTop: 2 }}>
+                  <button onClick={() => setSaasOpen((v) => !v)} style={{
+                    display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left', cursor: 'pointer',
+                    background: 'var(--surface)', border: '1px dashed var(--border-mid)', borderRadius: 8, padding: '0.6rem 0.9rem',
+                    color: 'var(--text-mute)', fontSize: 12, fontFamily: 'inherit',
+                  }}>
+                    <ChevronRight size={14} style={{ transform: saasOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                    {saasGroups.length} IP(s) de SaaS/e-mail de terceiro (Microsoft 365, MailChimp…) — infra do provedor, não sua exposição
+                  </button>
+                  {saasOpen && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                      {saasGroups.map((g) => <IpGroup key={g.ip} g={g} />)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -503,27 +559,51 @@ function AssetRow({ a }: { a: DomainAsset }) {
   )
 }
 
-function PortRow({ a }: { a: DomainAsset }) {
-  const sc = a.severity !== 'info' ? (SEV_COLOR[a.severity] || SEV_COLOR.info) : null
-  const svc = [a.service, a.product, a.version].filter(Boolean).join(' ')
+// Uma entrada por IP: cabeçalho (IP + subdomínio + tag) e as portas em chips.
+// `onlyRisky` mostra só as portas com achado (usado na seção "Exposições").
+function IpGroup({ g, onlyRisky = false }: {
+  g: { ip: string; thirdParty: boolean; provider: string | null; ports: DomainAsset[]; subs: string[]; risky: DomainAsset[] }
+  onlyRisky?: boolean
+}) {
+  const shown = onlyRisky ? g.risky : g.ports
+  const worst = g.risky.length ? g.risky.reduce((w, p) => SEV_ORDER.indexOf(p.severity) < SEV_ORDER.indexOf(w.severity) ? p : w).severity : 'info'
+  const stripe = g.thirdParty ? 'var(--border-mid)' : (g.risky.length ? SEV_COLOR[worst] : 'var(--border-mid)')
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderLeft: `3px solid ${sc || 'var(--border-mid)'}`, borderRadius: 8, padding: '0.6rem 0.9rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 13, color: 'var(--text)', fontFamily: 'var(--mono)' }}>
-            {a.ip}<span style={{ color: 'var(--purple-light)' }}>:{a.port}</span>
-            {svc && <span style={{ color: 'var(--text-mute)' }}> · {svc}</span>}
-          </div>
-          {a.label && a.severity !== 'info' && (
-            <div style={{ fontSize: 11, color: sc || 'var(--muted)', marginTop: 2 }}>{a.label}</div>
-          )}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {a.thirdParty && a.provider && <span title="IP de provedor SaaS/e-mail — infra de terceiro, não exposição sua" style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--info)', background: 'color-mix(in srgb, var(--info) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--info) 30%, transparent)', borderRadius: 99, padding: '1px 7px' }}>SaaS · {a.provider}</span>}
-          {a.fromNeighbor && <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--text-mute)', border: '1px solid var(--border-mid)', borderRadius: 99, padding: '1px 7px' }}>vizinho</span>}
-          {a.severity !== 'info' && <span style={{ width: 7, height: 7, borderRadius: '50%', background: sc || 'var(--text-dim)' }} />}
-        </div>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderLeft: `3px solid ${stripe}`, borderRadius: 8, padding: '0.65rem 0.9rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, color: 'var(--text)', fontFamily: 'var(--mono)', fontWeight: 600 }}>{g.ip}</span>
+        {g.subs.length > 0 && (
+          <span style={{ fontSize: 11, color: 'var(--text-mute)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {g.subs.slice(0, 3).join(', ')}{g.subs.length > 3 ? ` +${g.subs.length - 3}` : ''}
+          </span>
+        )}
+        <span style={{ flex: 1 }} />
+        {g.thirdParty
+          ? <span title="Infra do provedor — não é exposição sua" style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--info)', background: 'color-mix(in srgb, var(--info) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--info) 30%, transparent)', borderRadius: 99, padding: '1px 8px' }}>SaaS · {g.provider}</span>
+          : <span style={{ fontSize: 9, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--low)', background: 'color-mix(in srgb, var(--low) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--low) 30%, transparent)', borderRadius: 99, padding: '1px 8px' }}>SEU SERVIDOR</span>}
       </div>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 8 }}>
+        {shown.map((p) => {
+          const risky = p.severity !== 'info'
+          const c = risky ? (SEV_COLOR[p.severity] || SEV_COLOR.info) : null
+          const svc = [p.service, p.product, p.version].filter(Boolean).join(' ')
+          return (
+            <span key={p.id} title={p.label || `${p.port}${svc ? ' · ' + svc : ''}`} style={{
+              fontSize: 10.5, fontFamily: 'var(--mono)', borderRadius: 6, padding: '2px 8px', whiteSpace: 'nowrap',
+              color: risky ? c! : 'var(--muted)', fontWeight: risky ? 700 : 400,
+              background: risky ? `color-mix(in srgb, ${c} 12%, transparent)` : 'var(--bg)',
+              border: `1px solid ${risky ? `color-mix(in srgb, ${c} 34%, transparent)` : 'var(--border)'}`,
+            }}>
+              {p.port}{p.service ? `/${p.service}` : ''}
+            </span>
+          )
+        })}
+      </div>
+      {onlyRisky && g.risky.some((p) => p.label) && (
+        <div style={{ fontSize: 11, color: SEV_COLOR[worst], marginTop: 6 }}>
+          {[...new Set(g.risky.map((p) => p.label).filter(Boolean))].join(' · ')}
+        </div>
+      )}
     </div>
   )
 }
