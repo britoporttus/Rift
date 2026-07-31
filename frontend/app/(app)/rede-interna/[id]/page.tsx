@@ -10,9 +10,10 @@ import { AgentSetup } from '@/components/rede-interna/AgentSetup'
 import { NetworkTopology } from '@/components/rede-interna/NetworkTopology'
 import { NetworkDiagram } from '@/components/rede-interna/NetworkDiagram'
 import { deviceColor, deviceLabel, deviceIcon, DEVICE_ORDER } from '@/components/rede-interna/deviceMeta'
+import { SecurityRecommendations } from '@/components/rede-interna/SecurityRecommendations'
 import {
   ArrowLeft, Network, Loader2, ShieldCheck, Lock, Check, Trash2, Info, History,
-  TrendingUp, TrendingDown, Minus, Radio, AlertTriangle, Workflow,
+  TrendingUp, TrendingDown, Minus, Radio, Workflow,
 } from 'lucide-react'
 
 function fmtDate(d?: string | null) {
@@ -192,13 +193,8 @@ export default function RedeInternaDetailPage() {
               : <NetworkTopology hosts={hosts} networkName={net.name} />}
           </div>
 
-          {/* Achados de segurança */}
-          {risky.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <SectionTitle icon={<AlertTriangle size={13} />} color="var(--high)">Achados de segurança ({risky.length})</SectionTitle>
-              {risky.sort((a, b) => (['critical', 'high', 'medium', 'low', 'info'].indexOf(a.severity) - ['critical', 'high', 'medium', 'low', 'info'].indexOf(b.severity))).map((h) => <HostRow key={h.id} h={h} />)}
-            </div>
-          )}
+          {/* Recomendações de segurança (agrupadas por achado, com a ação) */}
+          <SecurityRecommendations hosts={hosts} />
 
           {/* Inventário agrupado por tipo */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

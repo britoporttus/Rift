@@ -445,8 +445,13 @@ def discover_hosts_native(cidr):
         except Exception:
             pass
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=128) as ex:
-        list(ex.map(ping, ips))
+    # 2 rodadas: dispositivo WiFi (celular/notebook) entra em power-save e ignora a
+    # primeira sonda — sem retry o ARP nunca resolve e ele some. Cada ping popula o
+    # cache ARP mesmo com o ICMP dropado; um settle antes de ler deixa assentar.
+    for _ in range(2):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=128) as ex:
+            list(ex.map(ping, ips))
+        time.sleep(0.5)
 
     neigh = _read_neighbors()
     alive = {}
