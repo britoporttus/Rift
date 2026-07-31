@@ -68,9 +68,10 @@ router.post('/', async (req, res) => {
   const name = (req.body?.name || '').toString().trim().slice(0, 120)
   if (!name) return res.status(400).json({ error: 'Nome da rede é obrigatório' })
   const kind = ['lan', 'dmz', 'cloud', 'other'].includes(req.body?.kind) ? req.body.kind : 'lan'
+  const scanDepth = ['medium', 'full'].includes(req.body?.scanDepth) ? req.body.scanDepth : 'medium'
   const authorized = req.body?.authorized === true
   const created = await InternalNetwork.create({
-    name, kind,
+    name, kind, scanDepth,
     description: req.body?.description ? String(req.body.description).slice(0, 500) : null,
     authorized,
     authorizedBy: authorized ? (req.user?.name || req.user?.email || 'operador') : null,
@@ -152,13 +153,15 @@ router.get('/:id/agent-command', requireAuth(['admin']), async (req, res) => {
   const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0]
   const host = (req.headers['x-forwarded-host'] || req.headers.host || 'localhost')
   const base = `${proto}://${host}`
+  const depth = d.scanDepth === 'full' ? 'full' : 'medium'   // agente lê via RIFT_DEPTH
   res.json({
     token: d.enrollToken,
+    scanDepth: depth,
     scriptUrl: `${base}/api/internal-networks/agent-script`,
     // Linux: precisa de root (ARP ping + detecção de OS). Windows: PowerShell
     // como Administrador, mesmo motivo.
-    command: `curl -s ${base}/api/internal-networks/agent-script -o rift-agente.py && RIFT_URL=${base} RIFT_TOKEN=${d.enrollToken} sudo -E python3 rift-agente.py`,
-    commandWindows: `$env:RIFT_URL='${base}'; $env:RIFT_TOKEN='${d.enrollToken}'; ` +
+    command: `curl -s ${base}/api/internal-networks/agent-script -o rift-agente.py && RIFT_URL=${base} RIFT_TOKEN=${d.enrollToken} RIFT_DEPTH=${depth} sudo -E python3 rift-agente.py`,
+    commandWindows: `$env:RIFT_URL='${base}'; $env:RIFT_TOKEN='${d.enrollToken}'; $env:RIFT_DEPTH='${depth}'; ` +
       `iwr '${base}/api/internal-networks/agent-script?platform=windows' -OutFile rift-agente.ps1; ` +
       `powershell -ExecutionPolicy Bypass -File .\\rift-agente.ps1`,
     watchHint: `# contínuo (a cada 15 min): acrescente --watch 900 (Linux) ou -Watch 900 (Windows) ao final`,

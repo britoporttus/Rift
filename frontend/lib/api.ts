@@ -179,7 +179,7 @@ export const api = {
   internalNetworks: {
     list: () => req<InternalNetworkSummary[]>('/internal-networks'),
     get: (id: string) => req<InternalNetworkDetail>(`/internal-networks/${id}`),
-    create: (data: { name: string; kind?: InternalNetworkKind; description?: string; authorized?: boolean; authorizationNote?: string }) =>
+    create: (data: { name: string; kind?: InternalNetworkKind; scanDepth?: 'medium' | 'full'; description?: string; authorized?: boolean; authorizationNote?: string }) =>
       req<InternalNetworkDetail>('/internal-networks', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: { name?: string; kind?: InternalNetworkKind; description?: string }) =>
       req<InternalNetworkDetail>(`/internal-networks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -192,7 +192,7 @@ export const api = {
     regenerateToken: (id: string) =>
       req<{ ok: boolean; token: string }>(`/internal-networks/${id}/regenerate-token`, { method: 'POST' }),
     agentCommand: (id: string) =>
-      req<{ token: string; scriptUrl: string; command: string; commandWindows: string; watchHint: string }>(`/internal-networks/${id}/agent-command`),
+      req<{ token: string; scanDepth?: 'medium' | 'full'; scriptUrl: string; command: string; commandWindows: string; watchHint: string }>(`/internal-networks/${id}/agent-command`),
   },
 }
 
@@ -353,6 +353,7 @@ export interface InternalNetworkSummary {
   name: string
   description?: string | null
   kind: InternalNetworkKind
+  scanDepth?: 'medium' | 'full'
   authorized: boolean
   lastImportAt?: string | null
   lastImportBy?: string | null

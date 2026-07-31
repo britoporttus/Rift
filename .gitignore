@@ -67,3 +67,7 @@ core.[0-9]*
 # Agente de rede interna baixado ao rodar (artefato, não fonte)
 /rift-agente.py
 /rift-agente.ps1
+
+# Python bytecode (py_compile do agente)
+__pycache__/
+*.pyc
