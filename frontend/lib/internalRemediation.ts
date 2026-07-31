@@ -100,3 +100,62 @@ export function remediationFor(label: string): Remediation {
     fix: 'Revise a necessidade deste serviço e restrinja o acesso por firewall/VLAN.',
   }
 }
+
+// ── Exportação da planilha de correções ──────────────────────────────────────
+
+const SEV_PT_EXPORT: Record<string, string> = { critical: 'Crítico', high: 'Alto', medium: 'Médio', low: 'Baixo', info: 'Informativo' }
+
+// Urgência de correção derivada da criticidade — com um SLA sugerido (ponto de
+// partida; a equipe ajusta ao próprio processo). É a coluna que transforma "achado"
+// em "tarefa priorizada".
+export interface UrgencyInfo { label: string; sla: string }
+export function urgencyFor(severity: string): UrgencyInfo {
+  switch (severity) {
+    case 'critical': return { label: 'Imediata', sla: 'até 24h' }
+    case 'high':     return { label: 'Alta',     sla: 'até 7 dias' }
+    case 'medium':   return { label: 'Média',    sla: 'até 30 dias' }
+    case 'low':      return { label: 'Baixa',    sla: 'até 90 dias' }
+    default:         return { label: 'Planejada', sla: 'backlog' }
+  }
+}
+
+export interface RemediationRow {
+  label: string
+  severity: string
+  why: string
+  fix: string
+  hosts: { ip: string; hostname?: string | null }[]
+}
+
+// Escapa uma célula CSV (delimitador ';' pro Excel pt-BR): aspas só quando há ';',
+// aspas ou quebra de linha; aspas internas viram "".
+function csvCell(v: string | number): string {
+  const s = String(v ?? '')
+  return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+// Monta o CSV de correções a partir das recomendações já ordenadas por severidade.
+// Colunas pensadas pra virar backlog: Prioridade, Criticidade, Urgência, SLA, o
+// achado, o porquê, a ação, e os ativos afetados. Sem BOM — quem baixa adiciona.
+export function buildRemediationCsv(rows: RemediationRow[], meta: { networkName: string; generatedAt: string }): string {
+  const headers = ['Prioridade', 'Criticidade', 'Urgência', 'SLA sugerido', 'Achado', 'Por que importa', 'Recomendação', 'Ativos afetados', 'Qtd. ativos', 'Rede', 'Gerado em']
+  const lines = [headers.map(csvCell).join(';')]
+  rows.forEach((r, i) => {
+    const u = urgencyFor(r.severity)
+    const assets = r.hosts.map((h) => (h.hostname ? `${h.ip} (${h.hostname})` : h.ip)).join(', ')
+    lines.push([
+      i + 1,
+      SEV_PT_EXPORT[r.severity] || r.severity,
+      u.label,
+      u.sla,
+      r.label,
+      r.why,
+      r.fix,
+      assets,
+      r.hosts.length,
+      meta.networkName,
+      meta.generatedAt,
+    ].map(csvCell).join(';'))
+  })
+  return lines.join('\r\n')
+}

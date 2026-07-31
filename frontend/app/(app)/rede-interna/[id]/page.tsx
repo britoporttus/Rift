@@ -194,7 +194,7 @@ export default function RedeInternaDetailPage() {
           </div>
 
           {/* Recomendações de segurança (agrupadas por achado, com a ação) */}
-          <SecurityRecommendations hosts={hosts} />
+          <SecurityRecommendations hosts={hosts} networkName={net.name} />
 
           {/* Inventário agrupado por tipo */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
