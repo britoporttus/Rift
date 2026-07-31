@@ -57,6 +57,16 @@ async function detectWildcard(domain, { resolver = dnsPromises, probes = WILDCAR
   return wildcardIps
 }
 
+// Host cujo rótulo mais à esquerda é infraestrutura de DNS: ns, ns1..ns9, dns,
+// dns1.., resolver. Não é superfície de ataque — o operador pediu pra não
+// apresentar nameservers como achado (a relação já está implícita no NS que
+// aponta pra eles). Determinístico e testável (não depende de resolveNs, que é
+// instável e nem pega vanity records tipo ns1.dominio.com fora do NS autoritativo).
+const DNS_INFRA_RE = /^(ns\d*|dns\d*|resolver)\./i
+function isDnsInfraHost(host) {
+  return DNS_INFRA_RE.test(String(host || '').toLowerCase() + '.')
+}
+
 // bruteforceSubdomains(domain, opts) → { hosts: string[], wildcard: boolean }.
 // `hosts` são FQDNs que resolveram para IP(s) reais (fora do conjunto wildcard).
 async function bruteforceSubdomains(domain, {
@@ -82,4 +92,4 @@ async function bruteforceSubdomains(domain, {
   return { hosts: [...found], wildcard: hasWildcard }
 }
 
-module.exports = { WORDLIST_PATH, loadWordlist, detectWildcard, bruteforceSubdomains }
+module.exports = { WORDLIST_PATH, loadWordlist, detectWildcard, bruteforceSubdomains, isDnsInfraHost }

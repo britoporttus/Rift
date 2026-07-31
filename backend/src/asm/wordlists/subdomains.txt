@@ -8,10 +8,6 @@ remote
 blog
 webmail
 server
-ns1
-ns2
-ns3
-ns4
 smtp
 secure
 vpn
@@ -21,7 +17,6 @@ ftp
 mail2
 test
 portal
-ns
 ww1
 host
 support
@@ -136,11 +131,6 @@ chat
 im
 xmpp
 mqtt
-ns5
-dns
-dns1
-dns2
-resolver
 ldap
 ad
 dc

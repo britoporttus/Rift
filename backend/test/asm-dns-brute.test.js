@@ -1,7 +1,7 @@
 // dns-brute.js — bruteforce DNS nativo com resolver injetado (sem DNS real).
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { loadWordlist, detectWildcard, bruteforceSubdomains } = require('../src/asm/dns-brute')
+const { loadWordlist, detectWildcard, bruteforceSubdomains, isDnsInfraHost } = require('../src/asm/dns-brute')
 
 // Resolver falso: mapa host → IPs. Lança (rejeita) p/ hosts ausentes, como o dns real.
 function fakeResolver(map) {
@@ -55,4 +55,19 @@ test('bruteforce: com wildcard, descarta hosts que só batem no IP do curinga', 
 test('bruteforce: domínio vazio → nada', async () => {
   const r = await bruteforceSubdomains('', { words: ['www'], resolver: fakeResolver({}) })
   assert.deepEqual(r.hosts, [])
+})
+
+test('isDnsInfraHost: pega nameservers/DNS pelo rótulo (ns1/dns/resolver)', () => {
+  for (const h of ['ns1.grcbuilder.com', 'ns.alvo.com', 'ns2.alvo.com', 'dns.alvo.com', 'dns1.alvo.com', 'resolver.alvo.com'])
+    assert.ok(isDnsInfraHost(h), `${h} deveria ser infra de DNS`)
+})
+
+test('isDnsInfraHost: NÃO pega hosts comuns nem falsos-positivos (nsw/dnsadmin)', () => {
+  for (const h of ['www.alvo.com', 'api.alvo.com', 'nsw.alvo.com', 'dnsadmin.alvo.com', 'grcbuilder.com'])
+    assert.ok(!isDnsInfraHost(h), `${h} NÃO deveria ser infra de DNS`)
+})
+
+test('wordlist: não contém rótulos de nameserver (ns*/dns*/resolver)', () => {
+  const w = new Set(loadWordlist())
+  for (const bad of ['ns', 'ns1', 'ns2', 'dns', 'dns1', 'resolver']) assert.ok(!w.has(bad), `wordlist não deve ter ${bad}`)
 })

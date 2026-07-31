@@ -22,7 +22,7 @@ const { computeScore } = require('./score')
 const { computeAssetDiff } = require('./diff')
 const { analyzePort } = require('./ports')
 const { detectTakeover } = require('./takeover')
-const { bruteforceSubdomains } = require('./dns-brute')
+const { bruteforceSubdomains, isDnsInfraHost } = require('./dns-brute')
 const { findChrome, storeScreenshot, makeWorkDir } = require('./screenshots')
 const { lookupNetblocks, classifyProvider } = require('./asn')
 const { isBlockedIp, expandCidrsV4, ipInCidr } = require('../net-guard')
@@ -128,7 +128,9 @@ async function stageSubdomains(domain) {
       for (const h of hosts) set.add(h)
     } catch (e) { console.warn('[asm] bruteforce DNS falhou:', e?.message) }
   }
-  return [...set]
+  // Nameservers (ns1/dns/resolver) não são superfície de ataque — são infra de DNS.
+  // Não os apresentamos como achado (feedback do operador). O apex nunca é filtrado.
+  return [...set].filter((h) => h === domain || !isDnsInfraHost(h))
 }
 
 // Anti-SSRF: verdadeiro só se NENHUM IP resolvido cair em loopback/RFC1918/
@@ -402,7 +404,15 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
   } })
 
   try {
-    // 1) subdomínios (passivo)
+    // Limpa nameservers (ns1/dns/resolver) que scans ANTIGOS gravaram — assets de
+    // subdomínio não são apagados em re-scan, então sem isto o ns1 antigo ficaria
+    // pra sempre mesmo já tendo saído da enumeração (feedback do operador).
+    await DomainAsset.deleteMany({
+      domainId, type: { $in: ['subdomain', 'web', 'exposure', 'port'] },
+      value: { $regex: '^(ns\\d*|dns\\d*|resolver)\\.', $options: 'i' },
+    }).catch(() => {})
+
+    // 1) subdomínios (passivo) — nameservers já saem filtrados aqui
     const hosts = await stageSubdomains(domain)
 
     // 2) DNS (passivo)
