@@ -144,7 +144,12 @@ export default function NovoEngagementPage() {
   const [domains, setDomains] = useState<DomainSummary[]>([])
   useEffect(() => { api.domains.list().then(setDomains).catch(() => setDomains([])) }, [])
   const pack = useMemo(() => packs.find((p) => p.id === packId) || null, [packs, packId])
-  const isAuth = pack?.credentialHandling === 'vault'
+  // Veio do funil /novo-pentest (?pack= válido) → o tipo já foi escolhido; escondemos
+  // o seletor pra não re-perguntar (um foco por tela) e mostramos só o tipo + "trocar".
+  const cameFromFunnel = !!preselectPack && packs.some((p) => p.id === preselectPack && p.available)
+  const isAuth = pack?.credentialHandling === 'vault'          // tem credenciais (mostra campos)
+  const isWebAuth = pack?.authStyle === 'web'                  // web autenticado (intake web + login)
+  const isCloudAuth = isAuth && !isWebAuth                     // tenant de nuvem (azure): 1 passo, sem intake web
 
   // Essencial
   const [name, setName]           = useState('')
@@ -168,10 +173,14 @@ export default function NovoEngagementPage() {
     () => (target.trim() ? domains.find((d) => engagementMatchesDomain(target, d.domain)) || null : null),
     [target, domains],
   )
-  // Campos de credencial obrigatórios preenchidos? (packs autenticados)
-  const credsOk = !isAuth || (pack?.credentialFields || [])
-    .filter((f) => !f.optional)
-    .every((f) => (creds[f.name] || '').trim().length > 0)
+  // Credenciais suficientes? Tenant de nuvem: todos os campos obrigatórios. web-auth:
+  // os campos são todos opcionais, mas exige PELO MENOS UM método (senha ou JWT) —
+  // senão não é um teste autenticado de verdade.
+  const credsOk = !isAuth
+    ? true
+    : isWebAuth
+      ? ((creds.password || '').trim().length > 0 || (creds.jwt || '').trim().length > 0)
+      : (pack?.credentialFields || []).filter((f) => !f.optional).every((f) => (creds[f.name] || '').trim().length > 0)
   const effectiveName = useMemo(() => name.trim() || target.trim(), [name, target])
   const targetLabel = isAuth ? 'Domínio / Tenant *' : 'Alvo (domínio) *'
   const targetPlaceholder = isAuth ? 'contoso.onmicrosoft.com' : 'exemplo.com'
@@ -179,10 +188,12 @@ export default function NovoEngagementPage() {
   async function handleCreate() {
     setError(null)
     if (!targetOk) { setStep(1); setError('Informe o alvo/tenant.'); return }
-    if (!credsOk) { setError('Preencha as credenciais obrigatórias.'); return }
+    if (!credsOk) { setError(isWebAuth ? 'Informe ao menos usuário/senha ou um token JWT.' : 'Preencha as credenciais obrigatórias.'); return }
     setCreating(true)
     try {
-      const scope: Record<string, unknown> = isAuth
+      // web-auth usa o MESMO escopo web do black-box (só adiciona credenciais); só
+      // o tenant de nuvem (azure) usa o escopo mínimo.
+      const scope: Record<string, unknown> = isCloudAuth
         ? { environment, intensity, focusAreas, outOfScope, notes }
         : {
             environment, appType, intensity,
@@ -209,14 +220,15 @@ export default function NovoEngagementPage() {
     }
   }
 
-  // Web tem 2 passos (essencial + detalhes); packs autenticados têm 1 (essencial + creds).
-  const hasStep2 = !isAuth
+  // Web e web-auth têm 2 passos (essencial + detalhes); só o tenant de nuvem (azure)
+  // tem 1 (essencial + creds).
+  const hasStep2 = !isCloudAuth
   const steps = hasStep2 ? [{ n: 1, t: 'Essencial' }, { n: 2, t: 'Detalhes (opcional)' }] : [{ n: 1, t: 'Essencial' }]
 
   return (
     <div style={{ padding: '1.5rem 1.75rem', maxWidth: 760, margin: '0 auto', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-        <Link href="/dashboard" style={{ color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
+        <Link href="/novo-pentest" style={{ color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
           <ArrowLeft size={18} />
         </Link>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Novo escopo</h1>
@@ -248,10 +260,16 @@ export default function NovoEngagementPage() {
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: 20 }}>
         {step === 1 ? (
           <>
-            {/* Tipo de teste (domain pack) — sempre primeiro */}
+            {/* Tipo de teste (domain pack). Vindo do funil, mostra só o tipo escolhido. */}
             <div>
               <label style={labelStyle}>Tipo de teste</label>
-              {packs.length ? <PackPicker packs={packs} value={packId} onChange={(id) => { setPackId(id); setStep(1) }} />
+              {cameFromFunnel ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,58,237,.1)', border: '1px solid var(--purple)' }}>
+                  <KeyRound size={14} color="var(--purple-light)" style={{ opacity: isAuth ? 1 : 0.35 }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--purple-light)' }}>{pack?.label || packId}</span>
+                  <Link href="/novo-pentest" style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-mute)', textDecoration: 'none' }}>trocar</Link>
+                </div>
+              ) : packs.length ? <PackPicker packs={packs} value={packId} onChange={(id) => { setPackId(id); setStep(1) }} />
                 : <div style={{ fontSize: 12, color: 'var(--muted)' }}>Carregando tipos…</div>}
             </div>
 
@@ -283,15 +301,17 @@ export default function NovoEngagementPage() {
               </div>
             </div>
 
-            {isAuth ? (
-              // Formulário AUTENTICADO (Azure/…): credenciais do próprio pack.
+            {/* Credenciais — tenant de nuvem (SP) OU web autenticado (login/JWT/2FA). */}
+            {isAuth && (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: -4 }}>
                   <KeyRound size={14} color="var(--purple-light)" />
                   <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>Credenciais ({pack?.label})</span>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: -12, lineHeight: 1.4 }}>
-                  Ficam só em memória do servidor, por este run, e são apagadas ao terminar. Nada é gravado em disco.
+                  {isWebAuth
+                    ? 'Informe usuário/senha e/ou um token JWT (2FA se houver). Ficam só em memória do servidor, por este run, e são apagadas ao terminar — nada em disco.'
+                    : 'Ficam só em memória do servidor, por este run, e são apagadas ao terminar. Nada é gravado em disco.'}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                   {(pack?.credentialFields || []).map((f) => (
@@ -309,6 +329,12 @@ export default function NovoEngagementPage() {
                     </div>
                   ))}
                 </div>
+              </>
+            )}
+
+            {isCloudAuth ? (
+              // Tenant de nuvem (Azure): escopo mínimo — ambiente + gasto.
+              <>
                 <div>
                   <label style={labelStyle}>Ambiente</label>
                   <Chips options={ENVIRONMENTS} value={environment} onChange={setEnv} />
@@ -319,7 +345,7 @@ export default function NovoEngagementPage() {
                 </div>
               </>
             ) : (
-              // Formulário WEB (black-box).
+              // Web (black-box) e web-auth: mesmo intake web (ambiente/tipo/intensidade).
               <>
                 <div>
                   <label style={labelStyle}>Ambiente</label>
@@ -389,7 +415,7 @@ export default function NovoEngagementPage() {
             </button>
           )}
           <div style={{ flex: 1 }} />
-          <Link href="/dashboard" style={{ color: 'var(--muted)', fontSize: 12.5, textDecoration: 'none', padding: '0.55rem 0.5rem' }}>Cancelar</Link>
+          <Link href="/novo-pentest" style={{ color: 'var(--muted)', fontSize: 12.5, textDecoration: 'none', padding: '0.55rem 0.5rem' }}>Cancelar</Link>
           {step === 1 && hasStep2 ? (
             <button type="button" onClick={() => { if (!targetOk) { setError('Informe o alvo (domínio).'); return } setError(null); setStep(2) }} disabled={!targetOk} style={{
               display: 'flex', alignItems: 'center', gap: 7, background: targetOk ? 'var(--purple)' : 'var(--border)', border: 'none', borderRadius: 8,

@@ -548,6 +548,7 @@ export interface DomainPackOption {
   position: 'external' | 'network'
   checkpointPolicy: 'per-phase' | 'per-action'
   credentialHandling: 'none' | 'vault'
+  authStyle?: 'web' | null   // 'web' = autenticado de escopo web (web-auth), não tenant de nuvem
   requiresRunner: boolean
   credentialFields: CredentialField[]
 }

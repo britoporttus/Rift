@@ -50,9 +50,13 @@ function buildScopeDoc(eng, domainPackId) {
   const now    = new Date().toISOString()
   const pack   = getDomainPack(domainPackId || eng.domainPackId)
   const authed = pack.credentialHandling === 'vault'
+  // web-auth: autenticado, mas escopo WEB (wildcard), não tenant de nuvem. Só os
+  // packs de tenant (azure/aws/gcp/ad/sap) geram bloco cloud e domínio único.
+  const webAuth     = pack.authStyle === 'web'
+  const cloudTenant = authed && !webAuth
 
   const environment = ENVIRONMENTS.includes(s.environment) ? s.environment : 'production'
-  const appType     = authed ? pack.id : (APP_TYPES.includes(s.appType) ? s.appType : 'web+api')
+  const appType     = cloudTenant ? pack.id : (APP_TYPES.includes(s.appType) ? s.appType : 'web+api')
   const intensity   = INTENSITIES.includes(s.intensity)    ? s.intensity   : 'medium'
   const wafPresent  = WAF_PRESENT.includes(s.wafPresent)   ? s.wafPresent  : 'unknown'
   const spending    = typeof s.spendingUsd === 'number' && s.spendingUsd > 0
@@ -70,8 +74,9 @@ function buildScopeDoc(eng, domainPackId) {
     agent_role: authed ? 'authenticated' : 'blackbox',
     domain_pack: pack.id,
     scope: {
-      // Autenticado: o "domínio" é o tenant/conta, não um site com wildcard web.
-      domains:      authed ? [target] : [target, `*.${target}`],
+      // Tenant de nuvem: o "domínio" é o tenant/conta, não um site com wildcard web.
+      // web-auth (autenticado de escopo web) mantém o wildcard como o black-box.
+      domains:      cloudTenant ? [target] : [target, `*.${target}`],
       ip_ranges:    asArray(s.ipRanges),
       out_of_scope: asArray(s.outOfScope),
       environment,
@@ -98,9 +103,9 @@ function buildScopeDoc(eng, domainPackId) {
     },
   }
 
-  // Bloco de autorização de nuvem/ambiente para packs autenticados: deixa explícito
-  // que o assessment AUTENTICADO do tenant está autorizado, com credencial no run.
-  if (authed) {
+  // Bloco de autorização de nuvem/ambiente para packs de TENANT (não web-auth): deixa
+  // explícito que o assessment AUTENTICADO do tenant está autorizado, com credencial no run.
+  if (cloudTenant) {
     doc.cloud = {
       provider:   pack.id,           // azure | aws | gcp
       tenant:     target,
@@ -118,11 +123,12 @@ function buildStateDoc(eng, domainPackId) {
   const now  = new Date().toISOString()
   const pack = getDomainPack(domainPackId || eng.domainPackId)
   const authed = pack.credentialHandling === 'vault'
+  const webAuth = pack.authStyle === 'web'   // credencial de usuário (login), não SP de nuvem
   return {
     engagement_id:      id,
-    // Autenticado: credencial de service principal fornecida (efêmera). Black-box:
-    // deriva do intake (user_level/none).
-    credential_state:   authed ? 'service_principal' : (isCredsProvided(eng.scope || {}) ? 'user_level' : 'none'),
+    // Tenant de nuvem: service principal. web-auth: credencial de usuário (user_level).
+    // Black-box: deriva do intake (user_level/none).
+    credential_state:   webAuth ? 'user_level' : (authed ? 'service_principal' : (isCredsProvided(eng.scope || {}) ? 'user_level' : 'none')),
     agent_role:         authed ? 'authenticated' : 'blackbox',
     domain_pack:        pack.id,
     current_phase:      'idle',
