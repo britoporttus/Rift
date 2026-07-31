@@ -15,6 +15,9 @@ const networkSchema = new mongoose.Schema({
   name:        { type: String, required: true },
   description: { type: String, default: null },
   kind:        { type: String, enum: ['lan', 'dmz', 'cloud', 'other'], default: 'lan' },
+  // Profundidade do scan — o agente lê via RIFT_DEPTH. medium: portas curadas
+  // (rápido); full: 1-1024 + extras (amplo, mais lento). Ver internal/agent-template.*.
+  scanDepth:   { type: String, enum: ['medium', 'full'], default: 'medium' },
 
   // --- Token do agente (segredo; regenerável) ---
   enrollToken: { type: String, default: () => crypto.randomBytes(24).toString('hex'), index: true },

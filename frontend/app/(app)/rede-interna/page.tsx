@@ -5,7 +5,7 @@ import { api, InternalNetworkSummary, InternalNetworkKind } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import {
-  Network, Plus, Loader2, Server, ShieldAlert, HelpCircle, Radio, ChevronRight,
+  Network, Plus, Server, ShieldAlert, HelpCircle, Radio, ChevronRight,
 } from 'lucide-react'
 
 const KIND_LABEL: Record<InternalNetworkKind, string> = { lan: 'LAN', dmz: 'DMZ', cloud: 'Nuvem', other: 'Outra' }
@@ -21,20 +21,10 @@ function timeAgo(d?: string | null) {
   return `há ${Math.floor(h / 24)}d`
 }
 
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-  color: 'var(--text)', fontSize: 13, padding: '9px 11px', fontFamily: 'inherit', outline: 'none',
-}
-
 export default function RedeInternaPage() {
   const router = useRouter()
   const [nets, setNets] = useState<InternalNetworkSummary[]>([])
   const [loading, setLoading] = useState(true)
-  const [name, setName] = useState('')
-  const [kind, setKind] = useState<InternalNetworkKind>('lan')
-  const [authorized, setAuthorized] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [err, setErr] = useState('')
 
   const load = useCallback((first = false) => {
     if (first) setLoading(true)
@@ -49,30 +39,27 @@ export default function RedeInternaPage() {
     return () => { clearInterval(iv); window.removeEventListener('focus', onFocus) }
   }, [load])
 
-  async function handleCreate() {
-    if (!name.trim()) return
-    setCreating(true); setErr('')
-    try {
-      const created = await api.internalNetworks.create({ name: name.trim(), kind, authorized })
-      setName(''); setAuthorized(false)
-      router.push(`/rede-interna/${created.id}`)
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Erro ao criar') }
-    finally { setCreating(false) }
-  }
-
   const totalHosts = nets.reduce((a, n) => a + (n.hostCount || 0), 0)
   const totalRisky = nets.reduce((a, n) => a + (n.riskyCount || 0), 0)
   const unauth = nets.filter((n) => !n.authorized).length
 
   return (
     <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto', width: '100%' }}>
-      <div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
-          <Network size={19} color="var(--purple-light)" /> Rede Interna
-        </h1>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-          Descoberta e inventário de redes internas via agente local. Crie uma rede, rode o agente numa máquina dela, e os dispositivos aparecem aqui.
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
+            <Network size={19} color="var(--purple-light)" /> Rede Interna
+          </h1>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
+            Descoberta e inventário de redes internas via agente local. Crie uma rede, rode o agente numa máquina dela, e os dispositivos aparecem aqui.
+          </div>
         </div>
+        <button onClick={() => router.push('/rede-interna/novo')} style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.6rem 1.15rem', background: 'var(--purple)', border: 'none',
+          borderRadius: 9, color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow-strong)', flexShrink: 0,
+        }}>
+          <Plus size={15} /> Nova rede
+        </button>
       </div>
 
       {/* KPIs */}
@@ -81,29 +68,6 @@ export default function RedeInternaPage() {
         <Kpi icon={<Server size={17} />} color="var(--info)" label="Dispositivos" value={totalHosts} />
         <Kpi icon={<ShieldAlert size={17} />} color="var(--high)" label="Com achados" value={totalRisky} />
         <Kpi icon={<HelpCircle size={17} />} color="var(--medium)" label="Não autorizadas" value={unauth} />
-      </div>
-
-      {/* Criar */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome da rede (ex.: Cliente X — LAN Matriz)"
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()} style={{ ...inputStyle, flex: 1, minWidth: 220 }} />
-          <select value={kind} onChange={(e) => setKind(e.target.value as InternalNetworkKind)} style={inputStyle}>
-            {Object.entries(KIND_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-          <button onClick={handleCreate} disabled={creating || !name.trim()} style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', background: 'var(--purple)', border: 'none',
-            borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 700, cursor: creating ? 'default' : 'pointer',
-            opacity: !name.trim() ? 0.5 : 1, fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow-strong)',
-          }}>
-            {creating ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} Adicionar rede
-          </button>
-        </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>
-          <input type="checkbox" checked={authorized} onChange={(e) => setAuthorized(e.target.checked)} style={{ width: 15, height: 15, accentColor: 'var(--purple)' }} />
-          Confirmo que tenho autorização para escanear esta rede (necessário para o agente coletar dados).
-        </label>
-        {err && <div style={{ fontSize: 12, color: 'var(--critical)' }}>{err}</div>}
       </div>
 
       {/* Lista */}

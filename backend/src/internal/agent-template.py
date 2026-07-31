@@ -43,6 +43,12 @@ import xml.etree.ElementTree as ET
 VERSION = "2.1"
 RIFT_URL = os.environ.get("RIFT_URL", "").rstrip("/")
 RIFT_TOKEN = os.environ.get("RIFT_TOKEN", "")
+# Profundidade do scan (RIFT_DEPTH): "medium" (curada, rápido — default) ou "full"
+# (1-1024 + extras, amplo). Só afeta a AMPLITUDE de portas do nmap; a descoberta e a
+# classificação são as mesmas. Valor inválido cai para medium.
+RIFT_DEPTH = (os.environ.get("RIFT_DEPTH", "medium") or "medium").strip().lower()
+if RIFT_DEPTH not in ("medium", "full"):
+    RIFT_DEPTH = "medium"
 
 # Portas varridas. Lista EXPLÍCITA em vez de --top-ports: cada porta aqui existe
 # porque alguma regra de classificação (classify.js) ou de risco (analyze.js) do
@@ -66,6 +72,11 @@ NATIVE_PORTS = [
     1433, 1521, 2049, 2179, 3306, 3389, 5060, 5061, 5432, 5480, 5900, 5901, 5985, 5986,
     5989, 6379, 8000, 8006, 8080, 8443, 9100, 9200, 9443, 27017,
 ]
+
+# Spec de portas que o nmap varre, por profundidade. medium = a lista curada acima
+# (as portas que classify.js/analyze.js usam — rápido). full = PORT_SPEC (1-1024 +
+# extras — amplo, encontra mais serviços, porém bem mais lento).
+NMAP_SPEC = PORT_SPEC if RIFT_DEPTH == "full" else ",".join(str(p) for p in NATIVE_PORTS)
 
 # Teto de hosts por alvo na varredura nativa: um /24 tem 254, mas um /16 passado à
 # mão teria 65k — ping sweep + connect scan nesse volume é inviável. Acima disto,
@@ -279,9 +290,9 @@ def scan_ports_nmap(ips, nmap):
         return ""
     # Otimização de tempo: host-timeout 120s (era 180 — cauda de latência com hosts
     # filtrados), max-retries 1, e min-hostgroup 32 pra o nmap varrer os hosts em
-    # paralelo em vez de quase-serial. PORT_SPEC já é a lista curada (~54 portas).
+    # paralelo em vez de quase-serial. NMAP_SPEC = curada (medium) ou 1-1024+ (full).
     args = [nmap] + nmap_extra_args(nmap) + [
-        "-oX", "-", "-Pn", "-p", PORT_SPEC, "-sV", "--version-intensity", "2",
+        "-oX", "-", "-Pn", "-p", NMAP_SPEC, "-sV", "--version-intensity", "2",
         "-T4", "--host-timeout", "120s", "--max-retries", "1", "--min-hostgroup", "32",
         "--script", "smb-protocols", "--script-timeout", "20s"]
     if is_root():

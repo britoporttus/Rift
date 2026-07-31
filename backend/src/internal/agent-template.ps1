@@ -195,10 +195,14 @@ function Invoke-NmapScan($nmap, $ips) {
     <# Enriquecimento opcional: versao de servico, SMBv1 real (script smb-protocols)
        e OS. -Pn porque a descoberta ja aconteceu no ARP sweep. Retorna
        @{ ByIp = <hash ip->dados>; Warn = <aviso pro painel ou $null> }. #>
-    # Lista curada (~54 portas) em vez de 1-1024: o -sV sobre 1024 portas era ~20x
-    # mais trabalho sem ganho de classificacao. Somado a host-timeout 120s,
-    # max-retries 1 e min-hostgroup 32 (varre os hosts em paralelo).
-    $spec = ($PORTS -join ',')
+    # Amplitude de portas por profundidade (RIFT_DEPTH): medium = lista curada (~54,
+    # o -sV sobre 1024 portas era ~20x mais trabalho sem ganho de classificacao);
+    # full = 1-1024 + extras (amplo, encontra mais servicos, porem bem mais lento).
+    # Default medium. Somado a host-timeout 120s, max-retries 1 e min-hostgroup 32.
+    $depth = if ($env:RIFT_DEPTH) { $env:RIFT_DEPTH.Trim().ToLower() } else { 'medium' }
+    $spec = if ($depth -eq 'full') {
+        '1-1024,1433,1521,2179,3306,3389,5432,5480,5900-5902,5989,6379,8000,8006,8080,8443,9100,9200,9443,27017'
+    } else { ($PORTS -join ',') }
     $tmp = [IO.Path]::GetTempFileName()
     $hasNpcap = Test-Npcap
     # -sT (connect) SEMPRE: como Administrador o nmap defaultaria pra -sS (SYN), que
