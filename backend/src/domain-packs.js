@@ -40,6 +40,46 @@ const REGISTRY = [
     systemPrompt: '',
   },
   {
+    id: 'web-auth',
+    label: 'Web / API (autenticado)',
+    note: 'Pentest web/API COM credenciais (usuário/senha, JWT, 2FA) — cobre a área pós-login, além do externo. Roda da VPS. Credencial efêmera no run.',
+    status: 'ready',
+    position: 'external',
+    checkpointPolicy: 'per-phase',
+    credentialHandling: 'vault',
+    requiresRunner: false,
+    // Autenticado, mas de ESCOPO WEB (wildcard do domínio), não um tenant de nuvem —
+    // scope.js usa isto para não gerar bloco `cloud`/autorização de tenant (seria
+    // errado: web-auth é um pentest web, com login).
+    authStyle: 'web',
+    toolManifest: ['subfinder', 'httpx', 'naabu', 'nuclei', 'ffuf', 'katana', 'gobuster'],
+    // Diferente de 'web' (no-op), aqui instruímos o agente a USAR as credenciais do
+    // env para autenticar e testar a superfície pós-login. Self-contained (sem arquivo).
+    systemPrompt: [
+      '[PENTEST WEB AUTENTICADO]',
+      'Este engagement é um pentest web/API COM acesso autenticado. As credenciais do',
+      'operador estão no ambiente do run (efêmeras): WEB_AUTH_USERNAME, WEB_AUTH_PASSWORD,',
+      'WEB_AUTH_JWT e/ou WEB_AUTH_TOTP (2FA). Autentique na aplicação e cubra a superfície',
+      'pós-login (não só a externa/black-box). Trate as credenciais como sensíveis: nunca',
+      'as inclua em findings, logs ou relatórios. Respeite o escopo (domínios autorizados)',
+      'e os checkpoints por fase.',
+    ].join('\n'),
+    credentialSpec: {
+      fields: [
+        { name: 'username', label: 'Usuário',                     secret: false, optional: true },
+        { name: 'password', label: 'Senha',                       secret: true,  optional: true },
+        { name: 'jwt',      label: 'Token JWT',                   secret: true,  optional: true },
+        { name: 'totp',     label: '2FA / TOTP (segredo ou código)', secret: true, optional: true },
+      ],
+      env: {
+        username: 'WEB_AUTH_USERNAME',
+        password: 'WEB_AUTH_PASSWORD',
+        jwt:      'WEB_AUTH_JWT',
+        totp:     'WEB_AUTH_TOTP',
+      },
+    },
+  },
+  {
     id: 'azure',
     label: 'Azure / Entra ID (autenticado)',
     note: 'Cloud, autenticado via API (Graph/ARM) — roda da VPS sem runner. Requer credencial (SP) no início do run e tooling (az/ScoutSuite/Prowler).',
@@ -293,6 +333,7 @@ function toPublic(entry) {
     position: entry.position,
     checkpointPolicy: entry.checkpointPolicy,
     credentialHandling: entry.credentialHandling,
+    authStyle: entry.authStyle || null,   // 'web' = autenticado de escopo web (vs tenant de nuvem)
     requiresRunner: !!entry.requiresRunner || entry.position === 'network',
     // Metadados dos campos de credencial (labels/secret/optional) — sem valores.
     credentialFields: (entry.credentialSpec && entry.credentialSpec.fields) || [],

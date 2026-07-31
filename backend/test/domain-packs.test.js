@@ -55,11 +55,11 @@ test('packs internos (ad/sap) exigem posição de rede e checkpoint por-ação',
   assert.equal(dp.getDomainPack('azure').position, 'external')
 })
 
-test('listDomainPacks: 6 packs, shape JSON-safe (sem systemPrompt/toolManifest cru)', () => {
+test('listDomainPacks: 7 packs, shape JSON-safe (sem systemPrompt/toolManifest cru)', () => {
   const list = dp.listDomainPacks()
-  assert.equal(list.length, 6)
+  assert.equal(list.length, 7)
   const ids = list.map((p) => p.id)
-  assert.deepEqual(ids, ['web', 'azure', 'ad', 'sap', 'aws', 'gcp'])   // ordem = sequência do roadmap
+  assert.deepEqual(ids, ['web', 'web-auth', 'azure', 'ad', 'sap', 'aws', 'gcp'])   // ordem = sequência do roadmap
   for (const p of list) {
     assert.ok(p.id && p.label && p.note)
     assert.equal(typeof p.available, 'boolean')
@@ -70,8 +70,20 @@ test('listDomainPacks: 6 packs, shape JSON-safe (sem systemPrompt/toolManifest c
     assert.equal(typeof p.requiresRunner, 'boolean')
     assert.ok(Array.isArray(p.credentialFields))
   }
-  // executáveis hoje: web + azure
-  assert.equal(list.filter((p) => p.available).length, 2)
+  // executáveis hoje: web + web-auth + azure
+  assert.equal(list.filter((p) => p.available).length, 3)
+})
+
+test('web-auth: autenticado de escopo web (vault + authStyle web), disponível', () => {
+  const wa = dp.listDomainPacks().find((p) => p.id === 'web-auth')
+  assert.ok(wa)
+  assert.equal(wa.available, true)
+  assert.equal(wa.credentialHandling, 'vault')
+  assert.equal(wa.authStyle, 'web')
+  assert.equal(dp.needsCredentials('web-auth'), true)
+  assert.equal(dp.requiresRunner('web-auth'), false)
+  // instrui o agente a usar as credenciais (não é no-op como o 'web' black-box)
+  assert.match(dp.loadDomainPrompt('web-auth'), /AUTENTICADO/)
 })
 
 test('loadDomainPrompt aceita id ou objeto e nunca quebra', () => {
