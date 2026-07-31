@@ -116,3 +116,23 @@ test('cap de nós trunca e reporta (não silencioso)', () => {
   assert.equal(nodes.length, 3, 'parou no cap')
   assert.ok(stats.truncated > 0, 'truncamento contabilizado')
 })
+
+test('assets de porta NÃO viram nós de subdomínio — viram meta.ports do IP', () => {
+  const b = createBuilder()
+  addDomainBundle(b, {
+    domain: { _id: 'd1', domain: 'grcbuilder.com' },
+    assets: [
+      { _id: 's1', type: 'subdomain', value: 'app.grcbuilder.com', alive: true, ips: ['104.26.9.48'] },
+      { _id: 'p1', type: 'port', ip: '104.26.9.48', port: 8080, service: 'http-proxy', severity: 'info', thirdParty: true, provider: 'Cloudflare' },
+      { _id: 'p2', type: 'port', ip: '104.26.9.48', port: 3389, service: 'ms-wbt', severity: 'high' },
+    ],
+  })
+  const { nodes } = b.result({ log: false })
+  // Só o subdomínio real vira nó de subdomínio (nada de "104.26.9.48:8080")
+  assert.deepEqual(nodes.filter((n) => n.type === 'subdomain').map((n) => n.label), ['app.grcbuilder.com'])
+  assert.equal(nodes.filter((n) => /:\d+$/.test(n.label)).length, 0, 'nenhum nó ip:porta solto')
+  // As portas viram metadado do nó de IP, ordenadas
+  const ipNode = nodes.find((n) => n.id === 'ip:104.26.9.48')
+  assert.deepEqual(ipNode.meta.ports.map((p) => p.port), [3389, 8080])
+  assert.equal(ipNode.meta.ports[0].severity, 'high')
+})

@@ -196,8 +196,37 @@ export function HostModal({ node, onClose, onSelectVuln, engagements = [] }: {
         </div>
       )}
       {node.ips.length > 0 && (
-        <Section title="IPs" icon={<Network size={12} />}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{node.ips.map((ip) => <Chip key={ip.id}>{ip.label}</Chip>)}</div>
+        <Section title="IPs & portas" icon={<Network size={12} />}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {node.ips.map((ip) => {
+              const ports = (ip.meta.ports as Array<{ port: number; service?: string | null; severity: string; thirdParty?: boolean; provider?: string | null }>) || []
+              const prov = ports.find((p) => p.thirdParty)?.provider
+              return (
+                <div key={ip.id}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>{ip.label}</span>
+                    {prov && <span title="IP de provedor/CDN — infra de terceiro, não sua exposição" style={{ fontSize: 8.5, fontFamily: 'var(--mono)', color: 'var(--info)', background: 'color-mix(in srgb, var(--info) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--info) 30%, transparent)', borderRadius: 99, padding: '1px 7px' }}>SaaS · {prov}</span>}
+                  </div>
+                  {ports.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                      {ports.map((p, i) => {
+                        const risky = p.severity !== 'info'
+                        const c = risky ? (SEV_COLOR[p.severity] || SEV_COLOR.info) : null
+                        return (
+                          <span key={i} title={p.service || ''} style={{
+                            fontSize: 10, fontFamily: 'var(--mono)', borderRadius: 5, padding: '1px 7px', whiteSpace: 'nowrap',
+                            color: risky ? c! : 'var(--muted)', fontWeight: risky ? 700 : 400,
+                            background: risky ? `color-mix(in srgb, ${c} 12%, transparent)` : 'var(--surface2)',
+                            border: `1px solid ${risky ? `color-mix(in srgb, ${c} 34%, transparent)` : 'var(--border)'}`,
+                          }}>{p.port}{p.service ? `/${p.service}` : ''}</span>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </Section>
       )}
       {node.techs.length > 0 && (

@@ -122,7 +122,27 @@ function addDomainBundle(b, { domain, assets = [], findings = [], leaks = [], ag
   // value(host) → subId, para casar vuln/exposure ao subdomínio certo.
   const subByHost = new Map()
 
+  // Portas por IP: viram METADADO do nó de IP (que já fica aninhado sob o
+  // subdomínio via resolves_to), NÃO nós próprios. Sem isto, cada asset 'port'
+  // caía no ramo de subdomínio abaixo e virava um falso "subdomínio" ip:porta
+  // pendurado na raiz do domínio, poluindo o mapa.
+  const portsByIp = {}
   for (const a of assets) {
+    if (a.type !== 'port') continue
+    const pip = a.ip || String(a.value || '').split(':')[0]
+    if (!pip) continue
+    ;(portsByIp[pip] = portsByIp[pip] || []).push({
+      port: a.port ?? (Number(String(a.value || '').split(':')[1]) || null),
+      service: a.service || null,
+      severity: a.severity || 'info',
+      thirdParty: !!a.thirdParty,
+      provider: a.provider || null,
+    })
+  }
+  for (const list of Object.values(portsByIp)) list.sort((x, y) => (x.port || 0) - (y.port || 0))
+
+  for (const a of assets) {
+    if (a.type === 'port') continue // já agregado em portsByIp → meta do nó de IP
     if (a.type === 'exposure') {
       const expId = `exp:${a._id}`
       b.node(expId, 'exposure', a.label || a.value, {
@@ -155,7 +175,9 @@ function addDomainBundle(b, { domain, assets = [], findings = [], leaks = [], ag
     for (const ip of a.ips || []) {
       if (!ip) continue
       const ipId = `ip:${ip}`
-      b.hub(ipId, 'ip', ip)
+      const ipNode = b.hub(ipId, 'ip', ip)
+      // Anexa as portas descobertas naquele IP (uma vez; o hub é compartilhado).
+      if (ipNode && portsByIp[ip] && !ipNode.meta.ports) ipNode.meta.ports = portsByIp[ip]
       b.edge(subId, ipId, 'resolves_to')
     }
     for (const t of a.tech || []) {
