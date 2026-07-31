@@ -41,6 +41,10 @@ const NUCLEI_ENABLED = process.env.ASM_NUCLEI !== '0'
 // dentro do stageDns; a confirmação ATIVA (nuclei -tags takeover) só em domínio
 // autorizado. `ASM_TAKEOVER=0` desliga a passada ativa.
 const TAKEOVER_ENABLED = process.env.ASM_TAKEOVER !== '0'
+// Módulo Vazamentos está "em construção" (reforma de UX 2026-07): por padrão o
+// sinal de vazamento NÃO entra no score do domínio. `RIFT_LEAKS_ENABLED=1` religa.
+// Neutraliza no call-site (não passa `leaks`) — computeScore segue puro/testável.
+const LEAKS_ENABLED = process.env.RIFT_LEAKS_ENABLED === '1'
 // Fase 5: bruteforce DNS nativo (passivo) na enumeração de subdomínios. Descobre
 // nomes previsíveis (vpn, gitlab, jenkins…) que as fontes passivas do subfinder
 // não listam. `ASM_DNS_BRUTE=0` desliga. Guard de wildcard embutido (dns-brute.js).
@@ -545,7 +549,7 @@ async function recomputeDomain(domainId) {
     DomainAsset.find({ domainId }).lean(),
     LeakedCredential.find({ domain: dom ? dom.domain : '__none__' }).lean(),
   ])
-  const { score, level, reasons } = computeScore({ assets, leaks })
+  const { score, level, reasons } = computeScore({ assets, leaks: LEAKS_ENABLED ? leaks : [] })
   await Domain.findByIdAndUpdate(domainId, { $set: {
     assetCount: assets.length,
     aliveCount: assets.filter((a) => a.alive).length,

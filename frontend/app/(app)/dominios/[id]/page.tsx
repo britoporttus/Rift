@@ -12,7 +12,7 @@ import type { DomainScanRecord } from '@/lib/api'
 import {
   ArrowLeft, Globe, Radar, Loader2, ShieldCheck, ShieldAlert, Lock,
   AlertTriangle, Trash2, Check, Info, ChevronRight, Share2, Target, Plus, Workflow,
-  Radio, History, TrendingUp, TrendingDown, Minus, Bug, Network, Camera, X,
+  Radio, History, TrendingUp, TrendingDown, Minus, Bug, Network, Camera, X, Clock,
 } from 'lucide-react'
 
 function fmtDate(d?: string | null) {
@@ -344,20 +344,20 @@ export default function DominioDetailPage() {
         </div>
       </div>
 
-      {/* Exposição de credenciais → link para o módulo Vazamentos */}
-      <Link href={`/vazamentos/${encodeURIComponent(domain.domain)}`} style={{ textDecoration: 'none' }}>
-        <div style={{ background: 'var(--surface)', border: `1px solid ${domain.leakCount > 0 ? 'color-mix(in srgb, var(--critical) 30%, transparent)' : 'var(--border)'}`, borderRadius: 12, padding: '0.9rem 1.1rem', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
-          <ShieldAlert size={18} color={domain.leakCount > 0 ? 'var(--critical)' : 'var(--text-mute)'} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Exposição de credenciais</div>
-            <div style={{ fontSize: 11, color: 'var(--text-mute)', marginTop: 2 }}>
-              {domain.leakCount > 0 ? `${domain.leakCount} registro(s) de vazamento associados — ver detalhe no módulo Vazamentos.` : 'Nenhuma busca de vazamento ainda. Abrir no módulo Vazamentos.'}
-            </div>
+      {/* Exposição de credenciais → módulo Vazamentos está "em construção" (reforma UX
+          2026-07): card informativo, sem navegação, sinal neutralizado no score/Mapa. */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '0.9rem 1.1rem', display: 'flex', alignItems: 'center', gap: 12, opacity: 0.75 }}>
+        <ShieldAlert size={18} color="var(--text-mute)" />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Exposição de credenciais</div>
+          <div style={{ fontSize: 11, color: 'var(--text-mute)', marginTop: 2 }}>
+            Módulo Vazamentos em construção — indisponível por enquanto.
           </div>
-          {domain.leakCount > 0 && <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--critical)', fontFamily: 'var(--mono)' }}>{domain.leakCount}</span>}
-          <ChevronRight size={16} color="var(--text-mute)" />
         </div>
-      </Link>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, color: 'var(--purple-light)', background: 'color-mix(in srgb, var(--purple) 12%, transparent)', border: '1px solid var(--border-mid)', borderRadius: 99, padding: '2px 9px' }}>
+          <Clock size={11} /> em construção
+        </span>
+      </div>
 
       {/* Engagements/pentests já rodados para este alvo */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
