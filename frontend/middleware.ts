@@ -20,6 +20,8 @@ export const config = {
   matcher: [
     '/dashboard/:path*',
     '/dominios/:path*',
+    '/novo-pentest/:path*',
+    '/rede-interna/:path*',
     '/vazamentos/:path*',
     '/mapa/:path*',
     '/findings/:path*',

@@ -252,6 +252,7 @@ export interface DomainSummary {
   aliveCount: number
   leakCount: number
   exposureCount: number
+  severityCounts?: Partial<Record<'critical' | 'high' | 'medium' | 'low', number>>
   riskScore: number
   riskLevel: 'critical' | 'high' | 'medium' | 'low' | 'info'
   riskReasons?: string[]

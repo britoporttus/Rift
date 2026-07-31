@@ -7,7 +7,7 @@ import { clickableDivProps } from '@/lib/a11y'
 import { HBars } from '@/components/ui/charts/HBars'
 import {
   Globe, Plus, ShieldCheck, ShieldAlert, Radar, Loader2, Server,
-  AlertTriangle, Lock,
+  AlertTriangle, Lock, Crosshair,
 } from 'lucide-react'
 
 const KIND_ORDER = ['vendor', 'partner', 'internal', 'other'] as const
@@ -78,13 +78,19 @@ export default function DominiosPage() {
 
   return (
     <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto', width: '100%' }}>
-      <div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: 9 }}>
-          <Globe size={19} color="var(--purple-light)" /> Domínios
-        </h1>
-        <p style={{ fontSize: 13, color: 'var(--muted)', margin: '3px 0 0' }}>
-          Análise de superfície (ASM) passiva e score de segurança por domínio — fornecedores, parceiros e ativos próprios.
-        </p>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: 9 }}>
+            <Globe size={19} color="var(--purple-light)" /> Domínios
+          </h1>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '3px 0 0' }}>
+            Análise de superfície (ASM) passiva e score de segurança por domínio — fornecedores, parceiros e ativos próprios.
+          </p>
+        </div>
+        <button onClick={() => router.push('/novo-pentest')}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.65rem 1.2rem', background: 'var(--purple)', border: 'none', borderRadius: 9, color: 'white', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 0 22px var(--purple-glow-strong)', flexShrink: 0 }}>
+          <Crosshair size={16} /> Novo Pentest
+        </button>
       </div>
 
       {!loading && (
@@ -165,6 +171,8 @@ export default function DominiosPage() {
                   <Stat icon={<AlertTriangle size={12} />} label="exposições" value={d.exposureCount} />
                 </div>
 
+                <SevStrip counts={d.severityCounts} />
+
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <div style={{ fontSize: 10.5, color: 'var(--text-mute)', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                     {isScanning ? (
@@ -202,6 +210,32 @@ function Kpi({ label, value, color, icon }: { label: string; value: number; colo
         <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>{value}</div>
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontWeight: 600 }}>{label}</div>
       </div>
+    </div>
+  )
+}
+
+// Resumo de findings por severidade (exposições) — strip compacto na home. Só mostra
+// as classes com contagem > 0; se não há nenhuma, uma linha discreta de "sem exposições".
+const SEV_ROW: Array<'critical' | 'high' | 'medium' | 'low'> = ['critical', 'high', 'medium', 'low']
+const SEV_ABBR: Record<string, string> = { critical: 'C', high: 'A', medium: 'M', low: 'B' }
+function SevStrip({ counts }: { counts?: Partial<Record<string, number>> }) {
+  const active = SEV_ROW.filter((s) => (counts?.[s] || 0) > 0)
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, minHeight: 20, flexWrap: 'wrap' }}>
+      {active.length === 0 ? (
+        <span style={{ fontSize: 10, color: 'var(--text-mute)', fontStyle: 'italic' }}>sem exposições classificadas</span>
+      ) : active.map((s) => {
+        const c = SEV_COLOR[s] || SEV_COLOR.info
+        return (
+          <span key={s} title={`${counts?.[s]} ${s}`} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 700, fontFamily: 'var(--mono)',
+            borderRadius: 6, padding: '2px 7px', color: c,
+            background: `color-mix(in srgb, ${c} 13%, transparent)`, border: `1px solid color-mix(in srgb, ${c} 32%, transparent)`,
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: c }} />{SEV_ABBR[s]} {counts?.[s]}
+          </span>
+        )
+      })}
     </div>
   )
 }

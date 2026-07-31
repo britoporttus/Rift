@@ -38,7 +38,18 @@ function toDto(d) {
 // ── CRUD de domínios ──────────────────────────────────────────────────────────
 router.get('/', async (_req, res) => {
   const list = await Domain.find().sort({ updatedAt: -1 }).lean()
-  res.json(list.map((d) => ({ ...d, id: d._id })))
+  // Resumo de findings por severidade (exposições) por domínio — a home mostra isso
+  // como um strip colorido. Uma agregação só pra toda a lista (barata).
+  const agg = await DomainAsset.aggregate([
+    { $match: { type: 'exposure', severity: { $in: ['critical', 'high', 'medium', 'low'] } } },
+    { $group: { _id: { domainId: '$domainId', severity: '$severity' }, n: { $sum: 1 } } },
+  ]).catch(() => [])
+  const bySev = {}
+  for (const r of agg) {
+    const did = r._id.domainId
+    ;(bySev[did] = bySev[did] || {})[r._id.severity] = r.n
+  }
+  res.json(list.map((d) => ({ ...d, id: d._id, severityCounts: bySev[d._id] || {} })))
 })
 
 router.post('/', async (req, res) => {

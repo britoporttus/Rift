@@ -605,7 +605,7 @@ function LoginPageInner() {
       // Troca o código de uso único por um cookie de sessão (nada trafega na URL).
       api.auth.exchange(code)
         .then(() => refreshUser())
-        .then(() => router.replace('/dashboard'))
+        .then(() => router.replace('/dominios'))
         .catch(() => setSsoError(ERROR_MESSAGES['token_exchange_failed']))
     } else if (err) {
       setSsoError(ERROR_MESSAGES[err] || `Erro SSO: ${err}`)
@@ -614,7 +614,7 @@ function LoginPageInner() {
 
   const handleLogin = async (email: string, password: string) => {
     await login(email, password)
-    router.replace('/dashboard')
+    router.replace('/dominios')
   }
 
   return <LoginScreen onLogin={handleLogin} ssoError={ssoError} />
