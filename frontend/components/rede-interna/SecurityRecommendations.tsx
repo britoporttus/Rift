@@ -7,8 +7,8 @@
 import { useState } from 'react'
 import { InternalHost } from '@/lib/api'
 import { SEV_COLOR, SEV_ORDER, SEV_ICON } from '@/lib/severity'
-import { remediationFor } from '@/lib/internalRemediation'
-import { ShieldAlert, Wrench, ChevronDown } from 'lucide-react'
+import { remediationFor, buildRemediationCsv } from '@/lib/internalRemediation'
+import { ShieldAlert, Wrench, ChevronDown, FileSpreadsheet } from 'lucide-react'
 
 interface RecItem {
   label: string
@@ -37,7 +37,7 @@ function buildRecommendations(hosts: InternalHost[]): RecItem[] {
   return [...byLabel.values()].sort((a, b) => rank(a.severity) - rank(b.severity) || b.hosts.length - a.hosts.length)
 }
 
-export function SecurityRecommendations({ hosts }: { hosts: InternalHost[] }) {
+export function SecurityRecommendations({ hosts, networkName }: { hosts: InternalHost[]; networkName?: string }) {
   const recs = buildRecommendations(hosts)
   // Abre crítico/alto por padrão — hierarquia sem custo de tela pros de menor risco.
   const [open, setOpen] = useState<Set<string>>(() =>
@@ -49,11 +49,34 @@ export function SecurityRecommendations({ hosts }: { hosts: InternalHost[] }) {
   const affected = new Set(recs.flatMap((r) => r.hosts.map((h) => h.id))).size
   const toggle = (label: string) => setOpen((prev) => { const n = new Set(prev); n.has(label) ? n.delete(label) : n.add(label); return n })
 
+  function exportCsv() {
+    const name = networkName || 'Rede interna'
+    const csv = buildRemediationCsv(recs, { networkName: name, generatedAt: new Date().toLocaleString('pt-BR') })
+    // BOM (﻿) pro Excel abrir UTF-8 certo (acentos); ';' como delimitador pt-BR.
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const slug = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'rede'
+    a.href = url
+    a.download = `correcoes-${slug}-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--high)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <ShieldAlert size={13} /> Recomendações de segurança ({recs.length})
-        <span style={{ color: 'var(--text-mute)', fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>· {affected} ativo(s) afetado(s)</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--high)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <ShieldAlert size={13} /> Recomendações de segurança ({recs.length})
+          <span style={{ color: 'var(--text-mute)', fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>· {affected} ativo(s) afetado(s)</span>
+        </div>
+        <button
+          onClick={exportCsv}
+          title="Exporta a planilha de correções (CSV) — criticidade, urgência e SLA sugerido"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', padding: '5px 11px', borderRadius: 7, color: 'var(--purple-light)', background: 'color-mix(in srgb, var(--purple) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--purple) 35%, transparent)' }}
+        >
+          <FileSpreadsheet size={13} /> Exportar planilha
+        </button>
       </div>
 
       {groups.map((g) => (
