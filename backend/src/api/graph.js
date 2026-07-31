@@ -8,6 +8,11 @@ const LeakDomain = require('../models/LeakDomain')
 const Engagement = require('../models/Engagement')
 const { createBuilder, addDomainBundle, normHost, hostMatchesDomain } = require('../graph/build')
 
+// Módulo Vazamentos "em construção" (reforma de UX 2026-07): por padrão o Mapa não
+// desenha nós de vazamento (leaked_account/breach/stealer_family). `RIFT_LEAKS_ENABLED=1`
+// religa. Neutraliza no call-site (não passa leaks/aggFamilies) — build.js segue puro.
+const LEAKS_ENABLED = process.env.RIFT_LEAKS_ENABLED === '1'
+
 // Mapa de Superfície — endpoint de VISUALIZAÇÃO sobre os dados já coletados. Dois modos:
 //   GET /api/graph/domain/:id → grafo de UM domínio
 //   GET /api/graph            → grafo GLOBAL (todos os domínios + hubs compartilhados)
@@ -80,8 +85,8 @@ router.get('/domain/:id', async (req, res) => {
     domain,
     assets,
     findings,
-    leaks,
-    aggFamilies: (leakDomain && leakDomain.agg && leakDomain.agg.families) || {},
+    leaks: LEAKS_ENABLED ? leaks : [],
+    aggFamilies: LEAKS_ENABLED ? ((leakDomain && leakDomain.agg && leakDomain.agg.families) || {}) : {},
   })
   res.json(b.result())
 })
@@ -111,8 +116,8 @@ router.get('/', async (req, res) => {
       domain,
       assets: assetsByDomainId.get(domain._id) || [],
       findings: findingsForDomain(domain.domain, engagements, findingsByEng),
-      leaks: leaksByDomain.get(domain.domain) || [],
-      aggFamilies: aggByDomain.get(domain.domain) || {},
+      leaks: LEAKS_ENABLED ? (leaksByDomain.get(domain.domain) || []) : [],
+      aggFamilies: LEAKS_ENABLED ? (aggByDomain.get(domain.domain) || {}) : {},
     })
   }
   const data = b.result()
