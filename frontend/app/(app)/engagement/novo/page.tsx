@@ -126,12 +126,18 @@ export default function NovoEngagementPage() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Tipo de teste (domain pack)
+  // Tipo de teste (domain pack). `?pack=` vem do funil /novo-pentest — pré-seleciona
+  // o tipo já escolhido lá (só aplica se o pack existir e estiver disponível).
+  const preselectPack = searchParams.get('pack')
   const [packs, setPacks] = useState<DomainPackOption[]>([])
   const [packId, setPackId] = useState('web')
   useEffect(() => {
-    api.settings.getDomainPacks().then((info) => { setPacks(info.available); setPackId(info.default) }).catch(() => setPacks([]))
-  }, [])
+    api.settings.getDomainPacks().then((info) => {
+      setPacks(info.available)
+      const wanted = info.available.find((p) => p.id === preselectPack && p.available)
+      setPackId(wanted ? wanted.id : info.default)
+    }).catch(() => setPacks([]))
+  }, [preselectPack])
 
   // Domínios cadastrados (ASM) — sugestão no campo de alvo, pra não criar
   // engagements "órfãos" (sem Domínio vinculado) sem querer.

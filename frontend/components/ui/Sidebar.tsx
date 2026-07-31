@@ -38,11 +38,12 @@ const Ico = {
   chevRight: (s?: number, c?: string) => <SI s={s || 14} c={c || C.textMute} sw={2}><polyline points="9 18 15 12 9 6" /></SI>,
 }
 
+// Navegação reorganizada (reforma de UX 2026-07): a entrada é Domínios (a home).
+// Dashboard saiu do menu (raiz → Domínios; métricas seguem no Admin). Vazamentos
+// está "em construção" — fora do menu por enquanto (a rota vira stub, ver /vazamentos).
 const NAV_ALL = [
-  { href: '/dashboard',   icon: 'grid'     as const, label: 'Dashboard',  adminOnly: false },
   { href: '/dominios',    icon: 'globe'    as const, label: 'Domínios',   adminOnly: false },
   { href: '/rede-interna', icon: 'network' as const, label: 'Rede Interna', adminOnly: false },
-  { href: '/vazamentos',  icon: 'database' as const, label: 'Vazamentos', adminOnly: false },
   { href: '/mapa',        icon: 'share2'   as const, label: 'Mapa',       adminOnly: false },
   { href: '/findings',    icon: 'alert'    as const, label: 'Findings',   adminOnly: false },
   { href: '/reports',     icon: 'file'     as const, label: 'Relatórios', adminOnly: false },

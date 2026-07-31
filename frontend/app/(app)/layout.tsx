@@ -10,8 +10,10 @@ const GRID_BG = {
 }
 
 const PAGE_NAMES: Record<string, string> = {
-  '/dashboard': 'Dashboard',
   '/dominios': 'Domínios',
+  '/novo-pentest': 'Novo Pentest',
+  '/rede-interna': 'Rede Interna',
+  '/engagement': 'Pentest Web/API',
   '/vazamentos': 'Vazamentos',
   '/mapa': 'Mapa de Superfície',
   '/findings': 'Findings',
