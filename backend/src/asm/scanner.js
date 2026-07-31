@@ -22,6 +22,7 @@ const { computeScore } = require('./score')
 const { computeAssetDiff } = require('./diff')
 const { analyzePort } = require('./ports')
 const { detectTakeover } = require('./takeover')
+const { bruteforceSubdomains } = require('./dns-brute')
 const { lookupNetblocks, classifyProvider } = require('./asn')
 const { isBlockedIp, expandCidrsV4, ipInCidr } = require('../net-guard')
 
@@ -39,6 +40,10 @@ const NUCLEI_ENABLED = process.env.ASM_NUCLEI !== '0'
 // dentro do stageDns; a confirmação ATIVA (nuclei -tags takeover) só em domínio
 // autorizado. `ASM_TAKEOVER=0` desliga a passada ativa.
 const TAKEOVER_ENABLED = process.env.ASM_TAKEOVER !== '0'
+// Fase 5: bruteforce DNS nativo (passivo) na enumeração de subdomínios. Descobre
+// nomes previsíveis (vpn, gitlab, jenkins…) que as fontes passivas do subfinder
+// não listam. `ASM_DNS_BRUTE=0` desliga. Guard de wildcard embutido (dns-brute.js).
+const DNS_BRUTE_ENABLED = process.env.ASM_DNS_BRUTE !== '0'
 const PORTSCAN_ENABLED = process.env.ASM_PORTSCAN !== '0'
 const SCAN_PORTS = (process.env.ASM_PORTS ||
   '21,22,23,25,53,69,80,110,111,135,139,143,161,389,443,445,465,512,513,514,587,636,873,993,995,' +
@@ -102,10 +107,20 @@ async function upsertAsset(domainId, fp, fields) {
 
 // ── etapas ──────────────────────────────────────────────────────────────────
 async function stageSubdomains(domain) {
-  if (!hasBin('subfinder')) return [domain]   // degrade: ao menos o apex
-  const r = await runTool('subfinder', ['-d', domain, '-silent', '-all'], { timeoutMs: 120000 })
-  const subs = (r.stdout || '').split('\n').map((s) => s.trim().toLowerCase()).filter(Boolean)
-  const set = new Set(subs); set.add(domain)
+  const set = new Set([domain])   // degrade: ao menos o apex, mesmo sem subfinder
+  if (hasBin('subfinder')) {
+    const r = await runTool('subfinder', ['-d', domain, '-silent', '-all'], { timeoutMs: 120000 })
+    for (const s of (r.stdout || '').split('\n').map((s) => s.trim().toLowerCase()).filter(Boolean)) set.add(s)
+  }
+  // Fase 5: bruteforce DNS nativo (passivo — só DNS público, zero pacote ao alvo).
+  // Guard de wildcard em dns-brute.js evita inflar com curinga. Não-fatal.
+  if (DNS_BRUTE_ENABLED) {
+    try {
+      const { hosts, wildcard } = await bruteforceSubdomains(domain)
+      if (wildcard) console.warn(`[asm] wildcard DNS em ${domain} — bruteforce filtrado pelo conjunto curinga`)
+      for (const h of hosts) set.add(h)
+    } catch (e) { console.warn('[asm] bruteforce DNS falhou:', e?.message) }
+  }
   return [...set]
 }
 
