@@ -32,6 +32,7 @@ const assetSchema = new mongoose.Schema({
   scheme:    { type: String, default: null },
   tlsIssuer: { type: String, default: null },
   tlsExpiry: { type: String, default: null },
+  screenshotPath: { type: String, default: null }, // caminho relativo do PNG (recon visual, Fase 4) — servido via /domains/:id/screenshot/:assetId
 
   // Classificação de exposição (quando o probe/nuclei acha algo notável)
   severity:  { type: String, enum: ['critical', 'high', 'medium', 'low', 'info'], default: 'info' },

@@ -12,7 +12,7 @@ import type { DomainScanRecord } from '@/lib/api'
 import {
   ArrowLeft, Globe, Radar, Loader2, ShieldCheck, ShieldAlert, Lock,
   AlertTriangle, Trash2, Check, Info, ChevronRight, Share2, Target, Plus, Workflow,
-  Radio, History, TrendingUp, TrendingDown, Minus, Bug, Network,
+  Radio, History, TrendingUp, TrendingDown, Minus, Bug, Network, Camera, X,
 } from 'lucide-react'
 
 function fmtDate(d?: string | null) {
@@ -64,6 +64,7 @@ export default function DominioDetailPage() {
   const [authOpen, setAuthOpen] = useState(false)
   const [saasOpen, setSaasOpen] = useState(false)
   const [history, setHistory] = useState<DomainScanRecord[]>([])
+  const [shotOpen, setShotOpen] = useState<DomainAsset | null>(null)  // lightbox do recon visual
 
   const load = useCallback(() => {
     return Promise.all([api.domains.get(id), api.domains.assets(id), api.engagements.list(), api.graph.domain(id), api.domains.history(id, 30)])
@@ -104,6 +105,7 @@ export default function DominioDetailPage() {
 
   const exposures = assets.filter((a) => a.type === 'exposure')
   const ports = assets.filter((a) => a.type === 'port')
+  const shots = assets.filter((a) => a.type === 'web' && a.screenshotPath)   // recon visual (Fase 4)
 
   // Agrupa as portas por IP (uma entrada por IP, não por porta) e amarra ao(s)
   // subdomínio(s) que resolvem pra ele. Muito mais limpo que a lista plana.
@@ -401,6 +403,27 @@ export default function DominioDetailPage() {
         )}
       </div>
 
+      {/* Capturas de tela (recon visual, Fase 4) */}
+      {shots.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <SectionTitle icon={<Camera size={13} />} color="var(--purple-light)">Capturas de tela ({shots.length})</SectionTitle>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 10 }}>
+            {shots.map((a) => (
+              <button key={a.id} onClick={() => setShotOpen(a)} title={`${a.value} — clique para ampliar`}
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', cursor: 'pointer', padding: 0, textAlign: 'left', fontFamily: 'inherit' }}>
+                <img src={`/api/domains/${id}/screenshot/${a.id}`} alt={a.value} loading="lazy"
+                  style={{ width: '100%', height: 118, objectFit: 'cover', objectPosition: 'top', display: 'block', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }} />
+                <div style={{ padding: '5px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: SEV_COLOR[a.severity] || SEV_COLOR.info, flexShrink: 0 }} />
+                  <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.value}</span>
+                  {typeof a.statusCode === 'number' && <span style={{ marginLeft: 'auto', fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--text-mute)' }}>{a.statusCode}</span>}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Exposições */}
       {exposures.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -496,6 +519,27 @@ export default function DominioDetailPage() {
           <ChevronRight size={16} color="var(--text-mute)" />
         </div>
       </Link>
+
+      {/* Lightbox do recon visual */}
+      {shotOpen && (
+        <div onClick={() => setShotOpen(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(2,2,8,0.86)', backdropFilter: 'blur(3px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3vh 3vw', cursor: 'zoom-out',
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ maxWidth: '100%', maxHeight: '100%', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'default' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: SEV_COLOR[shotOpen.severity] || SEV_COLOR.info, flexShrink: 0 }} />
+              <span style={{ fontSize: 12.5, fontFamily: 'var(--mono)', color: 'var(--text)' }}>{shotOpen.value}</span>
+              {shotOpen.title && <span style={{ fontSize: 11.5, color: 'var(--text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {shotOpen.title}</span>}
+              {shotOpen.scheme && <a href={`${shotOpen.scheme}://${shotOpen.value}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--purple-light)', textDecoration: 'none' }}>abrir ↗</a>}
+              <button onClick={() => setShotOpen(null)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', display: 'flex', padding: 2, marginLeft: shotOpen.scheme ? 0 : 'auto' }}><X size={18} /></button>
+            </div>
+            <img src={`/api/domains/${id}/screenshot/${shotOpen.id}`} alt={shotOpen.value}
+              style={{ maxWidth: '100%', maxHeight: '82vh', objectFit: 'contain', borderRadius: 8, border: '1px solid var(--border-mid)', background: 'var(--bg)' }} />
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`.spin { animation: spin 0.9s linear infinite; }`}</style>
     </div>

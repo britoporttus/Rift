@@ -321,6 +321,7 @@ export interface DomainAsset {
   scheme?: string | null
   tlsIssuer?: string | null
   tlsExpiry?: string | null
+  screenshotPath?: string | null   // recon visual (Fase 4) — servido via /domains/:id/screenshot/:assetId
   severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
   label?: string | null
   cveId?: string | null
