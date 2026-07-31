@@ -26,7 +26,7 @@ function hasBin(name) {
 // Executa uma ferramenta e resolve com o stdout completo. Falha de binário/timeout
 // NUNCA rejeita "para cima" de forma fatal — devolve { ok:false } para o scanner
 // degradar graciosamente (uma etapa que quebra não derruba o scan inteiro).
-function runTool(name, args, { timeoutMs = 120000, maxBuffer = 32 * 1024 * 1024, input = null } = {}) {
+function runTool(name, args, { timeoutMs = 120000, maxBuffer = 32 * 1024 * 1024, input = null, cwd = null } = {}) {
   return new Promise((resolve) => {
     const bin = resolveBin(name)
     if (!bin) return resolve({ ok: false, stdout: '', reason: 'binary_missing', name })
@@ -34,6 +34,7 @@ function runTool(name, args, { timeoutMs = 120000, maxBuffer = 32 * 1024 * 1024,
     const child = execFile(bin, args, {
       timeout: timeoutMs,
       maxBuffer,
+      cwd: cwd || undefined,   // httpx -ss grava PNGs em ./output/screenshot; controlamos o dir via cwd
       env: { ...process.env, PATH: TOOL_PATH },
     }, (err, stdout, stderr) => {
       if (err) {

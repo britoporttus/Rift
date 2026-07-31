@@ -23,6 +23,7 @@ const { computeAssetDiff } = require('./diff')
 const { analyzePort } = require('./ports')
 const { detectTakeover } = require('./takeover')
 const { bruteforceSubdomains } = require('./dns-brute')
+const { findChrome, storeScreenshot, makeWorkDir } = require('./screenshots')
 const { lookupNetblocks, classifyProvider } = require('./asn')
 const { isBlockedIp, expandCidrsV4, ipInCidr } = require('../net-guard')
 
@@ -44,6 +45,12 @@ const TAKEOVER_ENABLED = process.env.ASM_TAKEOVER !== '0'
 // nomes previsíveis (vpn, gitlab, jenkins…) que as fontes passivas do subfinder
 // não listam. `ASM_DNS_BRUTE=0` desliga. Guard de wildcard embutido (dns-brute.js).
 const DNS_BRUTE_ENABLED = process.env.ASM_DNS_BRUTE !== '0'
+// Fase 4: recon visual (screenshots) via httpx -ss + Chrome do sistema. ATIVO
+// (renderiza a página = envia requests) → só domínio autorizado. Pesado (Chrome
+// por host) → teto de hosts e não-fatal. `ASM_SCREENSHOT=0` desliga.
+const SCREENSHOT_ENABLED = process.env.ASM_SCREENSHOT !== '0'
+const SCREENSHOT_MAX = Number(process.env.ASM_SCREENSHOT_MAX) || 40
+const CHROME_BIN = findChrome()
 const PORTSCAN_ENABLED = process.env.ASM_PORTSCAN !== '0'
 const SCAN_PORTS = (process.env.ASM_PORTS ||
   '21,22,23,25,53,69,80,110,111,135,139,143,161,389,443,445,465,512,513,514,587,636,873,993,995,' +
@@ -271,6 +278,47 @@ async function stageTakeover(domainId, hosts) {
   return n
 }
 
+// Fase 4 (ativo): captura screenshot de cada host vivo com o httpx (-ss) usando o
+// Chrome do sistema. Renderiza a página → só domínio autorizado. Roda num dir
+// temporário (httpx grava em ./output/screenshot); os PNGs são movidos pro storage
+// permanente (screenshots.js) e o caminho relativo vai pro asset 'web'. Não-fatal:
+// Chrome pode travar/faltar — o scan não pode cair por causa de uma foto.
+async function stageScreenshots(domainId, aliveHosts) {
+  if (!SCREENSHOT_ENABLED || !CHROME_BIN || !hasBin('httpx') || !aliveHosts.length) return 0
+  const hosts = aliveHosts.slice(0, SCREENSHOT_MAX)
+  let work
+  try { work = makeWorkDir(domainId) } catch { return 0 }
+  try {
+    const r = await runTool('httpx', [
+      '-silent', '-no-color', '-json',
+      '-ss', '-system-chrome', '-esb',        // -esb: não embute bytes no JSON (lê o PNG do disco)
+      '-no-screenshot-full-page',             // só o viewport — menor e mais estável
+      '-screenshot-timeout', '15', '-timeout', '15', '-rate-limit', '20',
+    ], { timeoutMs: 300000, input: hosts.join('\n'), cwd: work })
+
+    let n = 0
+    for (const line of (r.stdout || '').split('\n')) {
+      const s = line.trim(); if (!s || s[0] !== '{') continue
+      let j; try { j = JSON.parse(s) } catch { continue }
+      const srcAbs = get(j, 'screenshot_path', 'screenshot-path')
+      if (!srcAbs) continue
+      const raw = get(j, 'input', 'host') || ''
+      const host = String(raw).replace(/^https?:\/\//, '').split(/[/:]/)[0].toLowerCase()
+      if (!host) continue
+      const rel = storeScreenshot(domainId, host, srcAbs)
+      if (!rel) continue
+      await DomainAsset.updateOne({ domainId, type: 'web', value: host }, { $set: { screenshotPath: rel } }).catch(() => {})
+      n++
+    }
+    return n
+  } catch (e) {
+    console.warn('[asm] screenshots falharam:', e?.message)
+    return 0
+  } finally {
+    try { fs.rmSync(work, { recursive: true, force: true }) } catch {}
+  }
+}
+
 // Probe TCP connect de um par ip:porta. Resolve true se conectou (porta aberta),
 // false em timeout/erro (fechada/filtrada). Nunca lança.
 function probeTcp(ip, port, timeoutMs) {
@@ -385,6 +433,13 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
     if (authorized && TAKEOVER_ENABLED) {
       await setStep(domainId, 'takeover')
       await stageTakeover(domainId, liveHosts)
+    }
+
+    // 3b-3) recon visual (screenshots) dos hosts vivos — autorizado. Ver Fase 4.
+    if (authorized && SCREENSHOT_ENABLED && CHROME_BIN) {
+      await setStep(domainId, 'screenshots')
+      const aliveWeb = await DomainAsset.find({ domainId, type: 'web', alive: true }).select('value').lean()
+      await stageScreenshots(domainId, aliveWeb.map((a) => a.value))
     }
 
     // 3c) port scan (naabu) — só autorizado. Nos IPs PRÓPRios do domínio (os que

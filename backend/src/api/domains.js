@@ -4,6 +4,7 @@ const Domain = require('../models/Domain')
 const DomainAsset = require('../models/DomainAsset')
 const DomainScan = require('../models/DomainScan')
 const scanner = require('../asm/scanner')
+const { absFor } = require('../asm/screenshots')
 const { isIpLiteral } = require('../net-guard')
 const { cooldownRemainingMs, canForceCooldown } = require('../cooldown')
 
@@ -137,6 +138,19 @@ router.get('/:id/assets', async (req, res) => {
   if (req.query.type) q.type = req.query.type
   const list = await DomainAsset.find(q).sort({ severity: 1, alive: -1, value: 1 }).lean()
   res.json(list.map((a) => ({ ...a, id: a._id })))
+})
+
+// Screenshot do recon visual (Fase 4). Autenticado (cookie) como todo o router →
+// o <img> do front envia o cookie sozinho. O caminho vem do asset (não do usuário);
+// mesmo assim absFor() valida que resolve DENTRO do storage (guard de travessia).
+router.get('/:id/screenshot/:assetId', async (req, res) => {
+  const asset = await DomainAsset.findOne({ _id: req.params.assetId, domainId: req.params.id })
+    .select('screenshotPath').lean()
+  if (!asset || !asset.screenshotPath) return res.status(404).end()
+  const abs = absFor(asset.screenshotPath)
+  if (!abs) return res.status(404).end()
+  res.type('png')
+  res.sendFile(abs, (err) => { if (err && !res.headersSent) res.status(404).end() })
 })
 
 module.exports = router

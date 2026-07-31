@@ -14,6 +14,8 @@ out/
 
 # Runtime data (dados reais de engagements e usuários — não versionar)
 backend/data/
+# Screenshots do recon visual do ASM (Fase 4) — regerados a cada scan
+backend/.asm-data/
 
 # Logs
 logs/
