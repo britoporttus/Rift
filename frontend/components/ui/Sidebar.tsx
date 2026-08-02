@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { User } from '@/lib/api'
 import { SI } from '@/components/ui/SI'
 import { isActive } from '@/lib/nav'
+import { can } from '@/lib/viewer'
 
 const C = {
   bg: 'var(--bg)',
@@ -101,6 +102,9 @@ export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
     .filter((g) => g.items.length > 0)
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href))
   const novoActive = path.startsWith('/novo-pentest')
+  // Frente 0: disparar pentest é ação da operação. O cliente acompanha o
+  // resultado do trabalho contratado — não opera a ferramenta.
+  const showNovoPentest = can(user.role, 'viewAgentInternals')
 
   return (
     <aside style={{
@@ -141,8 +145,8 @@ export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
         )}
       </div>
 
-      {/* Ação primária — sempre acessível, de qualquer tela */}
-      <div style={{ padding: collapsed ? '0.6rem 0.5rem 0.2rem' : '0.75rem 0.6rem 0.3rem', flexShrink: 0 }}>
+      {/* Ação primária — sempre acessível, de qualquer tela (só operação) */}
+      {showNovoPentest && <div style={{ padding: collapsed ? '0.6rem 0.5rem 0.2rem' : '0.75rem 0.6rem 0.3rem', flexShrink: 0 }}>
         <Link href="/novo-pentest" title={collapsed ? 'Novo Pentest' : undefined} style={{ textDecoration: 'none' }}>
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -159,7 +163,7 @@ export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
             {!collapsed && <span style={{ whiteSpace: 'nowrap' }}>Novo Pentest</span>}
           </div>
         </Link>
-      </div>
+      </div>}
 
       {/* Nav */}
       <nav style={{

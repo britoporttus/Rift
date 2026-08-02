@@ -119,9 +119,9 @@ export const api = {
   },
   users: {
     list: () => req<UserFull[]>('/users'),
-    create: (data: { email: string; name: string; password: string; role?: 'admin' | 'user' }) =>
+    create: (data: { email: string; name: string; password: string; role?: 'admin' | 'user' | 'client' }) =>
       req<UserFull>('/users', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: { role?: 'admin' | 'user'; name?: string }) =>
+    update: (id: string, data: { role?: 'admin' | 'user' | 'client'; name?: string }) =>
       req<UserFull>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) => req<void>(`/users/${id}`, { method: 'DELETE' }),
     resetPassword: (id: string, password: string) =>
@@ -572,7 +572,7 @@ export interface AgentModelInfo {
 export interface User {
   id: string
   email: string
-  role: 'admin' | 'user'
+  role: 'admin' | 'user' | 'client'
   name: string
 }
 

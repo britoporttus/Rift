@@ -86,7 +86,7 @@ router.post('/', async (req, res) => {
 
   // A-INTAKE-3: materializa scope.yaml + engagement-state.yaml (idle) no framework.
   // Best-effort: uma falha de FS não deve impedir a criação do engagement no Mongo.
-  try { writeEngagementScope(engagement, getFrameworkPath(engagement.frameworkId), pack) } catch (err) {
+  try { writeEngagementScope(engagement, getFrameworkPath(engagement.frameworkId), pack, req.tenant?.slug) } catch (err) {
     console.warn('[engagements] falha ao escrever scope do intake:', err?.message)
   }
 
@@ -198,7 +198,10 @@ router.post('/:id/run-now', requireAuth(['admin']), async (req, res) => {
 // Chave por-ENGAGEMENT (não por-sessão): a credencial é "a do próximo run autenticado
 // deste engagement". Evita descasar a chave entre o intake e o run. O server.js usa a
 // MESMA chave no gate. Ver src/cred-vault.js e domain-packs (ETAPA 1).
-function vaultKey(id) { return `cred:${id}` }
+// Frente 0: o TENANT entra na chave. Sem ele, dois tenants com o mesmo
+// engagementId (possível: o id vem do cliente em import/restore) compartilhariam
+// a mesma entrada do cofre — credencial de um cliente alcançável pelo run de outro.
+function vaultKey(tenantSlug, id) { return `cred:${tenantSlug || 'no-tenant'}:${id}` }
 
 router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
   const e = await getEngagement(req.db, req.params.id)
@@ -211,7 +214,7 @@ router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
   if (!creds || typeof creds !== 'object') return res.status(400).json({ error: 'credentials (objeto) obrigatório' })
   const { ok, missing } = validateCredentials(pack, creds)
   if (!ok) return res.status(400).json({ error: `Campos obrigatórios ausentes: ${missing.join(', ')}` })
-  const key = vaultKey(req.params.id)
+  const key = vaultKey(req.tenant?.slug, req.params.id)
   credVault.set(key, creds)
   res.status(201).json({ ok: true, ...credVault.describe(key) })   // só metadados
 })
@@ -225,12 +228,12 @@ router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
 // segurança: describe() só devolve metadados (nunca valores), e a MUTAÇÃO
 // (submeter/limpar credencial) já é corretamente bloqueada pro `user` no POST/DELETE.
 router.get('/:id/credentials', async (req, res) => {
-  const meta = credVault.describe(vaultKey(req.params.id))
+  const meta = credVault.describe(vaultKey(req.tenant?.slug, req.params.id))
   res.json(meta ? { set: true, ...meta } : { set: false })
 })
 
 router.delete('/:id/credentials', requireAuth(['admin']), async (req, res) => {
-  credVault.clear(vaultKey(req.params.id))
+  credVault.clear(vaultKey(req.tenant?.slug, req.params.id))
   res.status(204).end()
 })
 

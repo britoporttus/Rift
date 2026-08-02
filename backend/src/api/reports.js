@@ -9,6 +9,7 @@ const { renderReport } = require('../report')
 const { htmlToPdf, PdfConcurrencyLimitError } = require('../report-pdf')
 const { generateExecNarrative } = require('../report-ai')
 const { isExecutiveReport } = require('../report-kind')
+const { readClientDir } = require('../tenant-paths')
 
 const router = Router()
 router.use(requireAuth())
@@ -19,8 +20,11 @@ router.use(tenantScope())
 // Diretório de reports do engagement, na VERSÃO do framework escolhida (seletor A/B/C).
 // Antes era um FRAMEWORK_PATH fixo → os relatórios de legacy/v3 (e da cópia v2) nunca
 // eram encontrados. Agora resolve pelo frameworkId do engagement.
-function reportsDir(e) {
-  return path.join(getFrameworkPath(e.frameworkId), 'clients', e.slug, e.date, 'reports')
+// Frente 0: o diretório é resolvido sob o tenant. `slug` deriva do NOME do
+// engagement, então dois clientes com nomes parecidos caíam na mesma pasta.
+// `readClientDir` cai no layout legado para engagements pré-Frente 0.
+function reportsDir(e, tenantSlug) {
+  return path.join(readClientDir(getFrameworkPath(e.frameworkId), tenantSlug, e.slug, e.date), 'reports')
 }
 
 // Relatório executivo (C-level) é restrito a admin pela tabela de ROLES.
@@ -134,7 +138,7 @@ router.get('/:engagementId', async (req, res) => {
   const e = await getEngagement(req.db, req.params.engagementId)
   if (!e) return res.status(404).json({ error: 'not found' })
 
-  const dir = reportsDir(e)
+  const dir = reportsDir(e, req.tenant?.slug)
   if (!fs.existsSync(dir)) return res.json([])
 
   const isAdmin = req.user?.role === 'admin'
@@ -162,7 +166,7 @@ router.get('/:engagementId/view/:filename', async (req, res) => {
   if (isExecutiveReport(filename) && req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Relatório executivo restrito a administradores' })
   }
-  const filePath = path.join(reportsDir(e), filename)
+  const filePath = path.join(reportsDir(e, req.tenant?.slug), filename)
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'file not found' })
 
   const ext = path.extname(filename).toLowerCase()
@@ -182,7 +186,7 @@ router.get('/:engagementId/download/:filename', async (req, res) => {
   if (isExecutiveReport(filename) && req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Relatório executivo restrito a administradores' })
   }
-  const filePath = path.join(reportsDir(e), filename)
+  const filePath = path.join(reportsDir(e, req.tenant?.slug), filename)
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'file not found' })
 
   res.download(filePath)

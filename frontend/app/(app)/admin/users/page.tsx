@@ -81,11 +81,11 @@ export default function UsersPage() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
   const [showAdd, setShowAdd]   = useState(false)
-  const [addForm, setAddForm]   = useState({ email: '', name: '', password: '', role: 'user' as 'admin' | 'user' })
+  const [addForm, setAddForm]   = useState({ email: '', name: '', password: '', role: 'user' as 'admin' | 'user' | 'client' })
   const [addError, setAddError] = useState('')
   const [addLoading, setAddLoading] = useState(false)
   const [editId, setEditId]     = useState<string | null>(null)
-  const [editRole, setEditRole] = useState<'admin' | 'user'>('user')
+  const [editRole, setEditRole] = useState<'admin' | 'user' | 'client'>('user')
   const [editName, setEditName] = useState('')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [resetId, setResetId]   = useState<string | null>(null)
@@ -234,9 +234,10 @@ export default function UsersPage() {
                 </div>
                 <div key={`${u.id}-role`} style={{ ...TD }}>
                   {editId === u.id ? (
-                    <select style={{ ...inputStyle, width: 'auto' }} value={editRole} onChange={(ev) => setEditRole(ev.target.value as 'admin' | 'user')}>
-                      <option value="user">user</option>
-                      <option value="admin">admin</option>
+                    <select style={{ ...inputStyle, width: 'auto' }} value={editRole} onChange={(ev) => setEditRole(ev.target.value as 'admin' | 'user' | 'client')}>
+                      <option value="user">user — operador interno</option>
+                      <option value="admin">admin — operador com painel</option>
+                      <option value="client">client — usuário do cliente</option>
                     </select>
                   ) : (
                     <span style={{
@@ -394,9 +395,10 @@ export default function UsersPage() {
                 <div key={field}>
                   <label htmlFor={`add-user-${field}`} style={{ fontSize: 10, color: 'var(--text-mute)', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{label}</label>
                   {field === 'role' ? (
-                    <select id={`add-user-${field}`} style={inputStyle} value={addForm.role} onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as 'admin' | 'user' }))}>
-                      <option value="user">user</option>
-                      <option value="admin">admin</option>
+                    <select id={`add-user-${field}`} style={inputStyle} value={addForm.role} onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as 'admin' | 'user' | 'client' }))}>
+                      <option value="user">user — operador interno</option>
+                      <option value="admin">admin — operador com painel</option>
+                      <option value="client">client — usuário do cliente</option>
                     </select>
                   ) : (
                     <input

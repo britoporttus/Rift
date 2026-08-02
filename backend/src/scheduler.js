@@ -183,6 +183,7 @@ async function dispatchScheduledJob(db, job) {
     sysUser,
     {
       frameworkPath: framework.path,
+      tenantSlug: db.tenant?.slug,
       costCeiling: schedule.costCeilingUsd,
       // Resume durável: no boot, um job retomável volta pra fila com resume:true e o
       // seu claudeSessionId salvo → o CLI continua de onde parou (`claude --resume`).

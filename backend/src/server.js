@@ -570,7 +570,7 @@ async function handleMessage(msg, engId, sessionId, user) {
       const isAuthPack = domainPacks.needsCredentials(domainPack)
       // Chave por-ENGAGEMENT (mesma do POST /credentials) — a credencial é a "do próximo
       // run autenticado deste engagement", independente da sessão de chat.
-      const packVaultKey = `cred:${engId}`
+      const packVaultKey = `cred:${ws._tenant?.slug || 'no-tenant'}:${engId}`
       if (isAuthPack) {
         if (domainPacks.requiresRunner(domainPack)) {
           broadcastSession(engId, sessionId, { type: 'agent_message', text: `⚠️ O domínio "${domainPack.label}" exige um runner interno na rede do alvo (ainda não disponível). Azure/nuvem rodam da VPS; AD/SAP dependem do runner.` })
@@ -642,7 +642,7 @@ ${fwGuidance}
         // CRÍTICO: resetar também o engagement-state.yaml do framework. Sem isto, a
         // guarda de re-execução (skills/phase-state.md) vê recon/enum/vuln "concluídos"
         // e o agente PULA as fases → cada re-run rendia MENOS. scope + findings ficam.
-        if (eng) { try { resetEngagementState(eng, framework.path, domainPack.id) } catch (e) { console.warn('[reset] state:', e.message) } }
+        if (eng) { try { resetEngagementState(eng, framework.path, domainPack.id, ws._tenant?.slug) } catch (e) { console.warn('[reset] state:', e.message) } }
         broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
         broadcastSession(engId, sessionId, { type: 'phase_update', phase: 'recon', progress: 0 })
       }
@@ -715,6 +715,8 @@ ${fwGuidance}
           eng, user,
           {
             frameworkPath: framework.path,
+            // Frente 0: o runner usa isto para o contexto do agente em disco.
+            tenantSlug: ws._tenant?.slug,
             systemContext: '',
             allowAggressive: isAdminUser,
             agentRole: domainPacks.needsCredentials(domainPack) ? 'authenticated' : 'blackbox',
@@ -839,7 +841,7 @@ ${fwGuidance}
             // (Iniciar/Continuar/Começar do zero); nunca para /pentest-report (evita loop)
             // nem para /rift-compact. Se o agente já gerou um relatório, apenas avisa.
             if (autoReport && runState === 'completed' && !isReport && !isCompact && slug && date) {
-              const reportsDir = require('path').join(framework.path, 'clients', slug, date, 'reports')
+              const reportsDir = require('path').join(require('./tenant-paths').readClientDir(framework.path, ws._tenant?.slug, slug, date), 'reports')
               let hasReport = false
               try {
                 const fsm = require('fs')

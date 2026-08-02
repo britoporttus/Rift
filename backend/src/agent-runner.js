@@ -231,7 +231,10 @@ function writeScopeYaml(engagement, frameworkPath = FRAMEWORK_PATH) {
   if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true })
 
   // Create context dir + subdirs for this engagement
-  const ctxDir = path.join(frameworkPath, 'context', id)
+  // Frente 0: o contexto do agente vive sob o tenant. Sem isso o agente — que
+  // roda Bash com o framework como cwd — enxerga o contexto de todos os
+  // clientes com um `ls context/`.
+  const ctxDir = readContextDir(frameworkPath, opts.tenantSlug, id)
   if (!fs.existsSync(ctxDir)) fs.mkdirSync(ctxDir, { recursive: true })
   const parsedDir = path.join(ctxDir, 'parsed')
   if (!fs.existsSync(parsedDir)) fs.mkdirSync(parsedDir, { recursive: true })
@@ -359,6 +362,8 @@ const KILL_GRACE_MS  = Number(process.env.KILL_GRACE_MS) || 5000
 // então qualquer segredo no ambiente (JWT_SECRET, MONGO_URI, AZURE_*,
 // ADMIN_PASSWORD…) seria exfiltrável por prompt injection. Passamos só o mínimo
 // que o CLI do Claude precisa para rodar.
+const { readContextDir } = require('./tenant-paths')
+
 const ENV_ALLOWLIST = [
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR',
   'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR',
