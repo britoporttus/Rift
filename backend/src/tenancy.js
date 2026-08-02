@@ -189,6 +189,101 @@ function statusForError(err) {
   return 403
 }
 
+// ── acesso fora de request (workers, watcher, scheduler) ─────────────────────
+// Scheduler, jobs-worker, findings-watcher e asm-scheduler rodam sem `req`.
+// Antes eles varriam a coleção global; agora precisam iterar tenants
+// explicitamente — se um worker esquecer disso, ele simplesmente não vê nada,
+// em vez de ver tudo. É a falha na direção segura.
+
+/** `db` de um tenant pelo slug. */
+async function dbForSlug(slug, TenantModel) {
+  const Tenant = TenantModel || require('./models/Tenant')
+  const t = await Tenant.findOne({ slug, status: 'active' }).lean()
+  if (!t) throw new TenantResolutionError(`Tenant "${slug}" não existe ou está inativo`, 'TENANT_NOT_FOUND')
+  return dbFor(t)
+}
+
+/** Todos os tenants ativos. */
+async function activeTenants(TenantModel) {
+  const Tenant = TenantModel || require('./models/Tenant')
+  return Tenant.find({ status: 'active' }).lean()
+}
+
+/**
+ * Roda `fn({ tenant, db })` para cada tenant ativo, em série (não quer saturar
+ * o Mongo) e sem deixar a falha de um tenant derrubar os outros — um worker que
+ * morre no tenant A não pode parar o scan do tenant B.
+ * @returns {Promise<Array<{slug:string, ok:boolean, value?:any, error?:Error}>>}
+ */
+async function forEachTenant(fn, TenantModel) {
+  const tenants = await activeTenants(TenantModel)
+  const results = []
+  for (const tenant of tenants) {
+    try {
+      const db = await dbFor(tenant)
+      results.push({ slug: tenant.slug, ok: true, value: await fn({ tenant, db }) })
+    } catch (err) {
+      console.error(`[tenancy] falha no tenant "${tenant.slug}":`, err?.message || err)
+      results.push({ slug: tenant.slug, ok: false, error: err })
+    }
+  }
+  return results
+}
+
+/**
+ * Resolve o tenant a partir de um segredo que só existe dentro do banco de um
+ * tenant — hoje o `enrollToken` do agente de rede interna, que roda dentro da
+ * rede do cliente e não tem sessão de usuário.
+ *
+ * Varre os tenants ativos porque o token não carrega a qual tenant pertence.
+ * É O(nº de tenants) por chamada, aceitável porque a ingestão é periódica e
+ * cada passo é um lookup por campo indexado. Se o número de tenants crescer,
+ * o caminho é embutir o slug no próprio token (`<slug>.<random>`), não um
+ * índice global de tokens no control plane — isso recriaria uma tabela
+ * compartilhada com segredo de todos os clientes.
+ *
+ * @returns {Promise<{tenant,db,doc}|null>} null = token não pertence a ninguém
+ */
+async function resolveByTenantSecret(modelName, query, TenantModel) {
+  const tenants = await activeTenants(TenantModel)
+  for (const tenant of tenants) {
+    try {
+      const db = await dbFor(tenant)
+      const doc = await db[modelName].findOne(query)
+      if (doc) return { tenant, db, doc }
+    } catch (err) {
+      console.error(`[tenancy] falha ao consultar tenant "${tenant.slug}":`, err?.message || err)
+    }
+  }
+  return null
+}
+
+// ── middleware ───────────────────────────────────────────────────────────────
+
+/**
+ * Injeta `req.db` (models ligados ao banco do tenant). Tem que rodar DEPOIS do
+ * `requireAuth`, porque resolve a partir de `req.user`.
+ *
+ * Falha → nega com o status certo. Nunca segue sem `req.db`: uma rota que
+ * rodasse com `req.db` indefinido cairia nos models globais, ou seja, no banco
+ * compartilhado — exatamente o vazamento que isto existe para impedir.
+ */
+function tenantScope() {
+  return async (req, res, next) => {
+    try {
+      const tenant = await resolveTenant(req.user)
+      req.tenant = tenant
+      req.db = await dbFor(tenant)
+      next()
+    } catch (err) {
+      if (err instanceof TenantResolutionError) {
+        return res.status(statusForError(err)).json({ error: err.message, code: err.code })
+      }
+      next(err)
+    }
+  }
+}
+
 /** Fecha tudo (shutdown / teste). */
 async function closeAll() {
   const all = [...connections.values()]
@@ -204,5 +299,6 @@ module.exports = {
   tenantDbName, tenantUri, baseClusterUri,
   connectionFor, modelsFor, dbFor,
   resolveTenant, emailDomain, statusForError,
+  dbForSlug, activeTenants, forEachTenant, tenantScope, resolveByTenantSecret,
   closeAll, cachedConnectionCount,
 }

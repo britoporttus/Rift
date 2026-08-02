@@ -3,9 +3,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { requireAuth } = require('../auth')
-const InternalNetwork = require('../models/InternalNetwork')
-const InternalHost = require('../models/InternalHost')
-const InternalScan = require('../models/InternalScan')
+const { tenantScope, resolveByTenantSecret } = require('../tenancy')
 const { ingestReport } = require('../internal/ingest')
 
 const router = Router()
@@ -35,12 +33,16 @@ function toDto(d) {
 router.post('/ingest', async (req, res) => {
   const token = String(req.headers['x-rift-agent-token'] || '')
   if (!token) return res.status(401).json({ error: 'token ausente' })
-  const net = await InternalNetwork.findOne({ enrollToken: token })
-  if (!net) return res.status(401).json({ error: 'token inválido' })
+  // Frente 0: o agente não tem sessão, então o tenant é resolvido pelo próprio
+  // enrollToken — que só existe dentro do banco de um tenant. Sem usuário, não
+  // há `req.db` do middleware; esta é a única rota de dados que resolve assim.
+  const hit = await resolveByTenantSecret('InternalNetwork', { enrollToken: token })
+  if (!hit) return res.status(401).json({ error: 'token inválido' })
+  const { db, doc: net } = hit
   if (!net.authorized) return res.status(403).json({ error: 'rede não autorizada — autorize no painel antes de coletar' })
 
   try {
-    const result = await ingestReport(net._id, req.body || {}, { trigger: req.body?.trigger })
+    const result = await ingestReport(db, net._id, req.body || {}, { trigger: req.body?.trigger })
     res.status(202).json({ ok: true, ...result })
   } catch (err) {
     console.error('[internal:ingest]', err?.message)
@@ -58,9 +60,12 @@ router.get('/agent-script', (req, res) => {
 
 // ── Daqui pra baixo: auth por cookie (operador logado) ──────────────────────────
 router.use(requireAuth())
+// Frente 0: resolve o tenant do usuário e injeta req.db (models ligados ao
+// banco DELE). Sem tenant resolvido, nega — nunca segue para os models globais.
+router.use(tenantScope())
 
-router.get('/', async (_req, res) => {
-  const list = await InternalNetwork.find().sort({ updatedAt: -1 }).lean()
+router.get('/', async (req, res) => {
+  const list = await req.db.InternalNetwork.find().sort({ updatedAt: -1 }).lean()
   res.json(list.map((d) => { const { enrollToken, ...rest } = d; return { ...rest, id: d._id } }))
 })
 
@@ -70,7 +75,7 @@ router.post('/', async (req, res) => {
   const kind = ['lan', 'dmz', 'cloud', 'other'].includes(req.body?.kind) ? req.body.kind : 'lan'
   const scanDepth = ['medium', 'full'].includes(req.body?.scanDepth) ? req.body.scanDepth : 'medium'
   const authorized = req.body?.authorized === true
-  const created = await InternalNetwork.create({
+  const created = await req.db.InternalNetwork.create({
     name, kind, scanDepth,
     description: req.body?.description ? String(req.body.description).slice(0, 500) : null,
     authorized,
@@ -82,7 +87,7 @@ router.post('/', async (req, res) => {
 })
 
 router.get('/:id', async (req, res) => {
-  const d = await InternalNetwork.findById(req.params.id)
+  const d = await req.db.InternalNetwork.findById(req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
   res.json(toDto(d))
 })
@@ -92,17 +97,17 @@ router.patch('/:id', async (req, res) => {
   if (req.body?.name != null) patch.name = String(req.body.name).slice(0, 120)
   if (['lan', 'dmz', 'cloud', 'other'].includes(req.body?.kind)) patch.kind = req.body.kind
   if (req.body?.description != null) patch.description = String(req.body.description).slice(0, 500)
-  const d = await InternalNetwork.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
+  const d = await req.db.InternalNetwork.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
   if (!d) return res.status(404).json({ error: 'not found' })
   res.json(toDto(d))
 })
 
 router.delete('/:id', requireAuth(['admin']), async (req, res) => {
-  const d = await InternalNetwork.findByIdAndDelete(req.params.id)
+  const d = await req.db.InternalNetwork.findByIdAndDelete(req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
   await Promise.all([
-    InternalHost.deleteMany({ networkId: req.params.id }),
-    InternalScan.deleteMany({ networkId: req.params.id }),
+    req.db.InternalHost.deleteMany({ networkId: req.params.id }),
+    req.db.InternalScan.deleteMany({ networkId: req.params.id }),
   ])
   res.status(204).end()
 })
@@ -116,7 +121,7 @@ router.patch('/:id/authorization', requireAuth(['admin']), async (req, res) => {
     authorizedAt: authorized ? new Date() : null,
     authorizationNote: req.body?.note ? String(req.body.note).slice(0, 300) : null,
   }
-  const d = await InternalNetwork.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
+  const d = await req.db.InternalNetwork.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
   if (!d) return res.status(404).json({ error: 'not found' })
   res.json(toDto(d))
 })
@@ -127,27 +132,27 @@ router.patch('/:id/authorization', requireAuth(['admin']), async (req, res) => {
 router.get('/:id/hosts', async (req, res) => {
   const q = { networkId: req.params.id }
   if (req.query.status === 'online') q.status = { $ne: 'gone' }
-  const list = await InternalHost.find(q).sort({ status: 1, severity: 1, ip: 1 }).lean()
+  const list = await req.db.InternalHost.find(q).sort({ status: 1, severity: 1, ip: 1 }).lean()
   res.json(list.map((h) => ({ ...h, id: h._id })))
 })
 
 router.get('/:id/history', async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200)
-  const list = await InternalScan.find({ networkId: req.params.id }).sort({ ranAt: -1 }).limit(limit).lean()
+  const list = await req.db.InternalScan.find({ networkId: req.params.id }).sort({ ranAt: -1 }).limit(limit).lean()
   res.json(list.map((s) => ({ ...s, id: s._id })))
 })
 
 // Regera o token (invalida o agente antigo) — admin.
 router.post('/:id/regenerate-token', requireAuth(['admin']), async (req, res) => {
   const token = crypto.randomBytes(24).toString('hex')
-  const d = await InternalNetwork.findByIdAndUpdate(req.params.id, { $set: { enrollToken: token } }, { new: true })
+  const d = await req.db.InternalNetwork.findByIdAndUpdate(req.params.id, { $set: { enrollToken: token } }, { new: true })
   if (!d) return res.status(404).json({ error: 'not found' })
   res.json({ ok: true, token })
 })
 
 // Comando do agente (com token em claro) — só admin pode ver o token.
 router.get('/:id/agent-command', requireAuth(['admin']), async (req, res) => {
-  const d = await InternalNetwork.findById(req.params.id)
+  const d = await req.db.InternalNetwork.findById(req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
   // Origem que o operador acessou (respeita proxy do Next) → URL correta no comando.
   const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0]

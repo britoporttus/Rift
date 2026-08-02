@@ -4,9 +4,6 @@
 // rodam se o domínio estiver REGISTRADO E AUTORIZADO no módulo Domínios; LeakCheck
 // público (agregado) roda sempre. Conecta os dois módulos pela string de domínio.
 const crypto = require('crypto')
-const Domain = require('../models/Domain')
-const LeakDomain = require('../models/LeakDomain')
-const LeakedCredential = require('../models/LeakedCredential')
 const { runLeakCheck } = require('../asm/leak-providers')
 const { computeExposure } = require('./aggregate')
 const { maskAccount, sanitizeCredential } = require('./mask')
@@ -37,7 +34,7 @@ function buildFingerprint(domain, b) {
 
 // Persiste um conjunto de "breaches" (de qualquer origem: providers ou ingestão
 // externa) e recomputa/salva o assessment. Reutilizado por runSearch e por ingest.
-async function persistResults(domain, { breaches = [], aggregate = null, extra = null, providerIds = [], userName, domainId } = {}) {
+async function persistResults(db, domain, { breaches = [], aggregate = null, extra = null, providerIds = [], userName, domainId } = {}) {
   const now = new Date()
   for (const b of breaches) {
     const account = maskAccount(b.account)
@@ -55,16 +52,16 @@ async function persistResults(domain, { breaches = [], aggregate = null, extra =
     // upsert perder a corrida (E11000). 1 retry como update puro é suficiente
     // (o doc já existe, criado pela escrita concorrente que venceu).
     try {
-      await LeakedCredential.findOneAndUpdate({ fingerprint: fp }, { $set: set, $setOnInsert: { firstSeen: now } }, { upsert: true })
+      await db.LeakedCredential.findOneAndUpdate({ fingerprint: fp }, { $set: set, $setOnInsert: { firstSeen: now } }, { upsert: true })
     } catch (err) {
       if (err && err.code === 11000) {
-        await LeakedCredential.findOneAndUpdate({ fingerprint: fp }, { $set: set }).catch(() => {})
+        await db.LeakedCredential.findOneAndUpdate({ fingerprint: fp }, { $set: set }).catch(() => {})
       }
     }
   }
 
-  const creds = await LeakedCredential.find({ domain }).lean()
-  const existing = await LeakDomain.findOne({ domain }).lean()
+  const creds = await db.LeakedCredential.find({ domain }).lean()
+  const existing = await db.LeakDomain.findOne({ domain }).lean()
   // Merge do agregado das fontes (LeakCheck público + Hudson Rock) — preserva o
   // sinal de origens anteriores quando esta não trouxe agregado (ex.: record-level).
   const prevAgg = (existing && existing.agg) || {}
@@ -84,7 +81,7 @@ async function persistResults(domain, { breaches = [], aggregate = null, extra =
     if (extra.logo) set.logo = extra.logo
     if (Array.isArray(extra.thirdPartyDomains) && extra.thirdPartyDomains.length) set.thirdPartyDomains = extra.thirdPartyDomains
   }
-  await LeakDomain.findOneAndUpdate({ domain }, { $set: set }, { upsert: true })
+  await db.LeakDomain.findOneAndUpdate({ domain }, { $set: set }, { upsert: true })
   return a
 }
 
@@ -106,24 +103,24 @@ function mergeAgg(a = {}, b = {}) {
   }
 }
 
-async function runSearch(domainRaw, { userName } = {}) {
+async function runSearch(db, domainRaw, { userName } = {}) {
   const domain = normalizeDomain(domainRaw)
   if (!domain) throw new Error('Domínio inválido. Ex.: fornecedor.com')
 
-  const reg = await Domain.findOne({ domain }).lean()
+  const reg = await db.Domain.findOne({ domain }).lean()
   const authorized = !!(reg && reg.authorized)
   const domainId = reg ? reg._id : null
 
-  await LeakDomain.findOneAndUpdate({ domain }, { $set: { domain, searchState: 'searching', searchError: null } }, { upsert: true })
+  await db.LeakDomain.findOneAndUpdate({ domain }, { $set: { domain, searchState: 'searching', searchError: null } }, { upsert: true })
   try {
     const { breaches, providers, aggregate } = await runLeakCheck(domain, { authorized })
     // Só conta como "fonte usada" quem RODOU E contribuiu (available). Assim uma
     // LeakCheck Pro sem plano (403) ou provider que errou não vira badge enganoso.
     const providerIds = providers.filter((p) => p.ran && p.available !== false).map((p) => p.id)
-    const a = await persistResults(domain, { breaches, aggregate, providerIds, userName, domainId })
+    const a = await persistResults(db, domain, { breaches, aggregate, providerIds, userName, domainId })
     return { domain, authorized, providers, assessment: a }
   } catch (err) {
-    await LeakDomain.findOneAndUpdate({ domain }, { $set: { searchState: 'failed', searchError: String(err?.message || err).slice(0, 300) } }).catch(() => {})
+    await db.LeakDomain.findOneAndUpdate({ domain }, { $set: { searchState: 'failed', searchError: String(err?.message || err).slice(0, 300) } }).catch(() => {})
     throw err
   }
 }
@@ -131,10 +128,10 @@ async function runSearch(domainRaw, { userName } = {}) {
 // Ingestão externa — dado coletado FORA do backend (ex.: navegador do operador
 // consultando a Hudson Rock grátis, cujo IP de datacenter é bloqueado). O
 // normalizador já mascara/descarta cleartext; aqui só persistimos.
-async function ingest(domainRaw, { breaches, aggregate, extra, providerIds, userName }) {
+async function ingest(db, domainRaw, { breaches, aggregate, extra, providerIds, userName }) {
   const domain = normalizeDomain(domainRaw)
   if (!domain) throw new Error('Domínio inválido')
-  const reg = await Domain.findOne({ domain }).lean()
+  const reg = await db.Domain.findOne({ domain }).lean()
 
   // P0-3 (auditoria 2026-07-20): esta rota era o buraco no gate de autorização
   // legal. `runSearch` checa `Domain.authorized` antes de consultar provider
@@ -154,14 +151,14 @@ async function ingest(domainRaw, { breaches, aggregate, extra, providerIds, user
     throw err
   }
 
-  return persistResults(domain, { breaches, aggregate, extra, providerIds, userName, domainId: reg._id })
+  return persistResults(db, domain, { breaches, aggregate, extra, providerIds, userName, domainId: reg._id })
 }
 
-async function getAssessment(domainRaw) {
+async function getAssessment(db, domainRaw) {
   const domain = normalizeDomain(domainRaw)
   if (!domain) return null
-  const summary = await LeakDomain.findOne({ domain }).lean()
-  const creds = await LeakedCredential.find({ domain }).sort({ category: 1, seenDate: -1 }).lean()
+  const summary = await db.LeakDomain.findOne({ domain }).lean()
+  const creds = await db.LeakedCredential.find({ domain }).sort({ category: 1, seenDate: -1 }).lean()
   const agg = (summary && summary.agg) || {}
   const a = computeExposure(creds, agg)
   return {

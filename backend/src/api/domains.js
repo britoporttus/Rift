@@ -1,8 +1,6 @@
 const { Router } = require('express')
 const { requireAuth } = require('../auth')
-const Domain = require('../models/Domain')
-const DomainAsset = require('../models/DomainAsset')
-const DomainScan = require('../models/DomainScan')
+const { tenantScope } = require('../tenancy')
 const scanner = require('../asm/scanner')
 const { absFor } = require('../asm/screenshots')
 const { isIpLiteral } = require('../net-guard')
@@ -10,6 +8,9 @@ const { cooldownRemainingMs, canForceCooldown } = require('../cooldown')
 
 const router = Router()
 router.use(requireAuth())
+// Frente 0: resolve o tenant do usuário e injeta req.db (models ligados ao
+// banco DELE). Sem tenant resolvido, nega — nunca segue para os models globais.
+router.use(tenantScope())
 
 // P1-15: cooldown por domínio — evita reabrir scan (nmap/httpx/nuclei via
 // binários externos) em loop apertado. Admin pode forçar (`force:true`).
@@ -36,11 +37,11 @@ function toDto(d) {
 }
 
 // ── CRUD de domínios ──────────────────────────────────────────────────────────
-router.get('/', async (_req, res) => {
-  const list = await Domain.find().sort({ updatedAt: -1 }).lean()
+router.get('/', async (req, res) => {
+  const list = await req.db.Domain.find().sort({ updatedAt: -1 }).lean()
   // Resumo de findings por severidade (exposições) por domínio — a home mostra isso
   // como um strip colorido. Uma agregação só pra toda a lista (barata).
-  const agg = await DomainAsset.aggregate([
+  const agg = await req.db.DomainAsset.aggregate([
     { $match: { type: 'exposure', severity: { $in: ['critical', 'high', 'medium', 'low'] } } },
     { $group: { _id: { domainId: '$domainId', severity: '$severity' }, n: { $sum: 1 } } },
   ]).catch(() => [])
@@ -55,11 +56,11 @@ router.get('/', async (_req, res) => {
 router.post('/', async (req, res) => {
   const domain = normalizeDomain(req.body?.domain)
   if (!domain) return res.status(400).json({ error: 'Domínio inválido. Ex.: fornecedor.com' })
-  const existing = await Domain.findOne({ domain })
+  const existing = await req.db.Domain.findOne({ domain })
   if (existing) return res.status(409).json({ error: 'Domínio já cadastrado', id: existing._id })
 
   const kind = ['vendor', 'partner', 'internal', 'other'].includes(req.body?.kind) ? req.body.kind : 'vendor'
-  const created = await Domain.create({
+  const created = await req.db.Domain.create({
     domain,
     name: (req.body?.name || domain).toString().slice(0, 120),
     kind,
@@ -69,7 +70,7 @@ router.post('/', async (req, res) => {
 })
 
 router.get('/:id', async (req, res) => {
-  const d = await Domain.findById(req.params.id)
+  const d = await req.db.Domain.findById(req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
   res.json(toDto(d))
 })
@@ -79,19 +80,19 @@ router.patch('/:id', async (req, res) => {
   if (req.body?.name != null) patch.name = String(req.body.name).slice(0, 120)
   if (['vendor', 'partner', 'internal', 'other'].includes(req.body?.kind)) patch.kind = req.body.kind
   if (req.body?.notes != null) patch.notes = String(req.body.notes).slice(0, 500)
-  const d = await Domain.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
+  const d = await req.db.Domain.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
   if (!d) return res.status(404).json({ error: 'not found' })
   res.json(toDto(d))
 })
 
 router.delete('/:id', requireAuth(['admin']), async (req, res) => {
-  const d = await Domain.findByIdAndDelete(req.params.id)
+  const d = await req.db.Domain.findByIdAndDelete(req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
   // Só remove os ativos ASM + histórico de scans. As credenciais vazadas pertencem
   // ao módulo Vazamentos (keyed por string de domínio) e sobrevivem à exclusão.
   await Promise.all([
-    DomainAsset.deleteMany({ domainId: req.params.id }),
-    DomainScan.deleteMany({ domainId: req.params.id }),
+    req.db.DomainAsset.deleteMany({ domainId: req.params.id }),
+    req.db.DomainScan.deleteMany({ domainId: req.params.id }),
   ])
   res.status(204).end()
 })
@@ -107,7 +108,7 @@ router.patch('/:id/authorization', requireAuth(['admin']), async (req, res) => {
     authorizedAt: authorized ? new Date() : null,
     authorizationNote: req.body?.note ? String(req.body.note).slice(0, 300) : null,
   }
-  const d = await Domain.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
+  const d = await req.db.Domain.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true })
   if (!d) return res.status(404).json({ error: 'not found' })
   res.json(toDto(d))
 })
@@ -115,7 +116,7 @@ router.patch('/:id/authorization', requireAuth(['admin']), async (req, res) => {
 // ── Scan ──────────────────────────────────────────────────────────────────────
 // Dispara o scan passivo (fire-and-forget). O estado vive no Domain (front faz polling).
 router.post('/:id/scan', async (req, res) => {
-  const d = await Domain.findById(req.params.id)
+  const d = await req.db.Domain.findById(req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
   if (d.scanState === 'scanning') return res.status(409).json({ error: 'scan já em andamento' })
 
@@ -130,7 +131,7 @@ router.post('/:id/scan', async (req, res) => {
     }
   }
 
-  scanner.runScan(d._id, { userName: req.user?.name || req.user?.email, trigger: 'manual' })
+  scanner.runScan(req.db, d._id, { userName: req.user?.name || req.user?.email, trigger: 'manual' })
     .catch((err) => console.error('[asm] runScan falhou:', err?.message))
   res.status(202).json({ ok: true, message: d.authorized ? 'Scan iniciado (passivo + probe ativo autorizado).' : 'Scan iniciado (modo passivo — autorize o domínio para probe ativo).' })
 })
@@ -139,7 +140,7 @@ router.post('/:id/scan', async (req, res) => {
 // Linha do tempo de scans do domínio (monitoramento é contínuo/sempre-ativo).
 router.get('/:id/history', async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200)
-  const list = await DomainScan.find({ domainId: req.params.id }).sort({ ranAt: -1 }).limit(limit).lean()
+  const list = await req.db.DomainScan.find({ domainId: req.params.id }).sort({ ranAt: -1 }).limit(limit).lean()
   res.json(list.map((s) => ({ ...s, id: s._id })))
 })
 
@@ -147,7 +148,7 @@ router.get('/:id/history', async (req, res) => {
 router.get('/:id/assets', async (req, res) => {
   const q = { domainId: req.params.id }
   if (req.query.type) q.type = req.query.type
-  const list = await DomainAsset.find(q).sort({ severity: 1, alive: -1, value: 1 }).lean()
+  const list = await req.db.DomainAsset.find(q).sort({ severity: 1, alive: -1, value: 1 }).lean()
   res.json(list.map((a) => ({ ...a, id: a._id })))
 })
 
@@ -155,7 +156,7 @@ router.get('/:id/assets', async (req, res) => {
 // o <img> do front envia o cookie sozinho. O caminho vem do asset (não do usuário);
 // mesmo assim absFor() valida que resolve DENTRO do storage (guard de travessia).
 router.get('/:id/screenshot/:assetId', async (req, res) => {
-  const asset = await DomainAsset.findOne({ _id: req.params.assetId, domainId: req.params.id })
+  const asset = await req.db.DomainAsset.findOne({ _id: req.params.assetId, domainId: req.params.id })
     .select('screenshotPath').lean()
   if (!asset || !asset.screenshotPath) return res.status(404).end()
   const abs = absFor(asset.screenshotPath)

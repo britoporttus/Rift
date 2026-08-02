@@ -2,9 +2,6 @@
 // leaks/hudsonrock.js (normalize puro) + asm/scanner.js (upsert idempotente +
 // recompute). O agente (internal/agent-template.py) roda nmap dentro da rede e
 // faz POST /api/internal-networks/ingest com este shape.
-const InternalNetwork = require('../models/InternalNetwork')
-const InternalHost = require('../models/InternalHost')
-const InternalScan = require('../models/InternalScan')
 const { classifyDevice } = require('./classify')
 const { analyzeHost, computeNetworkScore } = require('./analyze')
 const { computeHostDiff } = require('./diff')
@@ -73,14 +70,14 @@ function normalizeAgentReport(raw = {}) {
 }
 
 // Upsert idempotente por fingerprint com retry no E11000 (igual asm/scanner.upsertAsset).
-async function upsertHost(networkId, fp, fields) {
+async function upsertHost(db, networkId, fp, fields) {
   const now = new Date()
   const set = { $set: { ...fields, networkId, fingerprint: fp, lastSeen: now }, $setOnInsert: { firstSeen: now } }
   try {
-    await InternalHost.findOneAndUpdate({ fingerprint: fp }, set, { upsert: true, new: false })
+    await db.InternalHost.findOneAndUpdate({ fingerprint: fp }, set, { upsert: true, new: false })
   } catch (err) {
     if (err && err.code === 11000) {
-      await InternalHost.findOneAndUpdate({ fingerprint: fp }, { $set: set.$set }).catch(() => {})
+      await db.InternalHost.findOneAndUpdate({ fingerprint: fp }, { $set: set.$set }).catch(() => {})
     }
   }
 }
@@ -88,13 +85,13 @@ async function upsertHost(networkId, fp, fields) {
 // Recomputa contadores + score a partir do estado persistido (idempotente).
 // Score e contadores usam só hosts `online`: um dispositivo que saiu da rede não
 // pode continuar somando risco pra sempre.
-async function recomputeNetwork(networkId) {
-  const all = await InternalHost.find({ networkId }).lean()
+async function recomputeNetwork(db, networkId) {
+  const all = await db.InternalHost.find({ networkId }).lean()
   const online = all.filter((h) => h.status !== 'gone')
   const { score, level, reasons } = computeNetworkScore({ hosts: online })
   const deviceTypeCounts = {}
   for (const h of online) deviceTypeCounts[h.deviceType || 'unknown'] = (deviceTypeCounts[h.deviceType || 'unknown'] || 0) + 1
-  await InternalNetwork.findByIdAndUpdate(networkId, { $set: {
+  await db.InternalNetwork.findByIdAndUpdate(networkId, { $set: {
     hostCount: all.length,
     aliveCount: online.length,
     riskyCount: online.filter((h) => h.severity && h.severity !== 'info').length,
@@ -106,13 +103,13 @@ async function recomputeNetwork(networkId) {
 
 // Persiste um import completo: upsert dos hosts (classificados + analisados),
 // recompute, diff vs. a coleta anterior, histórico. `meta` = { trigger, userName }.
-async function ingestReport(networkId, report, meta = {}) {
-  const net = await InternalNetwork.findById(networkId)
+async function ingestReport(db, networkId, report, meta = {}) {
+  const net = await db.InternalNetwork.findById(networkId)
   if (!net) throw new Error('network not found')
 
   const { agent, hosts, scannedCidrs, warnings } = normalizeAgentReport(report)
   const previousScore = net.riskScore || 0
-  const previousHosts = await InternalHost.find({ networkId }).select('ip mac deviceType fingerprint status').lean()
+  const previousHosts = await db.InternalHost.find({ networkId }).select('ip mac deviceType fingerprint status').lean()
   const previousOnline = previousHosts.filter((h) => h.status !== 'gone')
   const now = new Date()
 
@@ -123,7 +120,7 @@ async function ingestReport(networkId, report, meta = {}) {
     const { deviceType } = classifyDevice(h)
     const withType = { ...h, deviceType }
     const { severity, labels } = analyzeHost(withType)
-    await upsertHost(networkId, fp, { ...withType, severity, labels, source: 'agent', status: 'online', goneSince: null })
+    await upsertHost(db, networkId, fp, { ...withType, severity, labels, source: 'agent', status: 'online', goneSince: null })
   }
   const scannedSet = new Set(scannedFps)
 
@@ -136,15 +133,15 @@ async function ingestReport(networkId, report, meta = {}) {
       .filter((h) => !scannedSet.has(h.fingerprint) && ipInAnyCidr(h.ip, scannedCidrs))
       .map((h) => h._id)
     if (goneIds.length) {
-      await InternalHost.updateMany({ _id: { $in: goneIds } }, { $set: { status: 'gone', goneSince: now } })
+      await db.InternalHost.updateMany({ _id: { $in: goneIds } }, { $set: { status: 'gone', goneSince: now } })
     }
   }
 
-  const { score, level, hostCount, aliveCount } = await recomputeNetwork(networkId)
+  const { score, level, hostCount, aliveCount } = await recomputeNetwork(db, networkId)
   // Diff = o que esta coleta viu vs. o que estava online no mesmo escopo antes.
   // A v1 comparava o banco contra o próprio banco, então missingCount era
   // estruturalmente sempre 0 e nenhum host jamais era detectado como sumido.
-  const scannedNow = await InternalHost.find({ fingerprint: { $in: scannedFps } })
+  const scannedNow = await db.InternalHost.find({ fingerprint: { $in: scannedFps } })
     .select('ip mac deviceType fingerprint severity').lean()
   let diff
   if (hasScope) {
@@ -158,7 +155,7 @@ async function ingestReport(networkId, report, meta = {}) {
   const scoreDelta = score - previousScore
   const trigger = meta.trigger === 'watch' ? 'watch' : 'agent'
 
-  await InternalNetwork.findByIdAndUpdate(networkId, { $set: {
+  await db.InternalNetwork.findByIdAndUpdate(networkId, { $set: {
     lastImportAt: now,
     lastImportBy: meta.userName || agent.hostname || 'agente',
     agent,
@@ -170,7 +167,7 @@ async function ingestReport(networkId, report, meta = {}) {
   // O registro histórico é da COLETA (o que este agente viu agora); os contadores
   // da rede são do inventário inteiro, que pode ter outras sub-redes.
   const riskyCount = scannedNow.filter((h) => h.severity && h.severity !== 'info').length
-  await InternalScan.create({
+  await db.InternalScan.create({
     networkId, ranAt: now, trigger, agentHost: agent.hostname,
     hostCount: scannedNow.length, aliveCount: scannedNow.length, riskyCount,
     riskScore: score, riskLevel: level,

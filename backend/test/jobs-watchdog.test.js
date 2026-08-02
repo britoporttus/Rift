@@ -9,6 +9,8 @@ const jobs = require('../src/jobs')
 const jobsWorker = require('../src/jobs-worker')
 const agentRunner = require('../src/agent-runner')
 const Job = require('../src/models/Job')
+// Frente 0: db falso apontando para o model monkeypatchado pelo teste.
+const db = { Job }
 
 test('findStaleRunningJobs: só devolve running com heartbeatAt mais velho que staleMs', async () => {
   const original = Job.find
@@ -20,7 +22,7 @@ test('findStaleRunningJobs: só devolve running com heartbeatAt mais velho que s
   let queryFilter = null
   Job.find = (filter) => { queryFilter = filter; return { lean: async () => rows.filter((r) => new Date(r.heartbeatAt) < filter.heartbeatAt.$lt) } }
   try {
-    const result = await jobs.findStaleRunningJobs(['scheduled'], 10 * 60 * 1000)
+    const result = await jobs.findStaleRunningJobs(db, ['scheduled'], 10 * 60 * 1000)
     assert.equal(result.length, 1)
     assert.equal(result[0].id, 'stale')
     assert.equal(queryFilter.status, 'running')
@@ -40,7 +42,7 @@ test('reapStaleJobs: mata a sessão (agentRunner.stop) e fecha o job como failed
   agentRunner.stop = (sessionId) => { stoppedSessionId = sessionId }
 
   try {
-    const n = await jobsWorker.reapStaleJobs()
+    const n = await jobsWorker.reapStaleJobs(db)
     assert.equal(n, 1)
     assert.equal(stoppedSessionId, 'scheduled-eng-9')
     assert.equal(fakeJobDoc.status, 'failed')
@@ -56,6 +58,6 @@ test('reapStaleJobs: sem jobs travados, não faz nada (retorna 0)', async () => 
   const original = Job.find
   Job.find = () => ({ lean: async () => [] })
   try {
-    assert.equal(await jobsWorker.reapStaleJobs(), 0)
+    assert.equal(await jobsWorker.reapStaleJobs(db), 0)
   } finally { Job.find = original }
 })

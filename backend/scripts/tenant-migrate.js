@@ -38,9 +38,13 @@ const INTERNAL = arg('internal', 'porttus')
 
 // Tenants-semente. `unassigned` é quarentena: existe para nada ficar sem casa
 // nem cair silenciosamente num tenant errado.
+// Decisão do operador (2026-08-01): **Porttus é a operação; Trustsis é o
+// primeiro CLIENTE.** Não são dois tenants internos — essa distinção é o que
+// permite entrar com duas contas e ver de verdade como a plataforma fica do
+// lado do cliente.
 const SEED_TENANTS = [
   { slug: 'porttus',    name: 'Porttus',    allowedEmailDomains: ['porttus.com'],  kind: 'internal' },
-  { slug: 'trustsis',   name: 'Trustsis',   allowedEmailDomains: ['trustsis.com'], kind: 'internal' },
+  { slug: 'trustsis',   name: 'Trustsis',   allowedEmailDomains: ['trustsis.com'], kind: 'customer' },
   { slug: 'unassigned', name: 'Não atribuído (quarentena)', allowedEmailDomains: [], kind: 'internal',
     notes: 'Dados sem dono derivável na migração. Reclassificar manualmente.' },
 ]
@@ -178,15 +182,36 @@ async function main() {
   }
 
   // ── 6. Conferência origem ↔ destino ───────────────────────────────────────
+  // Registros ÓRFÃOS (que referenciam um engagement já deletado) não são
+  // migrados de propósito: são lixo de engagements removidos. A conferência
+  // precisa saber disso, senão acusa "faltou dado" num descarte correto — foi
+  // exatamente o que aconteceu na primeira execução (1 job `failed` de um
+  // engagement inexistente). Contar e DIZER o que foi descartado é melhor que
+  // afrouxar a comparação: silenciar um descarte é como um bug de migração
+  // passa despercebido.
+  const engIdSet = new Set(engagements.map((e) => String(e._id)))
   console.log('\n── conferência ──')
   let mismatch = 0
+  let droppedTotal = 0
   for (const coll of [...BY_ENGAGEMENT, ...TOP_LEVEL, 'engagements']) {
     const before = await src.collection(coll).countDocuments()
     let after = 0
     for (const slug of Object.keys(conns)) after += await conns[slug].db.collection(coll).countDocuments()
-    const ok = after >= before
+
+    let dropped = 0
+    if (BY_ENGAGEMENT.includes(coll)) {
+      const docs = await src.collection(coll).find({}, { projection: { engagementId: 1 } }).toArray()
+      dropped = docs.filter((d) => !engIdSet.has(String(d.engagementId))).length
+    }
+    droppedTotal += dropped
+
+    const ok = (after + dropped) >= before
     if (!ok) mismatch++
-    console.log(`  ${ok ? '✓' : '✗'} ${coll.padEnd(20)} origem ${String(before).padStart(6)}  destino ${String(after).padStart(6)}`)
+    const note = dropped ? `  (${dropped} órfão(s) descartado(s))` : ''
+    console.log(`  ${ok ? '✓' : '✗'} ${coll.padEnd(20)} origem ${String(before).padStart(6)}  destino ${String(after).padStart(6)}${note}`)
+  }
+  if (droppedTotal) {
+    console.log(`\n  ℹ  ${droppedTotal} registro(s) órfão(s) NÃO migrado(s) — referenciam engagement que já não existe.`)
   }
 
   await Promise.allSettled(Object.values(conns).map((c) => c.close()))

@@ -14,6 +14,10 @@ const LeakDomain = require('../src/models/LeakDomain')
 const Engagement = require('../src/models/Engagement')
 const Finding = require('../src/models/Finding')
 
+// Frente 0: as rotas usam req.db (models do tenant). Aqui o db falso aponta para
+// os MESMOS objetos que o teste monkeypatcha, preservando os stubs.
+const db = { Domain, DomainAsset, LeakedCredential, LeakDomain, Engagement, Finding }
+
 function findHandler(method, path) {
   const layer = router.stack.find((l) => l.route && l.route.path === path && l.route.methods[method])
   return layer.route.stack[layer.route.stack.length - 1].handle
@@ -54,8 +58,8 @@ test('GET /api/graph: segunda chamada dentro do TTL usa cache (não bate no banc
   const { getCalls, restore } = stubAllModels()
   try {
     const handle = findHandler('get', '/')
-    await handle({ query: {} }, fakeRes(), (e) => { throw e })
-    await handle({ query: {} }, fakeRes(), (e) => { throw e })
+    await handle({ db, query: {} }, fakeRes(), (e) => { throw e })
+    await handle({ db, query: {} }, fakeRes(), (e) => { throw e })
     assert.equal(getCalls(), 1, 'segunda chamada deveria vir do cache, sem nova query')
   } finally { restore() }
 })
@@ -65,8 +69,8 @@ test('GET /api/graph: ?fresh=1 ignora o cache', async () => {
   const { getCalls, restore } = stubAllModels()
   try {
     const handle = findHandler('get', '/')
-    await handle({ query: {} }, fakeRes(), (e) => { throw e })
-    await handle({ query: { fresh: '1' } }, fakeRes(), (e) => { throw e })
+    await handle({ db, query: {} }, fakeRes(), (e) => { throw e })
+    await handle({ db, query: { fresh: '1' } }, fakeRes(), (e) => { throw e })
     assert.equal(getCalls(), 2, '?fresh=1 deveria forçar nova query mesmo com cache válido')
   } finally { restore() }
 })
@@ -76,11 +80,11 @@ test('GET /api/graph: cache expirado (TTL) força nova query', async () => {
   const { getCalls, restore } = stubAllModels()
   try {
     const handle = findHandler('get', '/')
-    await handle({ query: {} }, fakeRes(), (e) => { throw e })
+    await handle({ db, query: {} }, fakeRes(), (e) => { throw e })
     // Simula expiração sem depender de tempo real: seta o cache com timestamp
     // no passado (bem além do TTL) diretamente via setGlobalGraphCache.
     router.setGlobalGraphCache({ nodes: [], edges: [], stats: {} }, Date.now() - 10 * 60 * 1000)
-    await handle({ query: {} }, fakeRes(), (e) => { throw e })
+    await handle({ db, query: {} }, fakeRes(), (e) => { throw e })
     assert.equal(getCalls(), 2, 'cache expirado deveria forçar nova query')
   } finally { restore() }
 })
@@ -91,9 +95,9 @@ test('GET /api/graph: cache dentro do TTL devolve exatamente o mesmo objeto (sem
   try {
     const handle = findHandler('get', '/')
     const res1 = fakeRes()
-    await handle({ query: {} }, res1, (e) => { throw e })
+    await handle({ db, query: {} }, res1, (e) => { throw e })
     const res2 = fakeRes()
-    await handle({ query: {} }, res2, (e) => { throw e })
+    await handle({ db, query: {} }, res2, (e) => { throw e })
     assert.strictEqual(res1.body, res2.body)
   } finally { restore() }
 })

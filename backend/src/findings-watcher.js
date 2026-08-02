@@ -3,7 +3,6 @@ const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
 const yaml = require('js-yaml')
-const Finding = require('./models/Finding')
 const { updateEngagement, countFindings } = require('./store')
 const { getFramework, resolveFindingsDirs } = require('./frameworks')
 
@@ -90,7 +89,7 @@ const watchers = new Map()
 // idempotente pelo upsert, então não precisa de set próprio.)
 const broadcasted = new Set()
 
-async function persistFinding(engagementId, engagementName, finding, sourceFile) {
+async function persistFinding(db, engagementId, engagementName, finding, sourceFile) {
   try {
     const state = deriveState(finding)
     const fingerprint = computeFingerprint(finding)
@@ -102,7 +101,7 @@ async function persistFinding(engagementId, engagementName, finding, sourceFile)
       : (typeof v === 'string' ? v
       : (typeof v === 'object' ? JSON.stringify(v) : String(v)))
     // Upsert by sourceFile so re-running the watcher doesn't create duplicates
-    await Finding.findOneAndUpdate(
+    await db.Finding.findOneAndUpdate(
       { engagementId, sourceFile },
       {
         $set: {
@@ -155,7 +154,7 @@ async function persistFinding(engagementId, engagementName, finding, sourceFile)
 
 // framework = objeto do registro (ou id) da versão do agente deste engagement.
 // target é usado só pelo dir de fallback do legacy (results/{target}_{date}/findings).
-function watch(engagementId, slug, dateStr, engagementName, framework, target) {
+function watch(db, engagementId, slug, dateStr, engagementName, framework, target) {
   const fw = normalizeFramework(framework)
   const existing = watchers.get(engagementId)
   if (existing) {
@@ -213,11 +212,11 @@ function watch(engagementId, slug, dateStr, engagementName, framework, target) {
       // remediation-verifier ainda o vê como já descartado.
       // Persiste sempre (add e change): upsert por sourceFile é idempotente e
       // atualiza campos em re-scan (last_seen, remediation_status, etc.).
-      await persistFinding(engagementId, engagementName, finding, filePath)
+      await persistFinding(db, engagementId, engagementName, finding, filePath)
 
       // REL-4/BUG-3: contagem real (idempotente) feita AQUI — vale para scan
       // agendado e para conexão WS, sem depender de callback do chamador.
-      try { await updateEngagement(engagementId, { findingsCount: await countFindings(engagementId) }) } catch {}
+      try { await updateEngagement(engagementId, { findingsCount: await countFindings(db, engagementId) }) } catch {}
 
       // Broadcast ao vivo (via notifier global): só findings NOVOS, não-false_positive, uma vez.
       const bkey = `${engagementId}::${filePath}`

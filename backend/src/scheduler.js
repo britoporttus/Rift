@@ -2,7 +2,6 @@
 // Varre engagements com schedule.enabled e nextRunAt vencido e ENFILEIRA um run (não
 // dispara direto): grava um Job 'queued' e o jobs-worker o despacha. Isso torna o run
 // agendado durável e reconciliável — se o backend cair no meio, o worker retoma no boot.
-const Engagement = require('./models/Engagement')
 const agentRunner = require('./agent-runner')
 const findingsWatcher = require('./findings-watcher')
 const jobs = require('./jobs')
@@ -69,12 +68,12 @@ ${steps.join(' → ')}
 // ENFILEIRA um run agendado (mantém o nome `triggerRun` para os call-sites: o tick e o
 // botão "rodar agora"). Não dispara nada — grava a intenção como Job 'queued'; o worker
 // despacha via dispatchScheduledJob. Guarda contra empilhar runs do mesmo engagement.
-async function triggerRun(eng) {
+async function triggerRun(db, eng) {
   const engId    = eng._id
   const schedule = eng.schedule || {}
 
   // Já existe um run agendado ativo (na fila OU rodando) para este engagement? Não empilha.
-  if (await jobs.hasActiveJob(engId, ['scheduled'])) {
+  if (await jobs.hasActiveJob(db, engId, ['scheduled'])) {
     console.log(`[scheduler] já há um scan agendado ativo para ${engId}, não enfileira outro`)
     return null
   }
@@ -83,13 +82,13 @@ async function triggerRun(eng) {
   const framework = getFramework(eng.frameworkId)
   if (!framework.available) {
     console.warn(`[scheduler] versão "${framework.label}" indisponível para ${eng.name} — scan não enfileirado`)
-    await updateEngagement(engId, { schedule: { ...schedule, lastRunStatus: 'error' } })
+    await updateEngagement(db, engId, { schedule: { ...schedule, lastRunStatus: 'error' } })
     return null
   }
 
   // Snapshot dos parâmetros NO MOMENTO do enfileiramento → uma edição do schedule entre a
   // fila e o dispatch não altera um run já pedido.
-  const jobId = await jobs.enqueueJob({
+  const jobId = await jobs.enqueueJob(db, {
     engagementId: engId,
     sessionId:    schedSessionId(engId),
     frameworkId:  framework.id,
@@ -103,11 +102,11 @@ async function triggerRun(eng) {
 
 // DESPACHA um job agendado (chamado pelo jobs-worker). Reconstrói o run a partir do
 // snapshot, wireia o Job (advanceStep/closeJob/resume) e roda o agente headless.
-async function dispatchScheduledJob(job) {
+async function dispatchScheduledJob(db, job) {
   const engId = job.engagementId
-  const eng   = await getEngagement(engId)
+  const eng   = await getEngagement(db, engId)
   if (!eng) {
-    await jobs.closeJob(job.id, { status: 'failed', reason: 'engagement-missing' }).catch(() => {})
+    await jobs.closeJob(db, job.id, { status: 'failed', reason: 'engagement-missing' }).catch(() => {})
     return
   }
 
@@ -119,7 +118,7 @@ async function dispatchScheduledJob(job) {
   // Defensivo: se já há um processo vivo nesta sessão, não sobrepõe — encerra o job.
   if (agentRunner.isRunning(sessionId)) {
     console.warn(`[scheduler] run já vivo para ${sessionId} — job ${job.id} não despachado`)
-    await jobs.closeJob(job.id, { status: 'failed', reason: 'already-running' }).catch(() => {})
+    await jobs.closeJob(db, job.id, { status: 'failed', reason: 'already-running' }).catch(() => {})
     return
   }
   // P1-20 (auditoria 2026-07-20): uma sessão INTERATIVA do mesmo engagement
@@ -129,33 +128,33 @@ async function dispatchScheduledJob(job) {
   // (o worker tenta de novo no próximo tick — não é um erro permanente).
   if (agentRunner.isEngagementRunning(engId)) {
     console.warn(`[scheduler] sessão interativa ativa para ${engId} — job ${job.id} adiado`)
-    await jobs.deferJob(job.id)
+    await jobs.deferJob(db, job.id)
     return
   }
 
   const framework = getFramework(eng.frameworkId)
   if (!framework.available) {
-    await updateEngagement(engId, { schedule: { ...schedule, lastRunStatus: 'error' } })
-    await jobs.closeJob(job.id, { status: 'failed', reason: 'framework-unavailable' }).catch(() => {})
+    await updateEngagement(db, engId, { schedule: { ...schedule, lastRunStatus: 'error' } })
+    await jobs.closeJob(db, job.id, { status: 'failed', reason: 'framework-unavailable' }).catch(() => {})
     return
   }
 
   const resuming = job.resume && !!job.claudeSessionId
   console.log(`[scheduler] despachando scan: ${eng.name} (versão ${framework.id}, teto US$ ${schedule.costCeilingUsd}${resuming ? ', RETOMANDO' : ''}) — job ${job.id}`)
-  await updateEngagement(engId, {
+  await updateEngagement(db, engId, {
     schedule: { ...schedule, lastRunAt: new Date(), lastRunStatus: 'running' },
     status: 'active',
   })
 
   // Watcher de findings (sem WS): persiste no Mongo e atualiza a contagem internamente.
-  findingsWatcher.watch(engId, eng.slug, eng.date, eng.name, framework, eng.target)
+  findingsWatcher.watch(db, engId, eng.slug, eng.date, eng.name, framework, eng.target)
 
   // P1-21 (auditoria 2026-07-20): `heartbeatAt` era gravado no claim e nunca mais
   // atualizado — um job travado (processo vivo, mas preso/sem progresso) nunca
   // era detectado em runtime, só reconciliado no próximo BOOT do backend.
   // Batimento periódico enquanto o run está de fato ativo; o watchdog em
   // jobs-worker.js usa isso pra liberar a vaga de concorrência sem esperar um restart.
-  const heartbeatTimer = setInterval(() => { jobs.heartbeatJob(job.id).catch(() => {}) }, HEARTBEAT_INTERVAL_MS)
+  const heartbeatTimer = setInterval(() => { jobs.heartbeatJob(db, job.id).catch(() => {}) }, HEARTBEAT_INTERVAL_MS)
   if (heartbeatTimer.unref) heartbeatTimer.unref()
 
   const prompt = buildPipelinePrompt(eng, engId2, schedule)
@@ -169,7 +168,7 @@ async function dispatchScheduledJob(job) {
     // Sem operador conectado (headless): broadcaster no-op. Findings/estado ainda são
     // persistidos; se alguém conectar, os findings chegam via notifier global.
     sessionId, engId2, prompt, () => {},
-    (usd, tokens) => appendUsage({
+    (usd, tokens) => appendUsage(db, {
       usd, tokens, engagementId: engId, engagementName: eng.name,
       userId: 'scheduler', userName: 'Agendador Rift', userEmail: 'scheduler@rift',
       scheduled: true, ts: new Date(),
@@ -177,7 +176,7 @@ async function dispatchScheduledJob(job) {
     // onEvent: a fase derivada da atividade real avança a etapa do Job (fluxo no banco).
     (event) => {
       if (event?.type === 'phase_update') {
-        jobs.advanceStep(job.id, event.phase).catch(() => {})
+        jobs.advanceStep(db, job.id, event.phase).catch(() => {})
       }
     },
     eng,
@@ -190,10 +189,10 @@ async function dispatchScheduledJob(job) {
       resumeSessionId: resuming ? job.claudeSessionId : null,
       // Persiste o session_id do CLI no Job assim que ele aparecer → habilita o resume
       // numa próxima queda (o mapa em memória do agent-runner não sobrevive a restart).
-      onClaudeSession: (cid) => jobs.setClaudeSession(job.id, cid),
+      onClaudeSession: (cid) => jobs.setClaudeSession(db, job.id, cid),
       onBudgetExceeded: async () => {
-        const cur = await getEngagement(engId)
-        await updateEngagement(engId, { schedule: { ...(cur?.schedule || schedule), lastRunStatus: 'budget_exceeded' } })
+        const cur = await getEngagement(db, engId)
+        await updateEngagement(db, engId, { schedule: { ...(cur?.schedule || schedule), lastRunStatus: 'budget_exceeded' } })
       },
       onClose: async (code, info) => {
         clearInterval(heartbeatTimer)
@@ -205,10 +204,10 @@ async function dispatchScheduledJob(job) {
           timedOut:           info?.timedOut,
           phasesReached:      info?.phasesReached,
         })
-        const cur = await getEngagement(engId)
+        const cur = await getEngagement(db, engId)
         const sch = cur?.schedule || schedule
         if (sch.lastRunStatus !== 'budget_exceeded') {
-          await updateEngagement(engId, {
+          await updateEngagement(db, engId, {
             schedule: { ...sch, lastRunStatus: (code === 0 || info?.budgetExceeded) ? 'completed' : 'error' },
           })
         }
@@ -216,11 +215,11 @@ async function dispatchScheduledJob(job) {
         // interrupted por CRASH não passa por aqui (o processo morreu) — quem o retoma
         // é recoverInterruptedJobs no boot.
         const [fc, spent] = await Promise.all([
-          countFindings(engId).catch(() => undefined),
-          sumUsageUsd(engId).catch(() => undefined),
+          countFindings(db, engId).catch(() => undefined),
+          sumUsageUsd(db, engId).catch(() => undefined),
         ])
         const jobStatus = ['completed', 'stopped', 'failed'].includes(runState) ? runState : 'stopped'
-        await jobs.closeJob(job.id, {
+        await jobs.closeJob(db, job.id, {
           status: jobStatus, reason: stopReason, findingsCount: fc, spentUsd: spent,
           phasesReached: info?.phasesReached || [],
         }).catch((e) => console.warn('[scheduler] closeJob falhou:', e.message))
@@ -234,24 +233,27 @@ function nextRunFrom(date, frequency) {
   return new Date(date.getTime() + (FREQUENCY_MS[frequency] || FREQUENCY_MS.weekly))
 }
 
+// Frente 0: o tick roda sem request → varre tenant a tenant. `forEachTenant`
+// isola a falha: um tenant com banco indisponível não impede o agendamento dos
+// demais (antes era uma coleção só, então não existia esse modo de falha).
 async function tick() {
-  try {
+  const { forEachTenant } = require('./tenancy')
+  await forEachTenant(async ({ tenant, db }) => {
     const now = new Date()
-    const due = await Engagement.find({ 'schedule.enabled': true }).lean()
+    const due = await db.Engagement.find({ 'schedule.enabled': true }).lean()
     for (const eng of due) {
       const sch = eng.schedule || {}
       const next = sch.nextRunAt ? new Date(sch.nextRunAt) : null
       if (next && next > now) continue // ainda não venceu
 
       // Reagenda ANTES de enfileirar (evita re-disparo se o run demorar mais que o intervalo)
-      await updateEngagement(eng._id, {
+      await updateEngagement(db, eng._id, {
         schedule: { ...sch, nextRunAt: nextRunFrom(now, sch.frequency || 'weekly') },
       })
-      await triggerRun(eng).catch((e) => console.error('[scheduler] erro ao enfileirar run:', e.message))
+      await triggerRun(db, eng)
+        .catch((e) => console.error(`[scheduler][${tenant.slug}] erro ao enfileirar run:`, e.message))
     }
-  } catch (e) {
-    console.error('[scheduler] erro no tick:', e.message)
-  }
+  })
 }
 
 function start() {

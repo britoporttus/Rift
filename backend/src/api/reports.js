@@ -2,18 +2,19 @@ const { Router } = require('express')
 const path = require('path')
 const fs = require('fs')
 const { requireAuth } = require('../auth')
+const { tenantScope } = require('../tenancy')
 const { getEngagement } = require('../store')
 const { getFrameworkPath } = require('../frameworks')
 const { renderReport } = require('../report')
 const { htmlToPdf, PdfConcurrencyLimitError } = require('../report-pdf')
 const { generateExecNarrative } = require('../report-ai')
 const { isExecutiveReport } = require('../report-kind')
-const Finding = require('../models/Finding')
-const Usage = require('../models/Usage')
-const ReportNarrative = require('../models/ReportNarrative')
 
 const router = Router()
 router.use(requireAuth())
+// Frente 0: resolve o tenant do usuário e injeta req.db (models ligados ao
+// banco DELE). Sem tenant resolvido, nega — nunca segue para os models globais.
+router.use(tenantScope())
 
 // Diretório de reports do engagement, na VERSÃO do framework escolhida (seletor A/B/C).
 // Antes era um FRAMEWORK_PATH fixo → os relatórios de legacy/v3 (e da cópia v2) nunca
@@ -31,8 +32,8 @@ function reportsDir(e) {
 // FAIL-CLOSED — nome desconhecido vira executivo (restrito) em vez de técnico
 // (visível a qualquer autenticado), que era como o buraco existia.
 
-async function costFor(engagementId) {
-  const [row] = await Usage.aggregate([
+async function costFor(db, engagementId) {
+  const [row] = await db.Usage.aggregate([
     { $match: { engagementId } },
     { $group: { _id: null, usd: { $sum: '$usd' } } },
   ])
@@ -43,7 +44,7 @@ async function costFor(engagementId) {
 // type=technical (default) | executive (admin). Renderiza HTML self-contained; seguro
 // para embutir inline (template nosso, conteúdo escapado). ?download=1 força baixar.
 router.get('/:engagementId/generated', async (req, res) => {
-  const e = await getEngagement(req.params.engagementId)
+  const e = await getEngagement(req.db, req.params.engagementId)
   if (!e) return res.status(404).json({ error: 'not found' })
 
   const type = req.query.type === 'executive' ? 'executive' : 'technical'
@@ -51,12 +52,12 @@ router.get('/:engagementId/generated', async (req, res) => {
     return res.status(403).json({ error: 'Relatório executivo restrito a administradores' })
   }
 
-  const findings = await Finding.find({ engagementId: e._id }).lean().catch(() => [])
+  const findings = await req.db.Finding.find({ engagementId: e._id }).lean().catch(() => [])
   const visible = findings.filter((f) => (f.state || '').toLowerCase() !== 'false_positive')
-  const costUsd = await costFor(e._id).catch(() => undefined)
+  const costUsd = await costFor(req.db, e._id).catch(() => undefined)
   // Executivo: embute o resumo por IA se já foi gerado (cache). Técnico não usa IA.
   const narrative = type === 'executive'
-    ? await ReportNarrative.findById(e._id).lean().catch(() => null)
+    ? await req.db.ReportNarrative.findById(e._id).lean().catch(() => null)
     : null
   const html = renderReport(e, visible, { type, costUsd, narrative })
   const slug = (e.slug || 'engagement')
@@ -90,33 +91,33 @@ router.get('/:engagementId/generated', async (req, res) => {
 // GET: devolve a narrativa salva (+ se está desatualizada vs findings atuais).
 router.get('/:engagementId/narrative', async (req, res) => {
   if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Resumo executivo restrito a administradores' })
-  const e = await getEngagement(req.params.engagementId)
+  const e = await getEngagement(req.db, req.params.engagementId)
   if (!e) return res.status(404).json({ error: 'not found' })
-  const n = await ReportNarrative.findById(e._id).lean().catch(() => null)
+  const n = await req.db.ReportNarrative.findById(e._id).lean().catch(() => null)
   if (!n) return res.json({ exists: false })
-  const current = await Finding.countDocuments({ engagementId: e._id, state: { $ne: 'false_positive' } }).catch(() => n.findingsCount)
+  const current = await req.db.Finding.countDocuments({ engagementId: e._id, state: { $ne: 'false_positive' } }).catch(() => n.findingsCount)
   res.json({ exists: true, ...n, stale: current !== n.findingsCount, currentFindings: current })
 })
 
 // POST: GERA (1 passada do modelo sobre os findings) e salva. Admin — é o "executivo".
 router.post('/:engagementId/narrative', async (req, res) => {
   if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Resumo executivo restrito a administradores' })
-  const e = await getEngagement(req.params.engagementId)
+  const e = await getEngagement(req.db, req.params.engagementId)
   if (!e) return res.status(404).json({ error: 'not found' })
 
-  const findings = await Finding.find({ engagementId: e._id, state: { $ne: 'false_positive' } }).lean().catch(() => [])
+  const findings = await req.db.Finding.find({ engagementId: e._id, state: { $ne: 'false_positive' } }).lean().catch(() => [])
   if (!findings.length) return res.status(400).json({ error: 'Sem findings para consolidar.' })
 
   try {
     const n = await generateExecNarrative(e, findings)
-    const doc = await ReportNarrative.findByIdAndUpdate(
+    const doc = await req.db.ReportNarrative.findByIdAndUpdate(
       e._id,
       { $set: { _id: e._id, engagementId: e._id, ...n, findingsCount: findings.length, generatedAt: new Date() } },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     ).lean()
     // Contabiliza o custo da geração (transparência no painel admin).
     if (n.costUsd > 0) {
-      await Usage.create({
+      await req.db.Usage.create({
         usd: n.costUsd, tokens: 0, engagementId: e._id, engagementName: e.name,
         userId: req.user.id, userName: req.user.name, userEmail: req.user.email,
         kind: 'report_narrative', ts: new Date(),
@@ -130,7 +131,7 @@ router.post('/:engagementId/narrative', async (req, res) => {
 
 // ── Arquivos de relatório escritos pelo AGENTE (narrativa) — secundários ────────────
 router.get('/:engagementId', async (req, res) => {
-  const e = await getEngagement(req.params.engagementId)
+  const e = await getEngagement(req.db, req.params.engagementId)
   if (!e) return res.status(404).json({ error: 'not found' })
 
   const dir = reportsDir(e)
@@ -154,7 +155,7 @@ router.get('/:engagementId', async (req, res) => {
 })
 
 router.get('/:engagementId/view/:filename', async (req, res) => {
-  const e = await getEngagement(req.params.engagementId)
+  const e = await getEngagement(req.db, req.params.engagementId)
   if (!e) return res.status(404).json({ error: 'not found' })
 
   const filename = path.basename(req.params.filename)
@@ -174,7 +175,7 @@ router.get('/:engagementId/view/:filename', async (req, res) => {
 })
 
 router.get('/:engagementId/download/:filename', async (req, res) => {
-  const e = await getEngagement(req.params.engagementId)
+  const e = await getEngagement(req.db, req.params.engagementId)
   if (!e) return res.status(404).json({ error: 'not found' })
 
   const filename = path.basename(req.params.filename)

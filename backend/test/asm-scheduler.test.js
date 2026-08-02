@@ -7,6 +7,10 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'chave-de-teste-com-mais-de-3
 
 const asmScheduler = require('../src/asm-scheduler')
 const Domain = require('../src/models/Domain')
+
+// Frente 0: o tick virou fan-out por tenant; a lógica de seleção mora em
+// tickFor(db). O db falso aponta para o model que o teste monkeypatcha.
+const db = { Domain }
 const scanner = require('../src/asm/scanner')
 
 const DAY = 24 * 60 * 60 * 1000
@@ -36,10 +40,10 @@ test('tick: dispara scan (trigger monitor) em domínio vencido e ocioso', async 
 
   const old = new Date(Date.now() - 30 * DAY)
   Domain.find = () => ({ select: () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'done', lastScanAt: old }] }) })
-  scanner.runScan = async (id, opts) => { calls.push({ id, opts }) }
+  scanner.runScan = async (_db, id, opts) => { calls.push({ id, opts }) }
 
   try {
-    await asmScheduler.tick()
+    await asmScheduler.tickFor(db)
     assert.equal(calls.length, 1)
     assert.equal(calls[0].id, 'd1')
     assert.equal(calls[0].opts.trigger, 'monitor')
@@ -59,7 +63,7 @@ test('tick: NÃO dispara em domínio que está escaneando (não empilha)', async
   scanner.runScan = async () => { runCalled = true }
 
   try {
-    await asmScheduler.tick()
+    await asmScheduler.tickFor(db)
     assert.equal(runCalled, false)
   } finally {
     Domain.find = originalFind
@@ -78,7 +82,7 @@ test('tick: respeita o cap de MAX_PER_TICK (não dispara todos de uma vez)', asy
   scanner.runScan = async () => { disparados++ }
 
   try {
-    await asmScheduler.tick()
+    await asmScheduler.tickFor(db)
     assert.equal(disparados, 3, 'default ASM_RESCAN_MAX_PER_TICK = 3')
   } finally {
     Domain.find = originalFind

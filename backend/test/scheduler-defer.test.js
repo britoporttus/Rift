@@ -12,6 +12,9 @@ const agentRunner = require('../src/agent-runner')
 const jobs = require('../src/jobs')
 const Engagement = require('../src/models/Engagement')
 
+// Frente 0: db falso apontando para os models monkeypatchados pelo teste.
+const db = { Engagement }
+
 test('dispatchScheduledJob ADIA (defer) em vez de rodar quando há sessão interativa ativa no engagement', async () => {
   const originalFindById = Engagement.findById
   const originalIsRunning = agentRunner.isRunning
@@ -25,11 +28,11 @@ test('dispatchScheduledJob ADIA (defer) em vez de rodar quando há sessão inter
   Engagement.findById = () => ({ lean: async () => ({ _id: 'eng-1', schedule: {}, slug: 'x', date: '2026-01-01' }) })
   agentRunner.isRunning = () => false
   agentRunner.isEngagementRunning = (engId) => engId === 'eng-1'
-  jobs.deferJob = async (jobId) => { deferredJobId = jobId }
+  jobs.deferJob = async (_db, jobId) => { deferredJobId = jobId }
   agentRunner.run = () => { runCalled = true }
 
   try {
-    await scheduler.dispatchScheduledJob({ id: 'job-1', engagementId: 'eng-1', sessionId: null, payload: {} })
+    await scheduler.dispatchScheduledJob(db, { id: 'job-1', engagementId: 'eng-1', sessionId: null, payload: {} })
     assert.equal(deferredJobId, 'job-1', 'deveria adiar o job travado (não rodar por cima da sessão interativa)')
     assert.equal(runCalled, false, 'NÃO deveria disparar o agente enquanto a sessão interativa está ativa')
   } finally {
