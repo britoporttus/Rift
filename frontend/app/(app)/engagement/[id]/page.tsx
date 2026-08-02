@@ -15,6 +15,7 @@ import { CredentialPanel } from '@/components/engagement/CredentialPanel'
 import { JobPipeline } from '@/components/engagement/JobPipeline'
 import { useAuth } from '@/hooks/useAuth'
 import { useEscapeClose } from '@/hooks/useEscapeClose'
+import { engagementMatchesDomain } from '@/lib/domainMatch'
 import {
   ArrowLeft, Wifi, WifiOff, Shield, FileText,
   Eye, Download, X, Clock, Wand2, Radar, Printer, ExternalLink, Workflow,
@@ -118,10 +119,31 @@ export default function EngagementPage() {
     }
   }, [loadEngagement, loadFindings, loadHistory])
 
-  // Load engagement (mount) — erro aqui volta ao dashboard (engagement inexistente).
+  // Load engagement (mount) — engagement inexistente volta para Domínios (a home).
+  // Antes ia para /dashboard, que hoje é só um `redirect('/dominios')`: o usuário
+  // via um pulo de rota extra antes de chegar no mesmo lugar.
   useEffect(() => {
-    loadEngagement().catch(() => router.replace('/dashboard'))
+    loadEngagement().catch(() => router.replace('/dominios'))
   }, [loadEngagement, router])
+
+  // ── Origem do engagement (coesão de navegação) ───────────────────────────────
+  // Um engagement quase sempre nasce de um domínio (`/dominios/[id]` → "Novo
+  // escopo"), mas o botão de voltar era fixo em /dashboard e descartava esse
+  // contexto. Resolve o domínio pelo mesmo critério de sufixo que o grafo usa,
+  // para o "voltar" devolver ao assessment de onde se veio.
+  const [originDomain, setOriginDomain] = useState<{ id: string; domain: string } | null>(null)
+  useEffect(() => {
+    if (!engagement?.target) return
+    let cancelled = false
+    api.domains.list()
+      .then((ds) => {
+        if (cancelled) return
+        const hit = ds.find((d) => engagementMatchesDomain(engagement.target, d.domain))
+        if (hit) setOriginDomain({ id: hit.id, domain: hit.domain })
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [engagement?.target])
 
   // Bootstrap da sessão: busca a lista e fixa a primeira como ativa — é o canal
   // WS que a Execução usa para comandar o agente. (Sem UI de múltiplos chats.)
@@ -228,20 +250,32 @@ export default function EngagementPage() {
     { id: 'report',   label: 'Relatório', icon: <FileText size={14} /> },
   ]
 
+  // `100%` e não `100vh`: esta tela vive dentro do <main> do layout, que já
+  // desconta os 52px da TopBar. Com 100vh o conteúdo ficava sempre 52px mais
+  // alto que o container e a página inteira ganhava um scroll fantasma.
+  const backHref = originDomain ? `/dominios/${originDomain.id}` : '/dominios'
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
       <div style={{
         padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: 12,
         background: 'var(--surface)', flexShrink: 0,
       }}>
-        <Link href="/dashboard" style={{ color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
+        <Link href={backHref} title={originDomain ? `Voltar para ${originDomain.domain}` : 'Voltar para Domínios'}
+          style={{ color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
           <ArrowLeft size={16} />
         </Link>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 15 }}>{engagement.name}</div>
-          <div style={{ color: 'var(--muted)', fontSize: 12 }}>{engagement.target}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>{engagement.target}</span>
+            {originDomain && (
+              <Link href={`/dominios/${originDomain.id}`} style={{ color: 'var(--purple-light)', fontSize: 11, textDecoration: 'none' }}>
+                · ver domínio
+              </Link>
+            )}
+          </div>
         </div>
 
         {tab === 'exec' && contextUsage && (
