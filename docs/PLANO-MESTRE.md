@@ -196,13 +196,34 @@ tenant. Decidir escopo disso depois que §6 estiver de pé.
 
 ## 6. Frente 0 — isolamento por tenant (o gate de venda)
 
-> **Estado em 2026-08-01: 0% construído.** Verificado no código — não existe model
-> `Tenant`, não existe `tenantId` em lugar nenhum (as ocorrências de "tenant" no
-> backend são todas sobre *tenant de nuvem Azure*, do domain pack, coisa
-> diferente), `Engagement` não tem nenhum campo de posse, e
-> `GET /api/engagements` (`api/engagements.js:35`, assinatura `(_req, res)`)
-> devolve **todos** os engagements a qualquer usuário autenticado. O upgrade do
-> WebSocket também não checa posse. Nada abaixo foi iniciado.
+> **Estado em 2026-08-01 (fim do dia): construída, em branch, não mergeada.**
+> Branch `feat/frente-0-tenant-isolation`, 3 commits. Backend 490 testes verdes,
+> frontend 35. Validada ao vivo com duas contas reais.
+>
+> | Peça | Estado |
+> |---|---|
+> | Registry `Tenant` + control/tenant plane | ✅ |
+> | Resolver fail-closed + cache de conexões | ✅ |
+> | Middleware `req.db` nos 7 routers de dados | ✅ |
+> | Rotas e módulos compartilhados escopados (~90 usos) | ✅ |
+> | WS recusa `engagementId` de outro tenant | ✅ |
+> | Workers iterando tenants (scheduler, asm, jobs, recovers de boot) | ✅ |
+> | Migração idempotente executada (origem intacta) | ✅ |
+> | Filesystem particionado + fallback para o layout legado | ✅ |
+> | Cofre de credenciais chaveado por tenant | ✅ |
+> | Papel `client` + matriz de visibilidade na UI | ✅ |
+> | Teste-régua cross-tenant (8 superfícies) | ✅ |
+> | **ACL intra-tenant por engagement** | ⬜ pendente |
+> | **Espelho de `Usage` no control plane** | ⬜ pendente (hoje é fan-out) |
+> | **Isolamento do agente por usuário de SO/container** | ⬜ pendente (ver §3.1, P0-8) |
+>
+> **Contas de demonstração** (criadas por `scripts/seed-tenant-users.js`):
+> `operador@porttus.com` (admin/porttus) e `cliente@trustsis.com` (client/trustsis).
+>
+> **Verificação ao vivo:** operador vê 21 engagements, 111 findings e 9 domínios;
+> cliente vê 0 de cada. Cliente informando o id de um engagement da Porttus recebe
+> 404 em `/engagements/:id`, `/reports/:id` e `/reports/:id/generated`, lista vazia
+> em `/findings` e `/messages`, e 403 no painel admin.
 
 **Modelo escolhido:** banco por cliente, conexão resolvida por tenant em tempo de
 request. O mesmo código serve bancos co-locados num cluster compartilhado (barato
