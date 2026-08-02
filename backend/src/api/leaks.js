@@ -29,15 +29,23 @@ router.put('/providers/:id', requireAuth(['admin']), (req, res) => {
 // ── Ingestão externa (browser-side) ────────────────────────────────────────────
 // O navegador do operador consulta uma fonte cujo IP do servidor é bloqueado
 // (Hudson Rock) e envia o JSON aqui. Normalizamos, mascaramos e persistimos.
-router.post('/ingest', async (req, res) => {
+// P0-3: grava dado pessoal de terceiro sem verificação de proveniência (o `raw`
+// vem do cliente), então exige admin — além do gate de `Domain.authorized` que
+// `ingest()` aplica no núcleo.
+router.post('/ingest', requireAuth(['admin']), async (req, res) => {
   const { domain, source, raw } = req.body || {}
   if (!normalizeDomain(domain)) return res.status(400).json({ error: 'domínio inválido' })
   if (source !== 'hudsonrock') return res.status(400).json({ error: 'fonte de ingestão não suportada' })
   if (!raw || typeof raw !== 'object') return res.status(400).json({ error: 'payload vazio' })
   console.log('[ingest:hudsonrock]', domain, '| keys:', Object.keys(raw).join(','), '| famílias:', raw.stealerFamilies ? Object.keys(raw.stealerFamilies).length : 0, '| urls:', ((raw.data && (raw.data.all_urls || raw.data.employees_urls)) || []).length)
   const { breaches, aggregate, extra } = normalizeHudsonRock(domain, raw)
-  const assessment = await ingest(domain, { breaches, aggregate, extra, providerIds: ['hudsonrock'], userName: req.user?.name || req.user?.email })
-  res.json({ domain, source, ingested: breaches.length, thirdParties: (extra && extra.thirdPartyDomains ? extra.thirdPartyDomains.length : 0), assessment })
+  try {
+    const assessment = await ingest(domain, { breaches, aggregate, extra, providerIds: ['hudsonrock'], userName: req.user?.name || req.user?.email })
+    res.json({ domain, source, ingested: breaches.length, thirdParties: (extra && extra.thirdPartyDomains ? extra.thirdPartyDomains.length : 0), assessment })
+  } catch (err) {
+    if (err?.code === 'DOMAIN_NOT_AUTHORIZED') return res.status(403).json({ error: err.message })
+    throw err
+  }
 })
 
 // ── Histórico de buscas ────────────────────────────────────────────────────────

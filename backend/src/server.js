@@ -875,6 +875,9 @@ connect()
     }
     httpServer.listen(PORT, () => {
       console.log(`[rift] backend em http://localhost:${PORT}`)
+      // P0-8: torna visível no log quando o agente está rodando com credencial
+      // compartilhada (assinatura pessoal) em vez de chave dedicada ao deployment.
+      agentRunner.warnIfSharedCredential()
     })
     scheduler.start()
     // Worker de Jobs: o único a despachar runs agendados/headless (lê a fila a cada ~2s).

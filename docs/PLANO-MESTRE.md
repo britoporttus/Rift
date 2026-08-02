@@ -25,7 +25,13 @@ do pentester humano, não um substituto dele.
 é baixa por causa de falso positivo; baixo ruído é o que transforma a ferramenta em
 produto vendável.
 
-**Uso hoje:** interno (Porttus/Trustsis), com um slice sendo lapidado para venda.
+**Uso hoje:** interno (Porttus/Trustsis).
+
+**Modelo de negócio decidido em 2026-08-01: SaaS — o cliente loga e acompanha os
+próprios domínios e achados em tempo real.** Isso não é detalhe de entrega, é o que
+define a ordem de engenharia: **a Frente 0 (isolamento por tenant) deixa de ser
+item #4 e passa a ser pré-requisito do primeiro cliente externo com login.** Hoje
+qualquer usuário autenticado enxerga os engagements de todo mundo (§6).
 
 ---
 
@@ -70,21 +76,33 @@ do nome. Estado verificado no código em 2026-08-01:
 |---|---|---|
 | **P0-1** SSRF no ASM | ✅ | `isIpLiteral` em `api/domains.js`; `isBlockedIp` no caminho de probe de `asm/scanner.js` |
 | **P0-2** PII no `fingerprint` | ✅ | `leaks/search.js:35` usa `sha256`, não o e-mail cru |
-| **P0-3** gate legal no ingest | ❌ **aberto** | `leaks/search.js:134` `ingest()` busca o `Domain` e **nunca checa `reg.authorized`**; a rota `POST /api/leaks/ingest` não tem gate nem exige admin |
+| **P0-3** gate legal no ingest | ✅ **fechado 2026-08-01** | gate de `Domain.authorized` no núcleo (`leaks/search.js` `ingest()`) + rota exige admin + 403 tipado. `test/leaks-ingest-authz.test.js` |
 | **P0-4** security headers | ✅ | `next.config.js` com CSP, HSTS, `frame-ancestors 'none'` |
 | **P0-5** narrative por role | ✅ | `api/reports.js:98` retorna 403 para não-admin |
-| **P0-6** relatório executivo por metadado | 🟡 **parcial** | continua sendo regex de nome de arquivo (`clevel`/`exec`), só mais abrangente. O próprio comentário no código admite: "ainda depende do nome do arquivo (limitação conhecida)". A recomendação era manifesto/metadado controlado pelo backend |
+| **P0-6** relatório executivo por metadado | ✅ **fechado 2026-08-01** | `src/report-kind.js`: precedência de diretório (`reports/executive/`) sobre nome + **fail-closed** (nome desconhecido → restrito). `test/report-kind.test.js` |
 | **P0-7** fase agressiva no nível de tool | ✅ | hook `aggressive-tools-check.sh` com `RIFT_ALLOW_AGGRESSIVE` |
-| **P0-8** API key dedicada + egress | 🟡 **parcial** | hook `egress-exfil-check.sh` cobre exfiltração via tool; falta a chave dedicada/monitorável e o egress filtering de rede |
+| **P0-8** API key dedicada + egress | 🟡 **metade de código feita** | ver nota abaixo |
 
-**Nota sobre o P0-3:** a flag `RIFT_LEAKS_ENABLED` neutraliza o sinal de vazamento
-no *score* e no *grafo* — ela **não desabilita a rota** `/api/leaks/ingest`, que
-segue viva e sem gate. A exposição prática é menor porque o módulo está represado
-na UI, mas o buraco continua aberto na API.
+**Nota sobre o P0-8 — a auditoria partiu de uma premissa errada.** Ela assumiu que
+`ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN` estavam no ambiente. **Não estão**:
+o CLI autentica pelo arquivo `~/.claude/.credentials.json` (assinatura pessoal do
+operador). O vetor real de exfiltração não é `env | base64` — é ler esse arquivo,
+já que o agente roda Bash arbitrário com `HOME` no ambiente.
 
-**Leitura para o gate de venda:** o bloqueador principal é o isolamento por tenant
-+ ACL por engagement (§6). P0-3 e a metade que falta de P0-6/P0-8 são pequenos e
-devem entrar no mesmo pacote.
+Feito em código: `agentCredential()` em `agent-runner.js` suporta
+`RIFT_AGENT_ANTHROPIC_API_KEY` (chave dedicada, com precedência) e garante que
+**nunca mais de uma credencial** entre no processo do agente; `RIFT_AGENT_CONFIG_DIR`
+aponta o CLI para um perfil dedicado; aviso no boot quando roda em credencial
+compartilhada.
+
+**Falta (é ação de infra, não de código — não dá para fechar daqui):**
+1. Criar a chave dedicada no console da Anthropic, com alerta de custo/uso anômalo,
+   e setar `RIFT_AGENT_ANTHROPIC_API_KEY`.
+2. Rodar o agente com **usuário de SO / container próprio** — enquanto `HOME`
+   apontar para o home do operador, um `cat ~/.claude/.credentials.json` alcança
+   a credencial pessoal, independente do que o env do processo carregue.
+3. Egress filtering de rede (só alvo autorizado + `api.anthropic.com`) e rotação
+   periódica da chave.
 
 ---
 
@@ -151,16 +169,28 @@ navegação**:
 Ordem definida pela combinação de **valor de negócio × custo × dependência**. Um
 front por vez até estar bom — foi a dispersão que causou o problema original.
 
+**Reordenado em 2026-08-01 pela decisão de SaaS.** Na leitura anterior (venda como
+serviço, cliente recebendo relatório) a Frente 0 era #4. Com cliente logando, ela
+vira #1: é o que separa "produto" de "vazamento cross-organização".
+
 | # | Front | Por que agora | Depende de |
 |---|---|---|---|
-| **1** | **ASM: monitoramento risk-triggered** 🟡 | Menor esforço / maior retorno. Já existe scan agendado; falta gatilho por evento (novo subdomínio, deploy, CVE crítica). É o que sustenta a promessa de "monitoramento contínuo". | nada |
-| **2** | **Agente 2 — pentest autenticado** 🟡 | O pack `web-auth` já coleta credencial e o relatório já sabe gerar variante autenticada. Falta o crawler e o gatilho de handoff. Dobra a profundidade do produto. | nada |
-| **3** | **Correlação leve de credenciais** 🟡 | Item mais barato da lista: domínio → empresa → funcionários (Hunter.io, fonte compliant) cruzado com os providers grátis já plugados. Vive como painel dentro do assessment de Domínio. | nada |
-| **4** | **Frente 0 — isolamento por tenant** ⛔ | **Gate de venda externa.** Detalhado em §6. Subir para #1 no instante em que alguém de fora precisar de login. | nada (é o trabalho) |
-| **5** | **Integrações / abas de conexão** 🔵 | Ticketing + MCP client, com dogfooding no próprio GitHub do Rift como critério de pronto. | ganha de tenant |
-| **6** | **BYOK nível 1 (Agent SDK)** 🔵 | Troca `spawn('claude')` pelo Claude Agent SDK: resolve chave própria **e** custo/rate-limit previsível no mesmo trabalho. | tenant |
-| **7** | **Runner interno + transporte de inferência** ⛔ | Peça de infra única que destrava rede-interna always-on, AD e SAP. Caro; só depois de 1–4. | — |
+| **1** | **Frente 0 — isolamento por tenant** ⛔ | **Pré-requisito do primeiro login externo.** Sem isso, o cliente A vê engagement, finding, relatório e WebSocket do cliente B. Não é dívida técnica, é o produto não existir como SaaS. Detalhado em §6. | nada (é o trabalho) |
+| **2** | **ASM: monitoramento risk-triggered** 🟡 | Menor esforço / maior retorno, e é o que dá valor recorrente ao login do cliente (ele volta porque algo mudou). Falta gatilho por evento — novo subdomínio, deploy, CVE crítica. | nada |
+| **3** | **Agente 2 — pentest autenticado** 🟡 | O pack `web-auth` já coleta credencial e o relatório já sabe gerar variante autenticada. Falta o crawler e o gatilho de handoff. Dobra a profundidade do produto. | nada |
+| **4** | **BYOK nível 1 (Agent SDK)** 🔵 | Sobe de #6: em SaaS, custo de inferência por tenant deixa de ser detalhe e vira margem. Troca `spawn('claude')` pelo Claude Agent SDK — resolve chave própria **e** custo/rate-limit previsível. | #1 |
+| **5** | **Correlação leve de credenciais** 🟡 | Item mais barato da lista: domínio → empresa → funcionários (Hunter.io, fonte compliant) cruzado com os providers grátis já plugados. Painel dentro do assessment de Domínio. | nada |
+| **6** | **Integrações / abas de conexão** 🔵 | Ticketing + MCP client, com dogfooding no próprio GitHub do Rift como critério de pronto. Em SaaS, conexões são por-tenant. | #1 |
+| **7** | **Runner interno + transporte de inferência** ⛔ | Peça de infra única que destrava rede-interna always-on, AD e SAP. Caro. | — |
 | **8** | **AD → SAP** ⛔ | Sequência decidida: Azure → AD → SAP. SAP é lacuna real de mercado (nenhuma das 12 concorrentes pesquisadas cobre), mas acumula runner novo + maior raio de explosão. | #7 |
+
+### 5.1. O que SaaS acrescenta que ainda não está em lugar nenhum
+
+Não são itens da Frente 0, mas o modelo de assinatura pede e hoje não existem —
+registrar para não virar surpresa: onboarding/provisionamento de tenant
+self-service, papel de "cliente" distinto de `user` interno (o RBAC hoje só tem
+admin/user), billing/limite de consumo por tenant, e trilha de auditoria por
+tenant. Decidir escopo disso depois que §6 estiver de pé.
 
 ---
 

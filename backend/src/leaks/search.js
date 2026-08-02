@@ -135,7 +135,26 @@ async function ingest(domainRaw, { breaches, aggregate, extra, providerIds, user
   const domain = normalizeDomain(domainRaw)
   if (!domain) throw new Error('Domínio inválido')
   const reg = await Domain.findOne({ domain }).lean()
-  return persistResults(domain, { breaches, aggregate, extra, providerIds, userName, domainId: reg ? reg._id : null })
+
+  // P0-3 (auditoria 2026-07-20): esta rota era o buraco no gate de autorização
+  // legal. `runSearch` checa `Domain.authorized` antes de consultar provider
+  // pago, mas a ingestão manual (pensada pro operador colar dado coletado no
+  // próprio navegador) nunca checava nada — e o `raw` é 100% controlado pelo
+  // cliente. Qualquer usuário autenticado podia fabricar "vazamentos" para um
+  // domínio de terceiro NÃO autorizado e persistir dado pessoal sem base legal,
+  // poluindo KPIs/timeline/grafo com informação não verificada.
+  //
+  // O gate mora aqui, no núcleo, e não só na rota: assim o worker, um script ou
+  // uma rota futura não conseguem contornar por esquecimento.
+  if (!reg || reg.authorized !== true) {
+    const err = new Error(
+      `Domínio "${domain}" não está autorizado. Registre o domínio e autorize-o (com referência contratual) antes de ingerir dados de vazamento.`
+    )
+    err.code = 'DOMAIN_NOT_AUTHORIZED'
+    throw err
+  }
+
+  return persistResults(domain, { breaches, aggregate, extra, providerIds, userName, domainId: reg._id })
 }
 
 async function getAssessment(domainRaw) {

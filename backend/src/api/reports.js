@@ -7,6 +7,7 @@ const { getFrameworkPath } = require('../frameworks')
 const { renderReport } = require('../report')
 const { htmlToPdf, PdfConcurrencyLimitError } = require('../report-pdf')
 const { generateExecNarrative } = require('../report-ai')
+const { isExecutiveReport } = require('../report-kind')
 const Finding = require('../models/Finding')
 const Usage = require('../models/Usage')
 const ReportNarrative = require('../models/ReportNarrative')
@@ -25,17 +26,10 @@ function reportsDir(e) {
 // P0-6 (auditoria 2026-07-20): a convenção REAL do framework (ver
 // Agentes-Pentest/*/.claude/commands/pentest-report.md) nomeia o C-level como
 // `clevel-{date}.md`/`clevel-surface-{date}.md` — sem a substring "exec". A
-// regex antiga só pegava o nome legado `relatorio-executivo.md` (framework v1)
-// e deixava QUALQUER `clevel-*` das versões v2/v2-next passar como "técnico"
-// (visível a qualquer usuário autenticado) — confirmado em arquivos já
-// existentes em disco (ex.: clients/akdmi/2026-07-08/reports/clevel-surface-2026-07-08.md).
-// Ainda depende do nome do arquivo (limitação conhecida — o ideal é um
-// manifesto controlado pelo backend), mas cobre a convenção real de todas as
-// versões do framework hoje em uso.
-function isExecutiveReport(filename) {
-  const f = filename.toLowerCase()
-  return f.startsWith('clevel') || /exec/i.test(f)
-}
+// P0-6: a classificação saiu daqui para `src/report-kind.js`, agora com
+// precedência de diretório (`reports/executive/`) sobre nome e política
+// FAIL-CLOSED — nome desconhecido vira executivo (restrito) em vez de técnico
+// (visível a qualquer autenticado), que era como o buraco existia.
 
 async function costFor(engagementId) {
   const [row] = await Usage.aggregate([
