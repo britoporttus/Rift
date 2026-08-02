@@ -61,11 +61,30 @@ para a anterior e a seguinte **sem passar pelo menu**. O menu é atalho, não é
 | **Plataforma** | ✅ | SSO Azure, RBAC admin/user, cookie HttpOnly, CSP, anti-SSRF, painel admin, ~430 testes, CI + deploy em merge. |
 | **Isolamento por tenant** | ⛔ ausente | **é o gate de venda externa** — ver §6. |
 
-### 3.1. Os 8 P0 da auditoria de 2026-07-20 estão fechados
+### 3.1. Os 8 P0 da auditoria de 2026-07-20 — 5 fechados, 1 aberto, 2 parciais
 
-Corrigidos no commit `ee776f0`, cada um com teste. Isso muda a leitura do gate de
-venda: **o que falta para expor a plataforma a um cliente externo não são mais os
-P0 — é o isolamento por tenant e a ACL por engagement.**
+O commit `ee776f0` ("remediação completa da auditoria") **não fechou tudo**, apesar
+do nome. Estado verificado no código em 2026-08-01:
+
+| P0 | Estado | Evidência |
+|---|---|---|
+| **P0-1** SSRF no ASM | ✅ | `isIpLiteral` em `api/domains.js`; `isBlockedIp` no caminho de probe de `asm/scanner.js` |
+| **P0-2** PII no `fingerprint` | ✅ | `leaks/search.js:35` usa `sha256`, não o e-mail cru |
+| **P0-3** gate legal no ingest | ❌ **aberto** | `leaks/search.js:134` `ingest()` busca o `Domain` e **nunca checa `reg.authorized`**; a rota `POST /api/leaks/ingest` não tem gate nem exige admin |
+| **P0-4** security headers | ✅ | `next.config.js` com CSP, HSTS, `frame-ancestors 'none'` |
+| **P0-5** narrative por role | ✅ | `api/reports.js:98` retorna 403 para não-admin |
+| **P0-6** relatório executivo por metadado | 🟡 **parcial** | continua sendo regex de nome de arquivo (`clevel`/`exec`), só mais abrangente. O próprio comentário no código admite: "ainda depende do nome do arquivo (limitação conhecida)". A recomendação era manifesto/metadado controlado pelo backend |
+| **P0-7** fase agressiva no nível de tool | ✅ | hook `aggressive-tools-check.sh` com `RIFT_ALLOW_AGGRESSIVE` |
+| **P0-8** API key dedicada + egress | 🟡 **parcial** | hook `egress-exfil-check.sh` cobre exfiltração via tool; falta a chave dedicada/monitorável e o egress filtering de rede |
+
+**Nota sobre o P0-3:** a flag `RIFT_LEAKS_ENABLED` neutraliza o sinal de vazamento
+no *score* e no *grafo* — ela **não desabilita a rota** `/api/leaks/ingest`, que
+segue viva e sem gate. A exposição prática é menor porque o módulo está represado
+na UI, mas o buraco continua aberto na API.
+
+**Leitura para o gate de venda:** o bloqueador principal é o isolamento por tenant
++ ACL por engagement (§6). P0-3 e a metade que falta de P0-6/P0-8 são pequenos e
+devem entrar no mesmo pacote.
 
 ---
 
@@ -146,6 +165,14 @@ front por vez até estar bom — foi a dispersão que causou o problema original
 ---
 
 ## 6. Frente 0 — isolamento por tenant (o gate de venda)
+
+> **Estado em 2026-08-01: 0% construído.** Verificado no código — não existe model
+> `Tenant`, não existe `tenantId` em lugar nenhum (as ocorrências de "tenant" no
+> backend são todas sobre *tenant de nuvem Azure*, do domain pack, coisa
+> diferente), `Engagement` não tem nenhum campo de posse, e
+> `GET /api/engagements` (`api/engagements.js:35`, assinatura `(_req, res)`)
+> devolve **todos** os engagements a qualquer usuário autenticado. O upgrade do
+> WebSocket também não checa posse. Nada abaixo foi iniciado.
 
 **Modelo escolhido:** banco por cliente, conexão resolvida por tenant em tempo de
 request. O mesmo código serve bancos co-locados num cluster compartilhado (barato
