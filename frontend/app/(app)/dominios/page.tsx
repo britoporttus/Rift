@@ -6,8 +6,12 @@ import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import { HBars } from '@/components/ui/charts/HBars'
 import {
+  Page, PageHeader, Card, Btn, Badge, Kpi, KpiRow, EmptyState, Skeleton,
+  SectionTitle, inputStyle, tint,
+} from '@/components/ui/kit'
+import {
   Globe, Plus, ShieldCheck, ShieldAlert, Radar, Loader2, Server,
-  AlertTriangle, Lock, Crosshair,
+  AlertTriangle, Lock, Crosshair, FileText,
 } from 'lucide-react'
 
 const KIND_ORDER = ['vendor', 'partner', 'internal', 'other'] as const
@@ -22,11 +26,6 @@ const STEP_LABEL: Record<string, string> = {
 const KIND_LABEL: Record<string, string> = { vendor: 'Fornecedor', partner: 'Parceiro', internal: 'Interno', other: 'Outro' }
 
 function riskColor(level: string) { return SEV_COLOR[level] || SEV_COLOR.info }
-
-const inputStyle: React.CSSProperties = {
-  background: 'rgba(2,2,8,0.6)', border: '1px solid var(--border-mid)', borderRadius: 6,
-  color: 'var(--text)', fontSize: 12, padding: '5px 9px', fontFamily: 'inherit', outline: 'none', minWidth: 120,
-}
 
 export default function DominiosPage() {
   const router = useRouter()
@@ -77,65 +76,63 @@ export default function DominiosPage() {
     .filter((k) => k.value > 0)
 
   return (
-    <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto', width: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', margin: 0, letterSpacing: '-0.01em', display: 'flex', alignItems: 'center', gap: 9 }}>
-            <Globe size={19} color="var(--purple-light)" /> Domínios
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '3px 0 0' }}>
-            Análise de superfície (ASM) passiva e score de segurança por domínio — fornecedores, parceiros e ativos próprios.
-          </p>
-        </div>
-        <button onClick={() => router.push('/novo-pentest')}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '0.65rem 1.2rem', background: 'var(--purple)', border: 'none', borderRadius: 9, color: 'white', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 0 22px var(--purple-glow-strong)', flexShrink: 0 }}>
-          <Crosshair size={16} /> Novo Pentest
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        icon={<Globe size={19} color="var(--purple-light)" />}
+        title="Domínios"
+        subtitle="Análise de superfície (ASM) passiva e score de segurança por domínio — fornecedores, parceiros e ativos próprios."
+        actions={
+          <>
+            <Btn href="/reports"><FileText size={14} /> Relatórios</Btn>
+            <Btn variant="primary" onClick={() => router.push('/novo-pentest')}><Crosshair size={16} /> Novo Pentest</Btn>
+          </>
+        }
+      />
 
-      {!loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
-          <Kpi label="Domínios" value={domains.length} color="var(--purple-light)" icon={<Globe size={18} />} />
-          <Kpi label="Em risco alto/crítico" value={atRisk} color="var(--high)" icon={<AlertTriangle size={18} />} />
-          <Kpi label="Não autorizados" value={unauthorizedCount} color="var(--medium)" icon={<Lock size={18} />} />
+      {/* KPIs navegáveis: "em risco" leva para os achados que sustentam o número.
+          Antes eram só números — o operador via "3 em risco" e não tinha para
+          onde clicar. */}
+      {!loading && domains.length > 0 && (
+        <KpiRow>
+          <Kpi label="Domínios monitorados" value={domains.length} color="var(--purple-light)" icon={<Globe size={18} />} />
+          <Kpi label="Em risco alto/crítico" value={atRisk} color="var(--high)" icon={<AlertTriangle size={18} />}
+            href="/findings?severity=high" hint="ver achados de alta severidade" />
+          <Kpi label="Não autorizados" value={unauthorizedCount} color="var(--medium)" icon={<Lock size={18} />}
+            hint="só coleta passiva" />
           <Kpi label="Credenciais vazadas" value={totalLeaks} color="var(--critical)" icon={<ShieldAlert size={18} />} />
-        </div>
+        </KpiRow>
       )}
 
       {!loading && kindData.length > 0 && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.25rem 1.4rem' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 18, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            Domínios por tipo
-          </div>
-          <HBars data={kindData} />
-        </div>
+        <Card pad="1.25rem 1.4rem">
+          <SectionTitle>Domínios por tipo</SectionTitle>
+          <div style={{ marginTop: 18 }}><HBars data={kindData} /></div>
+        </Card>
       )}
 
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '0.9rem 1.1rem', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <Card pad="0.9rem 1.1rem" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <input value={newDomain} onChange={(e) => setNewDomain(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} placeholder="fornecedor.com"
+          aria-label="Domínio a adicionar"
           style={{ ...inputStyle, flex: 1, minWidth: 200, fontFamily: 'var(--mono)' }} />
-        <select value={newKind} onChange={(e) => setNewKind(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+        <select value={newKind} onChange={(e) => setNewKind(e.target.value)} aria-label="Tipo do domínio" style={{ ...inputStyle, cursor: 'pointer' }}>
           <option value="vendor">Fornecedor</option>
           <option value="partner">Parceiro</option>
           <option value="internal">Interno</option>
           <option value="other">Outro</option>
         </select>
-        <button onClick={handleCreate} disabled={creating || !newDomain.trim()}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0.5rem 1rem', background: 'var(--purple)', border: 'none', borderRadius: 7, color: 'white', fontSize: 12.5, fontWeight: 700, cursor: creating ? 'default' : 'pointer', opacity: creating || !newDomain.trim() ? 0.6 : 1, fontFamily: 'inherit', boxShadow: '0 0 18px var(--purple-glow-strong)' }}>
+        <Btn variant="primary" onClick={handleCreate} disabled={creating || !newDomain.trim()}>
           {creating ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} Adicionar
-        </button>
-      </div>
+        </Btn>
+      </Card>
 
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-          {[0, 1, 2].map((i) => <div key={i} style={{ height: 150, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, animation: 'pulse 1.4s ease-in-out infinite' }} />)}
-        </div>
+        <Skeleton h={196} />
       ) : domains.length === 0 ? (
-        <div style={{ background: 'var(--surface)', border: '1px dashed var(--border-mid)', borderRadius: 12, padding: '3.5rem', textAlign: 'center', color: 'var(--muted)' }}>
-          <div style={{ margin: '0 auto 1rem', display: 'flex', justifyContent: 'center', color: 'var(--text-mute)' }}><Radar size={34} /></div>
-          <p style={{ fontSize: 14, margin: 0 }}>Nenhum domínio ainda.</p>
-          <p style={{ fontSize: 12, margin: '6px 0 0', color: 'var(--text-mute)' }}>Adicione um fornecedor acima para mapear a superfície.</p>
-        </div>
+        <EmptyState
+          icon={<Radar size={34} />}
+          title="Nenhum domínio ainda."
+          hint="Adicione um domínio acima para mapear a superfície externa dele. A coleta inicial é passiva — nada é sondado ativamente antes de você autorizar."
+        />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
           {domains.map((d) => {
@@ -186,7 +183,7 @@ export default function DominiosPage() {
                     )}
                   </div>
                   <button onClick={(ev) => handleScan(d.id, ev)} disabled={isScanning || scanning === d.id}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: isScanning ? 'default' : 'pointer', fontFamily: 'inherit', background: 'color-mix(in srgb, var(--purple) 14%, transparent)', border: '1px solid var(--border-mid)', color: 'var(--purple-light)', opacity: isScanning ? 0.5 : 1, whiteSpace: 'nowrap' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: isScanning ? 'default' : 'pointer', fontFamily: 'inherit', background: tint('var(--purple)', 14), border: '1px solid var(--border-mid)', color: 'var(--purple-light)', opacity: isScanning ? 0.5 : 1, whiteSpace: 'nowrap' }}>
                     {isScanning || scanning === d.id ? <Loader2 size={12} className="spin" /> : <Radar size={12} />} Escanear
                   </button>
                 </div>
@@ -197,20 +194,7 @@ export default function DominiosPage() {
       )}
 
       <style jsx global>{`.spin { animation: spin 0.9s linear infinite; }`}</style>
-    </div>
-  )
-}
-
-function Kpi({ label, value, color, icon }: { label: string; value: number; color: string; icon: React.ReactNode }) {
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '0.9rem 1.1rem', display: 'flex', alignItems: 'center', gap: 12, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 3, background: color }} />
-      <div style={{ width: 38, height: 38, borderRadius: 10, flexShrink: 0, background: `color-mix(in srgb, ${color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>{icon}</div>
-      <div>
-        <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>{value}</div>
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontWeight: 600 }}>{label}</div>
-      </div>
-    </div>
+    </Page>
   )
 }
 
@@ -237,14 +221,6 @@ function SevStrip({ counts }: { counts?: Partial<Record<string, number>> }) {
         )
       })}
     </div>
-  )
-}
-
-function Badge({ children, color, icon }: { children: React.ReactNode; color: string; icon?: React.ReactNode }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, borderRadius: 99, padding: '2px 8px', letterSpacing: '0.03em', background: `color-mix(in srgb, ${color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`, color }}>
-      {icon}{children}
-    </span>
   )
 }
 
