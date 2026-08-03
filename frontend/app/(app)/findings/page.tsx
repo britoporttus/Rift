@@ -11,6 +11,7 @@ import { clickableDivProps } from '@/lib/a11y'
 import { findingType } from '@/lib/findingClassify'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
 import { Donut } from '@/components/ui/charts/Donut'
+import { VulnEducation } from '@/components/findings/VulnEducation'
 import { AreaTrend } from '@/components/ui/charts/AreaTrend'
 import { findingsPerDay } from '@/lib/trends'
 import {
@@ -372,6 +373,7 @@ function FindingsView() {
                     <p style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.8, paddingTop: '0.6rem', whiteSpace: 'pre-wrap' }}>
                       {f.description}
                     </p>
+                    <VulnEducation finding={f} />
                     {f.evidence && (
                       <pre style={{
                         marginTop: 8, background: 'var(--bg)', borderRadius: 5,

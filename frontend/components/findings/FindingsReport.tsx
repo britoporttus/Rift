@@ -6,6 +6,7 @@ import { clickableDivProps } from '@/lib/a11y'
 import { findingType, findingConfirmation, findingExploitation, cvssKind } from '@/lib/findingClassify'
 import { Donut } from '@/components/ui/charts/Donut'
 import { useCountUp } from '@/lib/motion'
+import { VulnEducation } from '@/components/findings/VulnEducation'
 
 // Status de remediação — fecha o ciclo "achei → corrigi → confirmei"
 const REMEDIATION: Record<RemediationStatus, { label: string; color: string; icon: string }> = {
@@ -202,6 +203,8 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
           {f.description && (
             <p style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.7, marginBottom: 12 }}>{f.description}</p>
           )}
+
+          <VulnEducation finding={f} />
 
           {f.solution && (
             <>
