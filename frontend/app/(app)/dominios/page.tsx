@@ -8,6 +8,7 @@ import { HBars } from '@/components/ui/charts/HBars'
 import { AreaTrend } from '@/components/ui/charts/AreaTrend'
 import { findingsPerDay } from '@/lib/trends'
 import { Tilt } from '@/components/ui/fx/Tilt'
+import { Magnetic } from '@/components/ui/fx/Magnetic'
 import {
   Page, PageHeader, Card, Btn, Badge, Kpi, KpiRow, EmptyState, Skeleton,
   SectionTitle, inputStyle, tint, Reveal,
@@ -90,7 +91,7 @@ export default function DominiosPage() {
         actions={
           <>
             <Btn href="/reports"><FileText size={14} /> Relatórios</Btn>
-            <Btn variant="primary" onClick={() => router.push('/novo-pentest')}><Crosshair size={16} /> Novo Pentest</Btn>
+            <Magnetic><Btn variant="primary" onClick={() => router.push('/novo-pentest')}><Crosshair size={16} /> Novo Pentest</Btn></Magnetic>
           </>
         }
       />
@@ -170,7 +171,8 @@ export default function DominiosPage() {
               <Tilt>
               <div {...clickableDivProps(() => router.push(`/dominios/${d.id}`))}
                 onMouseEnter={() => setHovered(d.id)} onMouseLeave={() => setHovered(null)}
-                style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1.25rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none', height: '100%' }}>
+                style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1.25rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none', height: '100%', position: 'relative', overflow: isScanning ? 'hidden' : undefined }}>
+                {isScanning && <div className="rk-scanline" aria-hidden />}
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name || d.domain}</div>

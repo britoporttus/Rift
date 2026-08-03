@@ -3,6 +3,8 @@ import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/lib/api'
+import { ScrambleText } from '@/components/ui/fx/ScrambleText'
+import { Aurora } from '@/components/ui/fx/Aurora'
 
 const ERROR_MESSAGES: Record<string, string> = {
   domain_not_allowed: 'Acesso não permitido. Use um email @porttus.com ou @trustsis.com.',
@@ -402,11 +404,12 @@ function LoginSide({ onLogin, ssoError, narrow }: { onLogin: (email: string, pas
       borderTop: narrow ? '1px solid rgba(139,92,246,0.14)' : 'none',
       boxShadow: narrow ? '0 -30px 60px rgba(0,0,0,0.5)' : '-30px 0 80px rgba(0,0,0,0.5)',
     }}>
+      <Aurora opacity={0.35} />
       {!narrow && (
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 1,
           background: 'linear-gradient(180deg,transparent,rgba(139,92,246,0.5),transparent)' }} />
       )}
-      <div style={{ width: '100%', maxWidth: 360, margin: '0 auto', animation: 'loginFadeUp .6s cubic-bezier(.2,.7,.3,1) both' }}>
+      <div style={{ width: '100%', maxWidth: 360, margin: '0 auto', position: 'relative', zIndex: 1, animation: 'loginFadeUp .6s cubic-bezier(.2,.7,.3,1) both' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '.7rem', marginBottom: '2rem' }}>
           <CrosshairIcon size={34} color="#a78bfa" strokeWidth={1.5} />
           <span style={{
@@ -558,7 +561,7 @@ function LoginScreen({ onLogin, ssoError }: { onLogin: (email: string, password:
             R<span style={{ color: '#a78bfa' }}>i</span>FT
           </span>
           <span style={{ width: 1, height: 20, background: 'rgba(139,92,246,0.3)' }} />
-          <span style={{ fontSize: '.62rem', letterSpacing: '.3em', color: '#71717a' }}>AI PENTEST PLATFORM</span>
+          <span style={{ fontSize: '.62rem', letterSpacing: '.3em', color: '#71717a' }}><ScrambleText text="AI PENTEST PLATFORM" /></span>
         </div>
         {!narrow && (
           <div style={{

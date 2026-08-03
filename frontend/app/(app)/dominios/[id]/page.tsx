@@ -10,6 +10,7 @@ import { Donut } from '@/components/ui/charts/Donut'
 import { AreaTrend, AreaPoint } from '@/components/ui/charts/AreaTrend'
 import { Beacon } from '@/components/ui/fx/Beacon'
 import { ScanSweep } from '@/components/ui/fx/ScanSweep'
+import { Magnetic } from '@/components/ui/fx/Magnetic'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
 import { VerificationCard } from '@/components/dominios/VerificationCard'
 import type { DomainScanRecord } from '@/lib/api'
@@ -169,9 +170,11 @@ export default function DominioDetailPage() {
         actions={
           <>
             <Btn href={`/mapa?domain=${id}`} title="Ver no mapa de superfície"><Share2 size={14} /> Ver no mapa</Btn>
+            <Magnetic>
             <Btn variant="primary" onClick={doScan} disabled={isScanning || scanning}>
               {isScanning || scanning ? <Loader2 size={14} className="spin" /> : <Radar size={14} />} {isScanning ? 'Escaneando' : 'Escanear'}
             </Btn>
+            </Magnetic>
             {isAdmin && (
               <button onClick={doDelete} title="Excluir domínio" aria-label="Excluir domínio" style={{
                 display: 'flex', alignItems: 'center', padding: '0.5rem', background: 'var(--bg)',
@@ -407,7 +410,7 @@ export default function DominioDetailPage() {
               <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <TrendingUp size={12} /> Score de segurança ao longo do tempo
               </div>
-              <AreaTrend data={scoreSeries} color="var(--purple-light)" height={110} />
+              <AreaTrend data={scoreSeries} color="var(--purple-light)" height={110} live={isScanning} />
             </div>
           )}
           {domain.lastDiff && domain.lastDiff.computedAt && (

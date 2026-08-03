@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { useDrawProgress } from '@/lib/motion'
+import { useDrawProgress, usePrefersReducedMotion } from '@/lib/motion'
 
 export interface AreaPoint {
   label: string
@@ -18,6 +18,8 @@ interface AreaTrendProps {
   valueSuffix?: string
   /** desenho de entrada esq→dir. Padrão: ligado. */
   animate?: boolean
+  /** modo "ao vivo": pulso viajando pela linha + badge AO VIVO. */
+  live?: boolean
 }
 
 /**
@@ -26,11 +28,13 @@ interface AreaTrendProps {
  * tooltip com crosshair no hover. Sem legenda (série única; o título da seção
  * já a nomeia). Largura é medida do container para manter traço e ponto nítidos.
  */
-export function AreaTrend({ data, color = 'var(--purple-light)', height = 130, valueSuffix = '', animate = true }: AreaTrendProps) {
+export function AreaTrend({ data, color = 'var(--purple-light)', height = 130, valueSuffix = '', animate = true, live = false }: AreaTrendProps) {
   const uid = useId().replace(/[:]/g, '')
   const wrapRef = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(320)
   const [hover, setHover] = useState<number | null>(null)
+  const [pulseT, setPulseT] = useState(0)
+  const reduced = usePrefersReducedMotion()
   const p = useDrawProgress({ duration: 1100, enabled: animate })
 
   useEffect(() => {
@@ -44,6 +48,14 @@ export function AreaTrend({ data, color = 'var(--purple-light)', height = 130, v
     setW(el.clientWidth || 320)
     return () => ro.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (!live || reduced) return
+    let raf = 0, t0 = 0
+    const loop = (now: number) => { if (!t0) t0 = now; setPulseT(((now - t0) / 2600) % 1); raf = requestAnimationFrame(loop) }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [live, reduced])
 
   const H = height
   const padT = 10, padB = 6
@@ -70,6 +82,13 @@ export function AreaTrend({ data, color = 'var(--purple-light)', height = 130, v
     setHover(Math.max(0, Math.min(lastIdx, Math.round(rel * lastIdx))))
   }
 
+  // ponto do pulso "ao vivo" viajando pela linha
+  const pf = pulseT * (n - 1)
+  const pi = Math.min(n - 2, Math.floor(pf))
+  const pfr = pf - pi
+  const pulseX = x(pi) + (x(pi + 1) - x(pi)) * pfr
+  const pulseY = y(data[pi].value) + (y(data[pi + 1].value) - y(data[pi].value)) * pfr
+
   return (
     <div
       ref={wrapRef}
@@ -79,6 +98,16 @@ export function AreaTrend({ data, color = 'var(--purple-light)', height = 130, v
       role="img"
       aria-label={`Tendência: ${data[0].label} a ${data[lastIdx].label}, de ${data[0].value} a ${data[lastIdx].value}${valueSuffix}`}
     >
+      {live && (
+        <span style={{
+          position: 'absolute', top: 6, left: 8, zIndex: 2, display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.08em', color: 'var(--critical)',
+          background: 'rgba(7,7,13,.5)', border: '1px solid color-mix(in srgb, var(--critical) 40%, transparent)',
+          borderRadius: 99, padding: '2px 7px',
+        }}>
+          <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--critical)', animation: reduced ? undefined : 'pulse 1.1s ease-in-out infinite' }} />AO VIVO
+        </span>
+      )}
       <svg width={w} height={H} style={{ display: 'block' }}>
         <defs>
           <linearGradient id={`ag-${uid}`} x1="0" y1="0" x2="0" y2="1">
@@ -104,6 +133,9 @@ export function AreaTrend({ data, color = 'var(--purple-light)', height = 130, v
           opacity={dotOpacity}
           style={{ filter: `drop-shadow(0 0 5px color-mix(in srgb, ${color} 90%, transparent))` }}
         />
+        {live && !reduced && (
+          <circle cx={pulseX} cy={pulseY} r={4} fill={color} style={{ filter: `drop-shadow(0 0 8px ${color})` }} />
+        )}
         {/* crosshair + marcador no hover */}
         {hover != null && (
           <>

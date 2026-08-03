@@ -6,6 +6,7 @@ import { api, Engagement, ReportNarrativeStatus } from '@/lib/api'
 import { useEngagementWS, WsMsg } from '@/hooks/useEngagementWS'
 import { mergeMessages } from '@/lib/mergeMessages'
 import { FindingsReport } from '@/components/findings/FindingsReport'
+import { ProgressRing } from '@/components/ui/charts/ProgressRing'
 import { ScheduleSettings } from '@/components/engagement/ScheduleSettings'
 import { ExecutionPanel } from '@/components/engagement/ExecutionPanel'
 import { ModelSwitcher } from '@/components/engagement/ModelSwitcher'
@@ -299,6 +300,12 @@ export default function EngagementPage() {
           </button>
         )}
 
+        {running && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--purple-light)' }}>
+            <ProgressRing value={engagement.progress || 0} size={26} stroke={3} showNum={false} />
+            <span>{engagement.phase || 'rodando'}</span>
+          </div>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
           {connected
             ? <><Wifi size={13} color="var(--low)" /><span style={{ color: 'var(--low)' }}>conectado</span></>
