@@ -76,6 +76,7 @@ export default function DominioDetailPage() {
   const [authNote, setAuthNote] = useState('')
   const [authOpen, setAuthOpen] = useState(false)
   const [saasOpen, setSaasOpen] = useState(false)
+  const [infraOpen, setInfraOpen] = useState(false)
   const [history, setHistory] = useState<DomainScanRecord[]>([])
   const [shotOpen, setShotOpen] = useState<DomainAsset | null>(null)  // lightbox do recon visual
 
@@ -150,6 +151,21 @@ export default function DominioDetailPage() {
     .sort((a, b) => SEV_ORDER.indexOf(a.severity as never) - SEV_ORDER.indexOf(b.severity as never))
   const riskyPortCount = findingGroups.reduce((n, g) => n + g.risky.length, 0)
   const vulnNodes = graph ? graph.nodes.filter((n) => n.type === 'vuln') : []
+  // Subdomínios em primeiro plano: a superfície real do domínio. Vivos primeiro,
+  // depois por severidade. O IP passa a ser secundário (chip dentro da linha).
+  const subdomains = assets
+    .filter((a) => a.type === 'subdomain')
+    .sort((a, b) =>
+      Number(b.alive) - Number(a.alive) ||
+      SEV_ORDER.indexOf(a.severity as never) - SEV_ORDER.indexOf(b.severity as never) ||
+      a.value.localeCompare(b.value))
+  const aliveSubs = subdomains.filter((s) => s.alive).length
+  // Monitoramento centrado em subdomínio: mudança de subdomínio na frente;
+  // porta/IP viram um resumo discreto (era "IP demais" na tela).
+  const diffNewSubs = (domain.lastDiff?.newAssets || []).filter((a) => a.type === 'subdomain')
+  const diffMissSubs = (domain.lastDiff?.missingAssets || []).filter((a) => a.type === 'subdomain')
+  const diffOtherNew = (domain.lastDiff?.newAssets.length || 0) - diffNewSubs.length
+  const diffOtherMiss = (domain.lastDiff?.missingAssets.length || 0) - diffMissSubs.length
   // Série real do score ao longo dos scans (history vem do mais recente ao mais
   // antigo → invertemos para desenhar da esquerda p/ direita em ordem cronológica).
   const scoreSeries: AreaPoint[] = [...history].reverse().map((h) => ({
@@ -327,6 +343,21 @@ export default function DominioDetailPage() {
         )}
       </div>
 
+      {/* Subdomínios — a superfície real do domínio, em primeiro plano. O IP é
+          secundário (aparece como chip dentro de cada linha). Aberto por padrão. */}
+      {subdomains.length > 0 && (
+        <Collapsible title="Subdomínios" icon={<Globe size={12} />} count={subdomains.length}
+          defaultOpen meta={`${aliveSubs} vivo(s)`}>
+          {subdomains.slice(0, 40).map((a) => <AssetRow key={a.id} a={a} />)}
+          {subdomains.length > 40 && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-mute)', paddingLeft: 2 }}>
+              +{subdomains.length - 40} — veja todos no{' '}
+              <Link href={`/mapa?domain=${id}`} style={{ color: 'var(--purple-light)', textDecoration: 'none' }}>Mapa</Link>.
+            </div>
+          )}
+        </Collapsible>
+      )}
+
       {/* ── Detalhe sob demanda ──────────────────────────────────────────────
           Tudo abaixo é inventário e histórico: informação necessária, mas que
           não deve competir com o veredito. Fechado por padrão, com resumo
@@ -423,18 +454,23 @@ export default function DominioDetailPage() {
                 <HeroStat label="novos" value={`+${domain.lastDiff.newCount}`} color={domain.lastDiff.newCount > 0 ? 'var(--low)' : 'var(--muted)'} />
                 <HeroStat label="sumiram" value={`−${domain.lastDiff.missingCount}`} color={domain.lastDiff.missingCount > 0 ? 'var(--high)' : 'var(--muted)'} />
               </div>
-              {(domain.lastDiff.newAssets.length > 0 || domain.lastDiff.missingAssets.length > 0) && (
+              {(diffNewSubs.length > 0 || diffMissSubs.length > 0 || diffOtherNew > 0 || diffOtherMiss > 0) && (
                 <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  {domain.lastDiff.newAssets.slice(0, 6).map((a, i) => (
+                  {diffNewSubs.slice(0, 8).map((a, i) => (
                     <div key={`n${i}`} style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', gap: 8, fontFamily: 'var(--mono)' }}>
                       <span style={{ color: 'var(--low)' }}>+</span> {a.value}
                     </div>
                   ))}
-                  {domain.lastDiff.missingAssets.slice(0, 6).map((a, i) => (
+                  {diffMissSubs.slice(0, 8).map((a, i) => (
                     <div key={`m${i}`} style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', gap: 8, fontFamily: 'var(--mono)' }}>
                       <span style={{ color: 'var(--high)' }}>−</span> {a.value}
                     </div>
                   ))}
+                  {(diffOtherNew > 0 || diffOtherMiss > 0) && (
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', paddingLeft: 2 }}>
+                      {diffOtherNew > 0 ? `+${diffOtherNew} ` : ''}{diffOtherMiss > 0 ? `−${diffOtherMiss} ` : ''}outros ativos (portas/IPs)
+                    </div>
+                  )}
                 </div>
               )}
               <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 10 }}>calculado em {fmtDate(domain.lastDiff.computedAt)}</div>
@@ -541,7 +577,28 @@ export default function DominioDetailPage() {
                 </div>
               )}
 
-              {ownGroups.map((g) => <IpGroup key={g.ip} g={g} />)}
+              {riskyPortCount === 0 ? (
+                <>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <ShieldCheck size={14} color="var(--low)" /> Nenhuma porta de risco — os IPs abaixo são infraestrutura (DNS, cloud), não exposição sua.
+                  </div>
+                  <button onClick={() => setInfraOpen((v) => !v)} style={{
+                    display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left', cursor: 'pointer',
+                    background: 'var(--bg)', border: '1px dashed var(--border-mid)', borderRadius: R.row, padding: '0.6rem 0.9rem',
+                    color: 'var(--text-mute)', fontSize: 12, fontFamily: 'inherit', marginTop: 6,
+                  }}>
+                    <ChevronRight size={14} style={{ transform: infraOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                    Ver {ownGroups.length} IP(s) de infraestrutura
+                  </button>
+                  {infraOpen && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                      {ownGroups.map((g) => <IpGroup key={g.ip} g={g} />)}
+                    </div>
+                  )}
+                </>
+              ) : (
+                ownGroups.map((g) => <IpGroup key={g.ip} g={g} />)
+              )}
 
               {saasGroups.length > 0 && (
                 <div style={{ marginTop: 2 }}>
