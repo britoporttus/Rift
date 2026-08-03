@@ -5,6 +5,7 @@ import { api, InternalNetworkSummary, InternalNetworkKind } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import { Page, PageHeader, Card, Btn, Badge, Kpi, KpiRow, EmptyState, Skeleton, Reveal } from '@/components/ui/kit'
+import { Tilt } from '@/components/ui/fx/Tilt'
 import {
   Network, Plus, Server, ShieldAlert, HelpCircle, Radio, ChevronRight,
 } from 'lucide-react'
@@ -78,6 +79,7 @@ export default function RedeInternaPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
           {nets.map((n, i) => (
             <Reveal key={n.id} delay={Math.min(i, 8) * 45} style={{ height: '100%' }}>
+            <Tilt>
             <div {...clickableDivProps(() => router.push(`/rede-interna/${n.id}`))} style={{ cursor: 'pointer', height: '100%' }}>
               <Card hover pad="1.15rem 1.25rem" style={{ height: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
@@ -101,6 +103,7 @@ export default function RedeInternaPage() {
                 </div>
               </Card>
             </div>
+            </Tilt>
             </Reveal>
           ))}
         </div>

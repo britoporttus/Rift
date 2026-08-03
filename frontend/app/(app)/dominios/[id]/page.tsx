@@ -8,6 +8,8 @@ import { SEV_COLOR, SEV_ORDER } from '@/lib/severity'
 import { ScoreSlider } from '@/components/ui/charts/ScoreSlider'
 import { Donut } from '@/components/ui/charts/Donut'
 import { AreaTrend, AreaPoint } from '@/components/ui/charts/AreaTrend'
+import { Beacon } from '@/components/ui/fx/Beacon'
+import { ScanSweep } from '@/components/ui/fx/ScanSweep'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
 import { VerificationCard } from '@/components/dominios/VerificationCard'
 import type { DomainScanRecord } from '@/lib/api'
@@ -239,7 +241,7 @@ export default function DominioDetailPage() {
             {domain.authorized ? 'Autorizado — probe ativo habilitado' : 'Modo passivo — só coleta sem contato ativo'}
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--text-mute)' }}>
-            <Radio size={15} color="var(--low)" /> Monitoramento contínuo · último scan {timeAgo(domain.lastScanAt)}
+            <Beacon color="var(--low)" /> Monitoramento contínuo · último scan {timeAgo(domain.lastScanAt)}
           </span>
 
           {isAdmin && (
@@ -264,7 +266,7 @@ export default function DominioDetailPage() {
       {/* Estado transitório do scan — some quando não há scan em curso. */}
       {isScanning && (
         <div style={{ background: tint('var(--purple)', 8), border: '1px solid var(--border-mid)', borderRadius: 10, padding: '0.7rem 1rem', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: 'var(--purple-light)' }}>
-          <Loader2 size={15} className="spin" /> {STEP_LABEL[domain.scanStep || ''] || 'escaneando'}…
+          <ScanSweep size={24} /> {STEP_LABEL[domain.scanStep || ''] || 'escaneando'}…
         </div>
       )}
       {domain.scanState === 'failed' && domain.scanError && (

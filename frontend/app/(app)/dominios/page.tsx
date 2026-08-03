@@ -7,6 +7,7 @@ import { clickableDivProps } from '@/lib/a11y'
 import { HBars } from '@/components/ui/charts/HBars'
 import { AreaTrend } from '@/components/ui/charts/AreaTrend'
 import { findingsPerDay } from '@/lib/trends'
+import { Tilt } from '@/components/ui/fx/Tilt'
 import {
   Page, PageHeader, Card, Btn, Badge, Kpi, KpiRow, EmptyState, Skeleton,
   SectionTitle, inputStyle, tint, Reveal,
@@ -166,6 +167,7 @@ export default function DominiosPage() {
             const isScanning = d.scanState === 'scanning'
             return (
               <Reveal key={d.id} delay={Math.min(i, 8) * 45} style={{ height: '100%' }}>
+              <Tilt>
               <div {...clickableDivProps(() => router.push(`/dominios/${d.id}`))}
                 onMouseEnter={() => setHovered(d.id)} onMouseLeave={() => setHovered(null)}
                 style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1.25rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none', height: '100%' }}>
@@ -214,6 +216,7 @@ export default function DominiosPage() {
                   </button>
                 </div>
               </div>
+              </Tilt>
               </Reveal>
             )
           })}

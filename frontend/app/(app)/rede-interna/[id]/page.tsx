@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { SEV_COLOR } from '@/lib/severity'
 import { ScoreSlider } from '@/components/ui/charts/ScoreSlider'
 import { AreaTrend, AreaPoint } from '@/components/ui/charts/AreaTrend'
+import { Beacon } from '@/components/ui/fx/Beacon'
 import { AgentSetup } from '@/components/rede-interna/AgentSetup'
 import { NetworkTopology } from '@/components/rede-interna/NetworkTopology'
 import { NetworkDiagram } from '@/components/rede-interna/NetworkDiagram'
@@ -90,7 +91,7 @@ export default function RedeInternaDetailPage() {
             <Network size={19} color="var(--purple-light)" /> {net.name}
           </h1>
           <div style={{ fontSize: 12, color: 'var(--text-mute)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 7 }}>
-            {KIND_LABEL[net.kind]} · <Radio size={12} color={net.lastImportAt ? 'var(--low)' : 'var(--text-dim)'} /> última coleta {timeAgo(net.lastImportAt)}
+            {KIND_LABEL[net.kind]} · <Beacon color={net.lastImportAt ? 'var(--low)' : 'var(--text-dim)'} size={9} /> última coleta {timeAgo(net.lastImportAt)}
             {net.agent?.hostname && <span>· agente: {net.agent.hostname}</span>}
           </div>
         </div>

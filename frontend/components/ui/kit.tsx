@@ -12,7 +12,7 @@
  * Convenção do repo: estilo inline (`style={{}}`) + variáveis CSS de
  * `globals.css`. Não introduzir CSS modules nem classes utilitárias aqui.
  */
-import { useState, useId } from 'react'
+import { useState, useId, useRef } from 'react'
 import Link from 'next/link'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { EASE, useCountUp, useMounted, usePrefersReducedMotion } from '@/lib/motion'
@@ -110,30 +110,49 @@ export function PageHeader({ icon, title, subtitle, actions, eyebrow }: {
 
 // ── Superfícies ──────────────────────────────────────────────────────────────
 
-export function Card({ children, pad = SP.card, accent, hover = false, style }: {
+export function Card({ children, pad = SP.card, accent, hover = false, spotlight = false, style }: {
   children: React.ReactNode
   pad?: string
   /** faixa colorida de 3px na esquerda (severidade/estado) */
   accent?: string
   hover?: boolean
+  /** glow radial que segue o cursor no hover (efeito spotlight) */
+  spotlight?: boolean
   style?: React.CSSProperties
 }) {
   const [h, setH] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const interactive = hover || spotlight
   return (
     <div
-      onMouseEnter={hover ? () => setH(true) : undefined}
-      onMouseLeave={hover ? () => setH(false) : undefined}
+      ref={ref}
+      onMouseEnter={interactive ? () => setH(true) : undefined}
+      onMouseLeave={interactive ? () => setH(false) : undefined}
+      onPointerMove={spotlight ? (e) => {
+        const el = ref.current; if (!el) return
+        const r = el.getBoundingClientRect()
+        el.style.setProperty('--mx', `${e.clientX - r.left}px`)
+        el.style.setProperty('--my', `${e.clientY - r.top}px`)
+      } : undefined}
       style={{
         background: 'var(--surface)',
         border: `1px solid ${h ? 'var(--border-mid)' : 'var(--border)'}`,
         borderLeft: accent ? `3px solid ${accent}` : undefined,
         borderRadius: R.card, padding: pad, position: 'relative',
         transition: 'border-color .13s, box-shadow .13s, transform .13s',
-        boxShadow: h ? '0 6px 24px rgba(124,58,237,0.13)' : 'none',
-        transform: h ? 'translateY(-1px)' : 'none',
+        boxShadow: hover && h ? '0 6px 24px rgba(124,58,237,0.13)' : 'none',
+        transform: hover && h ? 'translateY(-1px)' : 'none',
+        overflow: spotlight ? 'hidden' : undefined,
         ...style,
       }}
     >
+      {spotlight && (
+        <div style={{
+          position: 'absolute', inset: 0, borderRadius: R.card, pointerEvents: 'none',
+          background: 'radial-gradient(220px circle at var(--mx,50%) var(--my,50%), color-mix(in srgb, var(--purple) 20%, transparent), transparent 60%)',
+          opacity: h ? 1 : 0, transition: 'opacity .22s',
+        }} />
+      )}
       {children}
     </div>
   )
@@ -228,7 +247,7 @@ export function Kpi({ label, value, color = 'var(--purple-light)', icon, hint, h
   const animated = useCountUp(isNum ? (value as number) : 0, { enabled: countUp && isNum })
   const display = countUp && isNum ? animated.toLocaleString('pt-BR') : value
   const body = (
-    <Card hover={!!href} pad="0.95rem 1.15rem" style={{ overflow: 'hidden', height: '100%' }}>
+    <Card hover={!!href} spotlight pad="0.95rem 1.15rem" style={{ overflow: 'hidden', height: '100%' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 3, background: color }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         {icon && (
@@ -325,6 +344,21 @@ export function btnStyle(variant: BtnVariant = 'ghost', color = 'var(--purple-li
   return { ...base, background: tint(color, 12), border: `1px solid ${tint(color, 35)}`, color }
 }
 
+/** Onda (ripple) a partir do ponto do clique. Usa `currentColor` do botão. */
+function spawnRipple(e: React.MouseEvent<HTMLButtonElement>) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const b = e.currentTarget
+  const r = b.getBoundingClientRect()
+  const d = Math.max(r.width, r.height)
+  const s = document.createElement('span')
+  s.style.cssText =
+    `position:absolute;border-radius:50%;pointer-events:none;background:color-mix(in srgb, currentColor 30%, transparent);` +
+    `width:${d}px;height:${d}px;left:${e.clientX - r.left - d / 2}px;top:${e.clientY - r.top - d / 2}px;` +
+    `transform:scale(0);animation:rkRipple .6s ease-out`
+  b.appendChild(s)
+  setTimeout(() => s.remove(), 620)
+}
+
 export function Btn({ children, variant = 'ghost', color, href, onClick, disabled, title, type = 'button' }: {
   children: React.ReactNode
   variant?: BtnVariant
@@ -337,7 +371,13 @@ export function Btn({ children, variant = 'ghost', color, href, onClick, disable
 }) {
   const s = { ...btnStyle(variant, color), opacity: disabled ? 0.55 : 1, cursor: disabled ? 'default' : 'pointer' }
   if (href && !disabled) return <Link href={href} title={title} style={s}>{children}</Link>
-  return <button type={type} onClick={onClick} disabled={disabled} title={title} style={s}>{children}</button>
+  return (
+    <button type={type} disabled={disabled} title={title}
+      style={{ ...s, position: 'relative', overflow: 'hidden' }}
+      onClick={(e) => { if (!disabled) spawnRipple(e); onClick?.() }}>
+      {children}
+    </button>
+  )
 }
 
 // ── Vazio / carregando ───────────────────────────────────────────────────────
