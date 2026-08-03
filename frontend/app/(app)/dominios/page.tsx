@@ -5,7 +5,8 @@ import { api, DomainSummary, Finding } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import { HBars } from '@/components/ui/charts/HBars'
-import { AreaTrend, AreaPoint } from '@/components/ui/charts/AreaTrend'
+import { AreaTrend } from '@/components/ui/charts/AreaTrend'
+import { findingsPerDay } from '@/lib/trends'
 import {
   Page, PageHeader, Card, Btn, Badge, Kpi, KpiRow, EmptyState, Skeleton,
   SectionTitle, inputStyle, tint, Reveal,
@@ -22,30 +23,6 @@ const STEP_LABEL: Record<string, string> = {
 const KIND_LABEL: Record<string, string> = { vendor: 'Fornecedor', partner: 'Parceiro', internal: 'Interno', other: 'Outro' }
 
 function riskColor(level: string) { return SEV_COLOR[level] || SEV_COLOR.info }
-
-/** Série real de findings descobertos por dia nos últimos `days` dias, a partir
- *  do `firstSeen` de cada finding. Sem dado fake: dias sem descoberta ficam em
- *  zero (o que também é informação). Chaves de dia em horário local para não
- *  deslocar a contagem por fuso. */
-function buildFindingsTrend(findings: Finding[], days = 14): AreaPoint[] {
-  const localKey = (dt: Date) => dt.toLocaleDateString('en-CA') // YYYY-MM-DD local
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const buckets: AreaPoint[] = []
-  const idx = new Map<string, number>()
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today)
-    d.setDate(today.getDate() - i)
-    idx.set(localKey(d), buckets.length)
-    buckets.push({ label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), value: 0 })
-  }
-  for (const f of findings) {
-    if (!f.firstSeen) continue
-    const i = idx.get(localKey(new Date(f.firstSeen)))
-    if (i != null) buckets[i].value++
-  }
-  return buckets
-}
 
 export default function DominiosPage() {
   const router = useRouter()
@@ -96,7 +73,7 @@ export default function DominiosPage() {
   const totalLeaks = domains.reduce((a, d) => a + (d.leakCount || 0), 0)
   const atRisk = domains.filter((d) => d.riskLevel === 'critical' || d.riskLevel === 'high').length
   const unauthorizedCount = domains.filter((d) => !d.authorized).length
-  const findingsTrend = buildFindingsTrend(findings, 14)
+  const findingsTrend = findingsPerDay(findings, 14)
   const topExposed = domains
     .filter((d) => (d.exposureCount || 0) > 0)
     .sort((a, b) => b.exposureCount - a.exposureCount)

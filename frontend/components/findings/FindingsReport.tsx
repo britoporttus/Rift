@@ -5,6 +5,7 @@ import { SEV_COLOR, SEV_ORDER, safeHref } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import { findingType, findingConfirmation, findingExploitation, cvssKind } from '@/lib/findingClassify'
 import { Donut } from '@/components/ui/charts/Donut'
+import { useCountUp } from '@/lib/motion'
 
 // Status de remediação — fecha o ciclo "achei → corrigi → confirmei"
 const REMEDIATION: Record<RemediationStatus, { label: string; color: string; icon: string }> = {
@@ -262,6 +263,12 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
 // ── main component ───────────────────────────────────────────────
 type FilterType = 'all' | 'vulnerability' | 'weakness' | 'observation'
 
+/** Número com contagem animada (0 → valor) para os stats do relatório. */
+function AnimNum({ value }: { value: number }) {
+  const n = useCountUp(value, { duration: 1000 })
+  return <>{n}</>
+}
+
 export function FindingsReport({ engagementId }: { engagementId: string }) {
   const [findings, setFindings] = useState<ExtFinding[]>([])
   const [loading, setLoading] = useState(true)
@@ -333,7 +340,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
         {/* donut */}
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
           <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--muted)', marginBottom: 4 }}>Distribuição</div>
-          <Donut data={donutData} total={total} caption="findings" size={128} thickness={16} animate={false} />
+          <Donut data={donutData} total={total} caption="findings" size={128} thickness={16} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             {SEV_ORDER.filter(s => bySev(s).length > 0).map(s => (
               <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
@@ -355,7 +362,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
               }}>
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: SEV_COLOR[s] }} />
                 <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.08em' }}>{s}</div>
-                <div style={{ fontSize: 34, fontWeight: 700, color: SEV_COLOR[s], margin: '4px 0 2px' }}>{bySev(s).length}</div>
+                <div style={{ fontSize: 34, fontWeight: 700, color: SEV_COLOR[s], margin: '4px 0 2px' }}><AnimNum value={bySev(s).length} /></div>
               </div>
             ))}
           </div>

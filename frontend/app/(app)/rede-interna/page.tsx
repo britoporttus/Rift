@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { api, InternalNetworkSummary, InternalNetworkKind } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
-import { Page, PageHeader, Card, Btn, Badge, Kpi, KpiRow, EmptyState, Skeleton } from '@/components/ui/kit'
+import { Page, PageHeader, Card, Btn, Badge, Kpi, KpiRow, EmptyState, Skeleton, Reveal } from '@/components/ui/kit'
 import {
   Network, Plus, Server, ShieldAlert, HelpCircle, Radio, ChevronRight,
 } from 'lucide-react'
@@ -54,12 +54,14 @@ export default function RedeInternaPage() {
       />
 
       {!loading && nets.length > 0 && (
-        <KpiRow>
-          <Kpi icon={<Network size={18} />} color="var(--purple-light)" label="Redes" value={nets.length} />
-          <Kpi icon={<Server size={18} />} color="var(--info)" label="Dispositivos" value={totalHosts} />
-          <Kpi icon={<ShieldAlert size={18} />} color="var(--high)" label="Com achados" value={totalRisky} />
-          <Kpi icon={<HelpCircle size={18} />} color="var(--medium)" label="Não autorizadas" value={unauth} />
-        </KpiRow>
+        <Reveal>
+          <KpiRow>
+            <Kpi icon={<Network size={18} />} color="var(--purple-light)" label="Redes" value={nets.length} countUp />
+            <Kpi icon={<Server size={18} />} color="var(--info)" label="Dispositivos" value={totalHosts} countUp />
+            <Kpi icon={<ShieldAlert size={18} />} color="var(--high)" label="Com achados" value={totalRisky} countUp />
+            <Kpi icon={<HelpCircle size={18} />} color="var(--medium)" label="Não autorizadas" value={unauth} countUp />
+          </KpiRow>
+        </Reveal>
       )}
 
       {/* Lista */}
@@ -74,8 +76,9 @@ export default function RedeInternaPage() {
         />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
-          {nets.map((n) => (
-            <div key={n.id} {...clickableDivProps(() => router.push(`/rede-interna/${n.id}`))} style={{ cursor: 'pointer' }}>
+          {nets.map((n, i) => (
+            <Reveal key={n.id} delay={Math.min(i, 8) * 45} style={{ height: '100%' }}>
+            <div {...clickableDivProps(() => router.push(`/rede-interna/${n.id}`))} style={{ cursor: 'pointer', height: '100%' }}>
               <Card hover pad="1.15rem 1.25rem" style={{ height: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
@@ -98,6 +101,7 @@ export default function RedeInternaPage() {
                 </div>
               </Card>
             </div>
+            </Reveal>
           ))}
         </div>
       )}

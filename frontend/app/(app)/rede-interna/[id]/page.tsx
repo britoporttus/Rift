@@ -6,6 +6,7 @@ import { api, InternalNetworkDetail, InternalHost, InternalScanRecord } from '@/
 import { useAuth } from '@/hooks/useAuth'
 import { SEV_COLOR } from '@/lib/severity'
 import { ScoreSlider } from '@/components/ui/charts/ScoreSlider'
+import { AreaTrend, AreaPoint } from '@/components/ui/charts/AreaTrend'
 import { AgentSetup } from '@/components/rede-interna/AgentSetup'
 import { NetworkTopology } from '@/components/rede-interna/NetworkTopology'
 import { NetworkDiagram } from '@/components/rede-interna/NetworkDiagram'
@@ -73,6 +74,11 @@ export default function RedeInternaDetailPage() {
 
   const risky = hosts.filter((h) => h.severity && h.severity !== 'info')
   const grouped = DEVICE_ORDER.map((t) => ({ type: t, items: hosts.filter((h) => h.deviceType === t) })).filter((g) => g.items.length > 0)
+  // Score da rede a cada coleta (history vem do mais recente ao mais antigo).
+  const scoreSeries: AreaPoint[] = [...history].reverse().map((h) => ({
+    label: new Date(h.ranAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+    value: h.riskScore,
+  }))
 
   return (
     <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1180, margin: '0 auto', width: '100%' }}>
@@ -218,6 +224,11 @@ export default function RedeInternaDetailPage() {
       {history.length > 0 && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '1.1rem 1.4rem' }}>
           <SectionTitle icon={<History size={13} />} color="var(--muted)">Histórico de coletas ({history.length})</SectionTitle>
+          {scoreSeries.length >= 2 && (
+            <div style={{ marginTop: 14 }}>
+              <AreaTrend data={scoreSeries} color="var(--purple-light)" height={110} />
+            </div>
+          )}
           <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column' }}>
             {history.map((h, i) => (
               <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>

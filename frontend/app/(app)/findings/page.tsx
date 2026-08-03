@@ -11,12 +11,14 @@ import { clickableDivProps } from '@/lib/a11y'
 import { findingType } from '@/lib/findingClassify'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
 import { Donut } from '@/components/ui/charts/Donut'
+import { AreaTrend } from '@/components/ui/charts/AreaTrend'
+import { findingsPerDay } from '@/lib/trends'
 import {
-  Page, PageHeader, Card, Btn, Chip, EmptyState, Kpi, KpiRow, tint,
+  Page, PageHeader, Card, Btn, Chip, EmptyState, Kpi, KpiRow, tint, SectionTitle, Reveal,
 } from '@/components/ui/kit'
 import {
   AlertTriangle, Download, ChevronDown, ChevronRight, Globe, Target,
-  SlidersHorizontal, X, ShieldCheck, Activity,
+  SlidersHorizontal, X, ShieldCheck, Activity, TrendingUp,
 } from 'lucide-react'
 
 const TYPE_LABEL: Record<string, string> = { vulnerability: 'Vulnerabilidade', weakness: 'Fraqueza', observation: 'Observação' }
@@ -178,16 +180,28 @@ function FindingsView() {
 
       {!loading && inScope.length > 0 && (
         <>
-          <KpiRow>
-            <Kpi label="Exigem ação" value={actionable} color="var(--critical)" icon={<AlertTriangle size={18} />}
-              hint="críticos e altos ainda abertos" />
-            <Kpi label="Total de achados" value={inScope.length} color="var(--purple-light)" icon={<Activity size={18} />}
-              hint={`${engCount} ${engCount === 1 ? 'engagement' : 'engagements'}`} />
-            <Kpi label="Corrigidos" value={fixedCount} color="var(--low)" icon={<ShieldCheck size={18} />}
-              hint="confirmados pelo re-teste" />
-          </KpiRow>
+          <Reveal>
+            <KpiRow>
+              <Kpi label="Exigem ação" value={actionable} color="var(--critical)" icon={<AlertTriangle size={18} />}
+                hint="críticos e altos ainda abertos" countUp />
+              <Kpi label="Total de achados" value={inScope.length} color="var(--purple-light)" icon={<Activity size={18} />}
+                hint={`${engCount} ${engCount === 1 ? 'engagement' : 'engagements'}`} countUp />
+              <Kpi label="Corrigidos" value={fixedCount} color="var(--low)" icon={<ShieldCheck size={18} />}
+                hint="confirmados pelo re-teste" countUp />
+            </KpiRow>
+          </Reveal>
+
+          <Reveal delay={60}>
+            <Card pad="1.25rem 1.4rem">
+              <SectionTitle icon={<TrendingUp size={13} />}>Findings descobertos · 14 dias</SectionTitle>
+              <div style={{ marginTop: 14 }}>
+                <AreaTrend data={findingsPerDay(inScope, 14)} height={130} valueSuffix=" findings" />
+              </div>
+            </Card>
+          </Reveal>
 
           {/* Panorama: distribuição + composição por tipo, lado a lado */}
+          <Reveal delay={120}>
           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 16, alignItems: 'stretch' }}>
             <Card pad="16px 22px" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--muted)' }}>Distribuição</div>
@@ -225,6 +239,7 @@ function FindingsView() {
               })}
             </div>
           </div>
+          </Reveal>
         </>
       )}
 
