@@ -154,6 +154,10 @@ export const api = {
     // Histórico de monitoramento (linha do tempo de scans — sempre-ativo).
     history: (id: string, limit?: number) =>
       req<DomainScanRecord[]>(`/domains/${id}/history${limit ? `?limit=${limit}` : ''}`),
+    // Prova de posse: o que publicar (GET) e rodar a checagem agora (POST).
+    verification: (id: string) => req<DomainVerification>(`/domains/${id}/verification`),
+    verify: (id: string) =>
+      req<DomainVerification>(`/domains/${id}/verification`, { method: 'POST' }),
   },
   // Módulo Vazamentos — exposição de credenciais por domínio (estilo QuimeraX).
   leaks: {
@@ -258,6 +262,7 @@ export interface DomainSummary {
   riskReasons?: string[]
   createdAt: string
   updatedAt: string
+  verification?: DomainVerification
 }
 
 // O que mudou desde o scan anterior (computado a cada scan, ver asm/diff.js).
@@ -295,6 +300,17 @@ export interface AsnInfo {
   prefix: string
   tooLarge?: boolean
   owned?: boolean
+}
+
+export interface DomainVerification {
+  status: 'pending' | 'verified' | 'failed' | 'legacy'
+  method?: 'dns' | 'http' | null
+  verifiedAt?: string | null
+  lastError?: string | null
+  instructions?: {
+    dns: { type: string; name: string; value: string }
+    http: { url: string; content: string }
+  }
 }
 
 export interface DomainDetail extends DomainSummary {

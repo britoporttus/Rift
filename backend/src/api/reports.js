@@ -10,6 +10,7 @@ const { htmlToPdf, PdfConcurrencyLimitError } = require('../report-pdf')
 const { generateExecNarrative } = require('../report-ai')
 const { isExecutiveReport } = require('../report-kind')
 const { readClientDir } = require('../tenant-paths')
+const { planFor } = require('../plans')
 
 const router = Router()
 router.use(requireAuth())
@@ -63,7 +64,10 @@ router.get('/:engagementId/generated', async (req, res) => {
   const narrative = type === 'executive'
     ? await req.db.ReportNarrative.findById(e._id).lean().catch(() => null)
     : null
-  const html = renderReport(e, visible, { type, costUsd, narrative })
+  // Plano free recebe o relatório RESUMIDO (ver src/plans.js): o que foi
+  // encontrado e a gravidade, sem o detalhe técnico que é o produto pago.
+  const detail = planFor(req.tenant).reportDetail
+  const html = renderReport(e, visible, { type, costUsd, narrative, detail })
   const slug = (e.slug || 'engagement')
 
   // PDF: converte o HTML via Chromium headless (design dark preservado). Sempre attachment.

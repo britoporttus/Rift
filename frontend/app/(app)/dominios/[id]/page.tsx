@@ -7,7 +7,9 @@ import { useAuth } from '@/hooks/useAuth'
 import { SEV_COLOR, SEV_ORDER } from '@/lib/severity'
 import { ScoreSlider } from '@/components/ui/charts/ScoreSlider'
 import { Donut } from '@/components/ui/charts/Donut'
+import { AreaTrend, AreaPoint } from '@/components/ui/charts/AreaTrend'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
+import { VerificationCard } from '@/components/dominios/VerificationCard'
 import type { DomainScanRecord } from '@/lib/api'
 import {
   Page, PageHeader, Card, Collapsible, Btn, Chip, Badge, EmptyState, tint, R,
@@ -144,6 +146,12 @@ export default function DominioDetailPage() {
     .sort((a, b) => SEV_ORDER.indexOf(a.severity as never) - SEV_ORDER.indexOf(b.severity as never))
   const riskyPortCount = findingGroups.reduce((n, g) => n + g.risky.length, 0)
   const vulnNodes = graph ? graph.nodes.filter((n) => n.type === 'vuln') : []
+  // Série real do score ao longo dos scans (history vem do mais recente ao mais
+  // antigo → invertemos para desenhar da esquerda p/ direita em ordem cronológica).
+  const scoreSeries: AreaPoint[] = [...history].reverse().map((h) => ({
+    label: new Date(h.ranAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+    value: h.riskScore,
+  }))
 
   return (
     <Page>
@@ -170,6 +178,15 @@ export default function DominioDetailPage() {
             )}
           </>
         }
+      />
+
+      {/* Prova de posse: sem verificar, nada roda. Fica no topo porque é a
+          única coisa acionável enquanto pendente. */}
+      <VerificationCard
+        domainId={id}
+        domain={domain.domain}
+        verification={domain.verification}
+        onVerified={load}
       />
 
       {/* ── Veredito ─────────────────────────────────────────────────────────
@@ -383,6 +400,14 @@ export default function DominioDetailPage() {
           meta={domain.lastDiff?.computedAt
             ? <ScoreDeltaBadge delta={domain.lastDiff.scoreDelta} />
             : `${history.length} scan(s) registrado(s)`}>
+          {scoreSeries.length >= 2 && (
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: R.row, padding: '0.9rem 1.1rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <TrendingUp size={12} /> Score de segurança ao longo do tempo
+              </div>
+              <AreaTrend data={scoreSeries} color="var(--purple-light)" height={110} />
+            </div>
+          )}
           {domain.lastDiff && domain.lastDiff.computedAt && (
             <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: R.row, padding: '0.9rem 1.1rem' }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>Desde o scan anterior</div>

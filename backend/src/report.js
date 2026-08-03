@@ -167,7 +167,23 @@ function tocSection(sorted) {
     </tr></thead><tbody>${rows}</tbody></table></section>`
 }
 
-function findingCard(f, i) {
+// `detail: 'summary'` = plano free. Mostra QUE existe o achado, sua gravidade e
+// onde — o suficiente para o valor ser óbvio — mas retém o que se compra ao
+// assinar: descrição completa, payload, evidência, impacto e recomendação.
+// Reter é diferente de esconder: o card diz explicitamente o que falta e por quê,
+// em vez de simplesmente aparecer vazio (o que pareceria produto quebrado).
+// Bloco que substitui o detalhe no plano free. Explícito de propósito: um card
+// vazio pareceria produto quebrado; dizer o que falta e por quê é honesto e é o
+// próprio argumento de venda.
+function lockedDetail() {
+  return `<div class="field"><span class="k">Detalhe técnico</span>
+    <p>Descrição completa, evidência, payload de reprodução, impacto e recomendação
+    de correção fazem parte do relatório completo. Este resumo mostra o que foi
+    encontrado e a gravidade; o como reproduzir e como corrigir vem no plano Pro.</p>
+  </div>`
+}
+
+function findingCard(f, i, detail = 'full') {
   const s = sevOf(f), st = stateOf(f), m = SEV[s] || SEV.info, sm = STATE[st] || STATE.informational
   const field = (k, v, mono) => v ? `<div class="field"><span class="k">${k}</span><p class="${mono ? 'loc' : ''}">${mono ? escapeHtml(v) : para(v)}</p></div>` : ''
   const pills = [f.type, f.cvss ? `CVSS ${f.cvss}` : '', f.cwe, f.owasp].filter(Boolean).map((p) => `<span class="pill">${escapeHtml(p)}</span>`).join('')
@@ -187,11 +203,12 @@ function findingCard(f, i) {
     </summary>
     <div class="fbody">
       ${f.location ? field('Localização', f.location + (f.parameter ? ` · param: ${f.parameter}` : ''), true) : ''}
+      ${detail === 'summary' ? lockedDetail() : `
       ${field('Descrição', f.description)}
       ${f.payload ? field('Payload', f.payload, true) : ''}
       ${evidence}
       ${field('Impacto', f.impact)}
-      ${field('Recomendação', f.recommendation)}
+      ${field('Recomendação', f.recommendation)}`}
     </div>
   </details>`
 }
@@ -267,6 +284,7 @@ function footer(kind) {
 }
 
 function renderTechnical(engagement, findings, opts = {}) {
+  const detail = opts.detail === 'summary' ? 'summary' : 'full'
   const counts = severityCounts(findings)
   const sorted = sortFindings(findings)
   const meta = [
@@ -279,7 +297,7 @@ function renderTechnical(engagement, findings, opts = {}) {
     + summaryTiles(counts)
     + secretsSection(extractArtifacts(findings))
     + (findings.length
-      ? tocSection(sorted) + `<section><h2 class="sec">Findings detalhados</h2>${sorted.map(findingCard).join('')}</section>`
+      ? tocSection(sorted) + `<section><h2 class="sec">Findings detalhados</h2>${sorted.map((f, i) => findingCard(f, i, detail)).join('')}</section>`
       : `<div class="empty">Nenhum finding registrado para este engagement ainda.</div>`)
     + footer('Relatório técnico')
   return shell(`Relatório técnico — ${engagement.name || ''}`, body)
@@ -312,10 +330,10 @@ function deCloudflareEmails(html) {
   return html.replace(/([A-Za-z0-9._%+-]+)@([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,})/g, '$1<span>@</span>$2')
 }
 
-function renderReport(engagement, findings, { type = 'technical', costUsd, narrative } = {}) {
+function renderReport(engagement, findings, { type = 'technical', costUsd, narrative, detail = 'full' } = {}) {
   const html = type === 'executive'
     ? renderExecutive(engagement, findings, { costUsd, narrative })
-    : renderTechnical(engagement, findings, { costUsd })
+    : renderTechnical(engagement, findings, { costUsd, detail })
   return deCloudflareEmails(html)
 }
 
