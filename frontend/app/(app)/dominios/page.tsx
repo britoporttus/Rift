@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { api, DomainSummary } from '@/lib/api'
+import { api, DomainSummary, Finding } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import { HBars } from '@/components/ui/charts/HBars'
@@ -15,11 +15,6 @@ import {
   AlertTriangle, Lock, Crosshair, FileText, TrendingUp,
 } from 'lucide-react'
 
-const KIND_ORDER = ['vendor', 'partner', 'internal', 'other'] as const
-const KIND_COLOR: Record<string, string> = {
-  vendor: 'var(--purple-light)', partner: 'var(--info)', internal: 'var(--low)', other: 'var(--text-mute)',
-}
-
 const STEP_LABEL: Record<string, string> = {
   subdomains: 'subdomínios', dns: 'DNS', http: 'probe web',
   exposures: 'exposições', takeover: 'takeover', ports: 'portas', scoring: 'score', done: 'concluído',
@@ -28,22 +23,28 @@ const KIND_LABEL: Record<string, string> = { vendor: 'Fornecedor', partner: 'Par
 
 function riskColor(level: string) { return SEV_COLOR[level] || SEV_COLOR.info }
 
-/** Série real (sem dado fake) de crescimento da superfície: contagem cumulativa
- *  de domínios monitorados por dia, a partir do `createdAt` de cada um. */
-function buildGrowthSeries(domains: DomainSummary[]): AreaPoint[] {
-  const byDay = new Map<string, number>()
-  for (const d of domains) {
-    if (!d.createdAt) continue
-    const day = d.createdAt.slice(0, 10)
-    byDay.set(day, (byDay.get(day) || 0) + 1)
+/** Série real de findings descobertos por dia nos últimos `days` dias, a partir
+ *  do `firstSeen` de cada finding. Sem dado fake: dias sem descoberta ficam em
+ *  zero (o que também é informação). Chaves de dia em horário local para não
+ *  deslocar a contagem por fuso. */
+function buildFindingsTrend(findings: Finding[], days = 14): AreaPoint[] {
+  const localKey = (dt: Date) => dt.toLocaleDateString('en-CA') // YYYY-MM-DD local
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const buckets: AreaPoint[] = []
+  const idx = new Map<string, number>()
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today)
+    d.setDate(today.getDate() - i)
+    idx.set(localKey(d), buckets.length)
+    buckets.push({ label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), value: 0 })
   }
-  const days = [...byDay.keys()].sort()
-  let cum = 0
-  return days.map((day) => {
-    cum += byDay.get(day) || 0
-    const dt = new Date(`${day}T00:00:00`)
-    return { label: dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), value: cum }
-  })
+  for (const f of findings) {
+    if (!f.firstSeen) continue
+    const i = idx.get(localKey(new Date(f.firstSeen)))
+    if (i != null) buckets[i].value++
+  }
+  return buckets
 }
 
 export default function DominiosPage() {
@@ -55,6 +56,7 @@ export default function DominiosPage() {
   const [creating, setCreating] = useState(false)
   const [scanning, setScanning] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
+  const [findings, setFindings] = useState<Finding[]>([])
 
   const load = useCallback((spin = false) => {
     if (spin) setLoading(true)
@@ -68,6 +70,10 @@ export default function DominiosPage() {
     window.addEventListener('focus', onFocus)
     return () => { clearInterval(iv); window.removeEventListener('focus', onFocus) }
   }, [load])
+
+  // Findings alimentam a curva "descobertos · 14 dias". Busca única (a tendência
+  // não precisa do polling de 8s dos domínios).
+  useEffect(() => { api.findings.list().then(setFindings).catch(() => {}) }, [])
 
   async function handleCreate() {
     const d = newDomain.trim()
@@ -90,10 +96,12 @@ export default function DominiosPage() {
   const totalLeaks = domains.reduce((a, d) => a + (d.leakCount || 0), 0)
   const atRisk = domains.filter((d) => d.riskLevel === 'critical' || d.riskLevel === 'high').length
   const unauthorizedCount = domains.filter((d) => !d.authorized).length
-  const kindData = KIND_ORDER
-    .map((k) => ({ label: KIND_LABEL[k], value: domains.filter((d) => d.kind === k).length, color: KIND_COLOR[k] }))
-    .filter((k) => k.value > 0)
-  const growth = buildGrowthSeries(domains)
+  const findingsTrend = buildFindingsTrend(findings, 14)
+  const topExposed = domains
+    .filter((d) => (d.exposureCount || 0) > 0)
+    .sort((a, b) => b.exposureCount - a.exposureCount)
+    .slice(0, 6)
+    .map((d) => ({ label: d.domain, value: d.exposureCount, color: SEV_COLOR[d.riskLevel] || SEV_COLOR.info }))
 
   return (
     <Page>
@@ -125,24 +133,29 @@ export default function DominiosPage() {
         </Reveal>
       )}
 
-      {!loading && growth.length >= 2 && (
-        <Reveal delay={60}>
-          <Card pad="1.25rem 1.4rem">
-            <SectionTitle icon={<TrendingUp size={13} />}>Domínios monitorados ao longo do tempo</SectionTitle>
-            <div style={{ marginTop: 14 }}>
-              <AreaTrend data={growth} height={120} valueSuffix=" domínios" />
-            </div>
-          </Card>
-        </Reveal>
-      )}
-
-      {!loading && kindData.length > 0 && (
-        <Reveal delay={120}>
-          <Card pad="1.25rem 1.4rem">
-            <SectionTitle>Domínios por tipo</SectionTitle>
-            <div style={{ marginTop: 18 }}><HBars data={kindData} /></div>
-          </Card>
-        </Reveal>
+      {/* Panorama visual: tendência de descobertas + ranking de exposição, lado
+          a lado. Ambos animam na entrada (curva desenha, barras crescem). */}
+      {!loading && (findings.length > 0 || topExposed.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18, alignItems: 'start' }}>
+          {findings.length > 0 && (
+            <Reveal delay={60}>
+              <Card pad="1.25rem 1.4rem">
+                <SectionTitle icon={<TrendingUp size={13} />}>Findings descobertos · 14 dias</SectionTitle>
+                <div style={{ marginTop: 14 }}>
+                  <AreaTrend data={findingsTrend} height={130} valueSuffix=" findings" />
+                </div>
+              </Card>
+            </Reveal>
+          )}
+          {topExposed.length > 0 && (
+            <Reveal delay={120}>
+              <Card pad="1.25rem 1.4rem">
+                <SectionTitle icon={<ShieldAlert size={13} />}>Domínios mais expostos</SectionTitle>
+                <div style={{ marginTop: 18 }}><HBars data={topExposed} /></div>
+              </Card>
+            </Reveal>
+          )}
+        </div>
       )}
 
       <Card pad="0.9rem 1.1rem" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
