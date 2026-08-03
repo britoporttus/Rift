@@ -7,6 +7,7 @@
 // scanner.runScan é uma função determinística fire-and-forget e o próprio Domain
 // já rastreia estado (scanState) e se recupera no boot (recoverInterruptedScans).
 const scanner = require('./asm/scanner')
+const { rescanIntervalMs } = require('./plans')
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000 // varre a cada 5 min (igual scheduler.js)
 const RESCAN_INTERVAL_MS = (Number(process.env.ASM_RESCAN_INTERVAL_DAYS) || 7) * 24 * 60 * 60 * 1000
@@ -31,10 +32,20 @@ function isDomainDue(domain, now, intervalMs) {
 // Seleção e disparo dentro de UM tenant. Separado do fan-out de propósito: é
 // aqui que mora a lógica de "quem está vencido", e é isto que os testes
 // exercitam — sem precisar simular a iteração de tenants.
-async function tickFor(db, label = '') {
+async function tickFor(db, label = '', tenant = null) {
   const now = new Date()
-  const all = await db.Domain.find({}).select('_id domain lastScanAt scanState').lean()
-  const due = all.filter((d) => d.scanState !== 'scanning' && isDomainDue(d, now, RESCAN_INTERVAL_MS))
+  // Cadência POR PLANO: free e pro são diários (o ASM roda binários
+  // determinísticos e não gasta token de IA — o custo marginal é CPU, então
+  // reduzir a cadência do free economizaria quase nada e mataria justamente o
+  // que traz o cliente de volta). O tenant interno segue a env histórica.
+  const intervalMs = tenant ? rescanIntervalMs(tenant) : RESCAN_INTERVAL_MS
+  const all = await db.Domain.find({}).select('_id domain lastScanAt scanState verification').lean()
+  const due = all.filter((d) =>
+    d.scanState !== 'scanning'
+    // Domínio não verificado nunca entra na fila automática: o scanner o
+    // recusaria e cada tick só produziria um scan 'failed' a mais no histórico.
+    && !scanner.scanBlockReason(d)
+    && isDomainDue(d, now, intervalMs))
   for (const dom of due.slice(0, MAX_PER_TICK)) {
     scanner.runScan(db, dom._id, { userName: 'Monitoramento ASM', trigger: 'monitor' })
       .catch((e) => console.error(`[asm-scheduler]${label} scan de ${dom.domain} falhou:`, e?.message))
@@ -47,7 +58,7 @@ async function tickFor(db, label = '') {
 
 async function tick() {
   const { forEachTenant } = require('./tenancy')
-  await forEachTenant(({ tenant, db }) => tickFor(db, `[${tenant.slug}]`))
+  await forEachTenant(({ tenant, db }) => tickFor(db, `[${tenant.slug}]`, tenant))
 }
 
 function start() {

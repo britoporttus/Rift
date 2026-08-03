@@ -379,9 +379,35 @@ async function stagePortScan(domainId, ips, { fromNeighbor = false, providerFor 
 
 // ── entrada principal ─────────────────────────────────────────────────────────
 // Fire-and-forget: a API chama sem await; o estado vive no Domain (polling no front).
+/**
+ * Prova de posse: um domínio só é escaneável depois de verificado.
+ *
+ * Decisão do operador (2026-08-03): bloqueia TUDO — nem a coleta passiva roda —
+ * e ninguém dispensa, nem admin. O gate mora aqui, no scanner, e não só na
+ * rota: assim o scheduler, um job ou uma rota futura não contornam por
+ * esquecimento (mesmo raciocínio do gate de `authorized` no ingest de leaks).
+ *
+ * `legacy` = cadastrado antes da regra existir. NÃO conta como verificado; é
+ * deixado passar para não parar a operação que já roda, mas aparece como
+ * pendência na UI. Um dia é só rodar a verificação de verdade.
+ */
+function scanBlockReason(dom) {
+  const status = dom?.verification?.status
+  if (status === 'verified' || status === 'legacy') return null
+  return `Domínio "${dom.domain}" não teve a posse verificada. `
+    + 'Publique o registro TXT ou o arquivo em /.well-known/ e verifique antes de escanear.'
+}
+
 async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
   const dom = await db.Domain.findById(domainId)
   if (!dom) return
+  const blocked = scanBlockReason(dom)
+  if (blocked) {
+    await db.Domain.findByIdAndUpdate(domainId, { $set: { scanState: 'failed', scanStep: null, scanError: blocked } }).catch(() => {})
+    const err = new Error(blocked)
+    err.code = 'DOMAIN_NOT_VERIFIED'
+    throw err
+  }
   const domain = dom.domain
   const authorized = !!dom.authorized
 
@@ -572,7 +598,7 @@ async function recoverInterruptedScansFor(db) {
   } catch { return 0 }
 }
 
-module.exports = { runScan, recomputeDomain, recoverInterruptedScansFor, recoverInterruptedScans, isProbeSafe, upsertAsset, extractCveId }
+module.exports = { runScan, scanBlockReason, recomputeDomain, recoverInterruptedScansFor, recoverInterruptedScans, isProbeSafe, upsertAsset, extractCveId }
 
 // Fan-out por tenant do recover de boot (ver recoverInterruptedScansFor).
 async function recoverInterruptedScans() {

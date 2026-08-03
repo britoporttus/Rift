@@ -37,6 +37,11 @@ const tenantSchema = new mongoose.Schema({
   // não expor tenants internos em telas de cliente e para relatórios de billing.
   kind: { type: String, enum: ['internal', 'customer'], default: 'customer' },
 
+  // Plano comercial. Fail-closed no código (ver src/plans.js): id desconhecido
+  // cai em 'free', nunca no mais permissivo — um typo aqui não pode liberar o
+  // agente de IA de graça.
+  plan: { type: String, enum: ['free', 'pro', 'internal'], default: 'free', index: true },
+
   notes: { type: String, default: null },
 }, { timestamps: true })
 

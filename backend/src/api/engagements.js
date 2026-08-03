@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { v4: uuid } = require('uuid')
 const { requireAuth } = require('../auth')
 const { tenantScope } = require('../tenancy')
+const { planAllows, planFor } = require('../plans')
 const { readEngagements, getEngagement, createEngagement, updateEngagement, deleteEngagement } = require('../store')
 const findingsWatcher = require('../findings-watcher')
 const scheduler = require('../scheduler')
@@ -53,6 +54,14 @@ router.get('/:id', async (req, res) => {
 })
 
 router.post('/', async (req, res) => {
+  // O agente de IA é o que o plano cobra (ver src/plans.js): o free monitora a
+  // superfície, mas não dispara pentest.
+  if (!planAllows(req.tenant, 'canRunPentest')) {
+    return res.status(403).json({
+      error: `O plano ${planFor(req.tenant).label} não inclui pentest conduzido pelo agente. O monitoramento de superfície continua ativo.`,
+      code: 'PLAN_NO_PENTEST',
+    })
+  }
   const { name, target, scope, domainPackId } = req.body ?? {}
   // A-INTAKE: nome é opcional (default = alvo). Só o alvo é obrigatório — mesma
   // filosofia da skill pentest-intake ("só o alvo é obrigatório, o resto tem default").

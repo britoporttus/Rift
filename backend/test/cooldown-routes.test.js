@@ -45,7 +45,7 @@ test('POST /api/leaks/search: 429 quando busca recente (cooldown ativo)', async 
 
 test('POST /api/domains/:id/scan: 429 quando scan recente (cooldown ativo)', async () => {
   const original = Domain.findById
-  Domain.findById = async () => ({ _id: 'd1', scanState: 'done', lastScanAt: new Date(), authorized: false })
+  Domain.findById = async () => ({ _id: 'd1', scanState: 'done', lastScanAt: new Date(), authorized: false, verification: { status: 'verified' } })
   try {
     const handle = findHandler(domainsRouter, 'post', '/:id/scan')
     const req = { db, params: { id: 'd1' }, body: {}, user: { role: 'user' } }
@@ -58,7 +58,7 @@ test('POST /api/domains/:id/scan: 429 quando scan recente (cooldown ativo)', asy
 
 test('POST /api/domains/:id/scan: scanState=scanning continua barrado com 409 (não regride pro 429)', async () => {
   const original = Domain.findById
-  Domain.findById = async () => ({ _id: 'd1', scanState: 'scanning', lastScanAt: new Date(), authorized: false })
+  Domain.findById = async () => ({ _id: 'd1', scanState: 'scanning', lastScanAt: new Date(), authorized: false, verification: { status: 'verified' } })
   try {
     const handle = findHandler(domainsRouter, 'post', '/:id/scan')
     const req = { db, params: { id: 'd1' }, body: {}, user: { role: 'user' } }

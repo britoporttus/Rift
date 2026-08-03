@@ -1,6 +1,8 @@
 const { Router } = require('express')
 const { requireAuth } = require('../auth')
 const { tenantScope } = require('../tenancy')
+const { generateToken, verificationInstructions, verifyDomain } = require('../domain-verify')
+const { canAddDomain, planFor } = require('../plans')
 const scanner = require('../asm/scanner')
 const { absFor } = require('../asm/screenshots')
 const { isIpLiteral } = require('../net-guard')
@@ -59,14 +61,76 @@ router.post('/', async (req, res) => {
   const existing = await req.db.Domain.findOne({ domain })
   if (existing) return res.status(409).json({ error: 'Domínio já cadastrado', id: existing._id })
 
+  // Teto de domínios do plano (free = 3 por padrão). Explica o motivo em vez de
+  // só recusar — o 403 seco não diz ao cliente o que fazer.
+  const count = await req.db.Domain.countDocuments()
+  const gate = canAddDomain(req.tenant, count)
+  if (!gate.allowed) {
+    return res.status(403).json({
+      error: `O plano ${planFor(req.tenant).label} permite até ${gate.limit} domínios (você tem ${gate.current}).`,
+      code: 'PLAN_DOMAIN_LIMIT', limit: gate.limit, current: gate.current,
+    })
+  }
+
   const kind = ['vendor', 'partner', 'internal', 'other'].includes(req.body?.kind) ? req.body.kind : 'vendor'
+  // Nasce PENDENTE de verificação, com token já emitido: a UI mostra a
+  // instrução imediatamente, sem um passo extra de "pedir para verificar".
+  const token = generateToken()
   const created = await req.db.Domain.create({
     domain,
     name: (req.body?.name || domain).toString().slice(0, 120),
     kind,
     notes: req.body?.notes ? String(req.body.notes).slice(0, 500) : null,
+    verification: { status: 'pending', token, issuedAt: new Date() },
   })
-  res.status(201).json(toDto(created))
+  res.status(201).json({ ...toDto(created), instructions: verificationInstructions(domain, token) })
+})
+
+// ── Prova de posse ────────────────────────────────────────────────────────────
+// GET: o que publicar. Reemite o token se o domínio ainda não tem um.
+router.get('/:id/verification', async (req, res) => {
+  const d = await req.db.Domain.findById(req.params.id)
+  if (!d) return res.status(404).json({ error: 'not found' })
+  let token = d.verification?.token
+  if (!token) {
+    token = generateToken()
+    await req.db.Domain.findByIdAndUpdate(d._id, { $set: { 'verification.token': token, 'verification.issuedAt': new Date() } })
+  }
+  res.json({
+    status: d.verification?.status || 'pending',
+    method: d.verification?.method || null,
+    verifiedAt: d.verification?.verifiedAt || null,
+    lastError: d.verification?.lastError || null,
+    instructions: verificationInstructions(d.domain, token),
+  })
+})
+
+// POST: roda a checagem agora (DNS primeiro, depois HTTP).
+router.post('/:id/verification', async (req, res) => {
+  const d = await req.db.Domain.findById(req.params.id)
+  if (!d) return res.status(404).json({ error: 'not found' })
+  if (d.verification?.status === 'verified') return res.json({ status: 'verified', method: d.verification.method })
+
+  let token = d.verification?.token
+  if (!token) {
+    token = generateToken()
+    await req.db.Domain.findByIdAndUpdate(d._id, { $set: { 'verification.token': token, 'verification.issuedAt': new Date() } })
+  }
+
+  const result = await verifyDomain(d.domain, token)
+  const now = new Date()
+  const set = result.ok
+    ? { 'verification.status': 'verified', 'verification.method': result.method, 'verification.verifiedAt': now, 'verification.lastCheckAt': now, 'verification.lastError': null }
+    : { 'verification.status': 'failed', 'verification.lastCheckAt': now, 'verification.lastError': String(result.error).slice(0, 400) }
+  const updated = await req.db.Domain.findByIdAndUpdate(d._id, { $set: set, $inc: { 'verification.attempts': 1 } }, { new: true })
+
+  if (!result.ok) {
+    return res.status(422).json({
+      status: 'failed', error: result.error,
+      instructions: verificationInstructions(d.domain, token),
+    })
+  }
+  res.json({ status: 'verified', method: result.method, domain: toDto(updated) })
 })
 
 router.get('/:id', async (req, res) => {
@@ -119,6 +183,17 @@ router.post('/:id/scan', async (req, res) => {
   const d = await req.db.Domain.findById(req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
   if (d.scanState === 'scanning') return res.status(409).json({ error: 'scan já em andamento' })
+
+  // Prova de posse antes de qualquer coisa. O gate também existe dentro do
+  // scanner (para o scheduler não contornar); aqui ele responde um erro
+  // ACIONÁVEL — com a instrução do que publicar — em vez de só recusar.
+  const blocked = scanner.scanBlockReason(d)
+  if (blocked) {
+    return res.status(403).json({
+      error: blocked, code: 'DOMAIN_NOT_VERIFIED',
+      instructions: verificationInstructions(d.domain, d.verification?.token || null),
+    })
+  }
 
   if (!canForceCooldown(req.body, req.user)) {
     const remaining = cooldownRemainingMs(d.lastScanAt, SCAN_COOLDOWN_MS)

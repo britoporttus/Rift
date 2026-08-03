@@ -39,7 +39,7 @@ test('tick: dispara scan (trigger monitor) em domínio vencido e ocioso', async 
   const calls = []
 
   const old = new Date(Date.now() - 30 * DAY)
-  Domain.find = () => ({ select: () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'done', lastScanAt: old }] }) })
+  Domain.find = () => ({ select: () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'done', lastScanAt: old, verification: { status: 'verified' } }] }) })
   scanner.runScan = async (_db, id, opts) => { calls.push({ id, opts }) }
 
   try {
@@ -59,7 +59,7 @@ test('tick: NÃO dispara em domínio que está escaneando (não empilha)', async
   let runCalled = false
 
   const old = new Date(Date.now() - 30 * DAY)
-  Domain.find = () => ({ select: () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'scanning', lastScanAt: old }] }) })
+  Domain.find = () => ({ select: () => ({ lean: async () => [{ _id: 'd1', domain: 'x.com', scanState: 'scanning', lastScanAt: old, verification: { status: 'verified' } }] }) })
   scanner.runScan = async () => { runCalled = true }
 
   try {
@@ -77,7 +77,7 @@ test('tick: respeita o cap de MAX_PER_TICK (não dispara todos de uma vez)', asy
   let disparados = 0
 
   const old = new Date(Date.now() - 30 * DAY)
-  const many = Array.from({ length: 10 }, (_, i) => ({ _id: `d${i}`, domain: `x${i}.com`, scanState: 'done', lastScanAt: old }))
+  const many = Array.from({ length: 10 }, (_, i) => ({ _id: `d${i}`, domain: `x${i}.com`, scanState: 'done', lastScanAt: old, verification: { status: 'verified' } }))
   Domain.find = () => ({ select: () => ({ lean: async () => many }) })
   scanner.runScan = async () => { disparados++ }
 
