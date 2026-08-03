@@ -213,9 +213,49 @@ tenant. Decidir escopo disso depois que §6 estiver de pé.
 > | Cofre de credenciais chaveado por tenant | ✅ |
 > | Papel `client` + matriz de visibilidade na UI | ✅ |
 > | Teste-régua cross-tenant (8 superfícies) | ✅ |
+> | Prova de posse de domínio (DNS TXT + arquivo HTTP, anti-SSRF) | ✅ |
+> | Planos free/pro/interno + tetos e gates | ✅ |
+> | Relatório resumido no plano free | ✅ |
 > | **ACL intra-tenant por engagement** | ⬜ pendente |
 > | **Espelho de `Usage` no control plane** | ⬜ pendente (hoje é fan-out) |
 > | **Isolamento do agente por usuário de SO/container** | ⬜ pendente (ver §3.1, P0-8) |
+
+### 6.1. Prova de posse e planos (2026-08-03)
+
+**Posse.** `Domain.authorized` continua sendo a autorização *comercial*. A
+verificação é a prova *técnica* de que quem cadastrou controla o domínio —
+necessária porque, com cliente self-service, o scan de um domínio de terceiro
+sairia do **nosso** IP. Dois métodos padrão: TXT em `_rift-verify.<domínio>` e
+arquivo em `/.well-known/rift-verify.txt`.
+
+Política escolhida (a mais conservadora): **bloqueia tudo — nem passivo roda —
+e ninguém dispensa, nem admin.** O gate vive no scanner, não só na rota, para o
+scheduler/job não contornar por esquecimento.
+
+> A checagem HTTP é uma requisição a um host escolhido pelo usuário — o mesmo
+> padrão do P0-1. Todo IP resolvido passa pelo net-guard antes de conectar;
+> basta um IP do round-robin ser interno para recusar; a conexão vai ao IP já
+> validado com `Host` header (fecha DNS rebinding); redirect não é seguido.
+
+Os 9 domínios que já existiam foram marcados `legacy`, **não** `verified` —
+marcá-los como verificados seria mentir (ninguém provou posse de
+`scanme.nmap.org`). Eles continuam escaneando e aparecem como pendência na UI:
+exceção auditável em vez de aprovação silenciosa.
+
+**Planos.** O corte econômico: o ASM roda binários determinísticos e **não gasta
+token de IA** — o custo marginal é CPU. O agente de pentest é o único componente
+caro. Por isso free e pro têm a **mesma cadência diária**; o que se cobra é pôr
+o agente para trabalhar.
+
+| | free | pro | internal |
+|---|---|---|---|
+| ASM | diário | diário | env histórica |
+| domínios | 3 | ilimitado | ilimitado |
+| pentest de IA | ❌ | ✅ | ✅ |
+| relatório | resumido | completo | completo |
+
+Fail-closed: plano desconhecido cai em `free`, nunca no mais permissivo.
+Tenants: `porttus`=internal, `trustsis`=free (o primeiro cliente).
 >
 > **Contas de demonstração** (criadas por `scripts/seed-tenant-users.js`):
 > `operador@porttus.com` (admin/porttus) e `cliente@trustsis.com` (client/trustsis).
