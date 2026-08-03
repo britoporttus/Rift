@@ -15,6 +15,7 @@
 import { useState, useId } from 'react'
 import Link from 'next/link'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import { EASE, useCountUp, useMounted, usePrefersReducedMotion } from '@/lib/motion'
 
 // ── Escala de design ─────────────────────────────────────────────────────────
 // Um único lugar define raio/espaçamento. Mudar aqui muda o app inteiro.
@@ -26,6 +27,31 @@ export const PAGE_MAX = 1240
  *  (o bug clássico do repo era `${cor}22`, que não funciona com var()) */
 export function tint(color: string, pct: number) {
   return `color-mix(in srgb, ${color} ${pct}%, transparent)`
+}
+
+// ── Movimento ────────────────────────────────────────────────────────────────
+
+/**
+ * Entrada suave (fade + subida) ao montar. `delay` escalona uma sequência —
+ * dê índices crescentes a irmãos para revelar em cascata. Respeita
+ * `prefers-reduced-motion` (aparece sem animar) e não quebra SSR.
+ */
+export function Reveal({ children, delay = 0, y = 12, style }: {
+  children: React.ReactNode; delay?: number; y?: number; style?: React.CSSProperties
+}) {
+  const mounted = useMounted()
+  const reduced = usePrefersReducedMotion()
+  const shown = mounted || reduced
+  return (
+    <div style={{
+      opacity: shown ? 1 : 0,
+      transform: shown ? 'none' : `translateY(${y}px)`,
+      transition: reduced ? 'none' : `opacity .5s ${EASE} ${delay}ms, transform .5s ${EASE} ${delay}ms`,
+      ...style,
+    }}>
+      {children}
+    </div>
+  )
 }
 
 // ── Container de página ──────────────────────────────────────────────────────
@@ -188,14 +214,19 @@ export function Collapsible({ title, icon, meta, children, defaultOpen = false, 
 
 /** KPI de destaque. `href` transforma o card em porta de entrada navegável —
  *  um número que não leva a lugar nenhum é decoração, não informação. */
-export function Kpi({ label, value, color = 'var(--purple-light)', icon, hint, href }: {
+export function Kpi({ label, value, color = 'var(--purple-light)', icon, hint, href, countUp = false }: {
   label: string
   value: React.ReactNode
   color?: string
   icon?: React.ReactNode
   hint?: string
   href?: string
+  /** anima a contagem de 0 até o valor (só quando `value` é número) */
+  countUp?: boolean
 }) {
+  const isNum = typeof value === 'number'
+  const animated = useCountUp(isNum ? (value as number) : 0, { enabled: countUp && isNum })
+  const display = countUp && isNum ? animated.toLocaleString('pt-BR') : value
   const body = (
     <Card hover={!!href} pad="0.95rem 1.15rem" style={{ overflow: 'hidden', height: '100%' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 3, background: color }} />
@@ -208,7 +239,7 @@ export function Kpi({ label, value, color = 'var(--purple-light)', icon, hint, h
           }}>{icon}</div>
         )}
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>{value}</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>{display}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontWeight: 600 }}>{label}</div>
           {hint && <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>{hint}</div>}
         </div>

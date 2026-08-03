@@ -333,7 +333,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
         {/* donut */}
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
           <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--muted)', marginBottom: 4 }}>Distribuição</div>
-          <Donut data={donutData} total={total} caption="findings" size={128} thickness={16} />
+          <Donut data={donutData} total={total} caption="findings" size={128} thickness={16} animate={false} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             {SEV_ORDER.filter(s => bySev(s).length > 0).map(s => (
               <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>

@@ -5,13 +5,14 @@ import { api, DomainSummary } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import { HBars } from '@/components/ui/charts/HBars'
+import { AreaTrend, AreaPoint } from '@/components/ui/charts/AreaTrend'
 import {
   Page, PageHeader, Card, Btn, Badge, Kpi, KpiRow, EmptyState, Skeleton,
-  SectionTitle, inputStyle, tint,
+  SectionTitle, inputStyle, tint, Reveal,
 } from '@/components/ui/kit'
 import {
   Globe, Plus, ShieldCheck, ShieldAlert, Radar, Loader2, Server,
-  AlertTriangle, Lock, Crosshair, FileText,
+  AlertTriangle, Lock, Crosshair, FileText, TrendingUp,
 } from 'lucide-react'
 
 const KIND_ORDER = ['vendor', 'partner', 'internal', 'other'] as const
@@ -26,6 +27,24 @@ const STEP_LABEL: Record<string, string> = {
 const KIND_LABEL: Record<string, string> = { vendor: 'Fornecedor', partner: 'Parceiro', internal: 'Interno', other: 'Outro' }
 
 function riskColor(level: string) { return SEV_COLOR[level] || SEV_COLOR.info }
+
+/** Série real (sem dado fake) de crescimento da superfície: contagem cumulativa
+ *  de domínios monitorados por dia, a partir do `createdAt` de cada um. */
+function buildGrowthSeries(domains: DomainSummary[]): AreaPoint[] {
+  const byDay = new Map<string, number>()
+  for (const d of domains) {
+    if (!d.createdAt) continue
+    const day = d.createdAt.slice(0, 10)
+    byDay.set(day, (byDay.get(day) || 0) + 1)
+  }
+  const days = [...byDay.keys()].sort()
+  let cum = 0
+  return days.map((day) => {
+    cum += byDay.get(day) || 0
+    const dt = new Date(`${day}T00:00:00`)
+    return { label: dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), value: cum }
+  })
+}
 
 export default function DominiosPage() {
   const router = useRouter()
@@ -74,6 +93,7 @@ export default function DominiosPage() {
   const kindData = KIND_ORDER
     .map((k) => ({ label: KIND_LABEL[k], value: domains.filter((d) => d.kind === k).length, color: KIND_COLOR[k] }))
     .filter((k) => k.value > 0)
+  const growth = buildGrowthSeries(domains)
 
   return (
     <Page>
@@ -93,21 +113,36 @@ export default function DominiosPage() {
           Antes eram só números — o operador via "3 em risco" e não tinha para
           onde clicar. */}
       {!loading && domains.length > 0 && (
-        <KpiRow>
-          <Kpi label="Domínios monitorados" value={domains.length} color="var(--purple-light)" icon={<Globe size={18} />} />
-          <Kpi label="Em risco alto/crítico" value={atRisk} color="var(--high)" icon={<AlertTriangle size={18} />}
-            href="/findings?severity=high" hint="ver achados de alta severidade" />
-          <Kpi label="Não autorizados" value={unauthorizedCount} color="var(--medium)" icon={<Lock size={18} />}
-            hint="só coleta passiva" />
-          <Kpi label="Credenciais vazadas" value={totalLeaks} color="var(--critical)" icon={<ShieldAlert size={18} />} />
-        </KpiRow>
+        <Reveal>
+          <KpiRow>
+            <Kpi label="Domínios monitorados" value={domains.length} color="var(--purple-light)" icon={<Globe size={18} />} countUp />
+            <Kpi label="Em risco alto/crítico" value={atRisk} color="var(--high)" icon={<AlertTriangle size={18} />}
+              href="/findings?severity=high" hint="ver achados de alta severidade" countUp />
+            <Kpi label="Não autorizados" value={unauthorizedCount} color="var(--medium)" icon={<Lock size={18} />}
+              hint="só coleta passiva" countUp />
+            <Kpi label="Credenciais vazadas" value={totalLeaks} color="var(--critical)" icon={<ShieldAlert size={18} />} countUp />
+          </KpiRow>
+        </Reveal>
+      )}
+
+      {!loading && growth.length >= 2 && (
+        <Reveal delay={60}>
+          <Card pad="1.25rem 1.4rem">
+            <SectionTitle icon={<TrendingUp size={13} />}>Domínios monitorados ao longo do tempo</SectionTitle>
+            <div style={{ marginTop: 14 }}>
+              <AreaTrend data={growth} height={120} valueSuffix=" domínios" />
+            </div>
+          </Card>
+        </Reveal>
       )}
 
       {!loading && kindData.length > 0 && (
-        <Card pad="1.25rem 1.4rem">
-          <SectionTitle>Domínios por tipo</SectionTitle>
-          <div style={{ marginTop: 18 }}><HBars data={kindData} /></div>
-        </Card>
+        <Reveal delay={120}>
+          <Card pad="1.25rem 1.4rem">
+            <SectionTitle>Domínios por tipo</SectionTitle>
+            <div style={{ marginTop: 18 }}><HBars data={kindData} /></div>
+          </Card>
+        </Reveal>
       )}
 
       <Card pad="0.9rem 1.1rem" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -135,14 +170,15 @@ export default function DominiosPage() {
         />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-          {domains.map((d) => {
+          {domains.map((d, i) => {
             const isH = hovered === d.id
             const rc = riskColor(d.riskLevel)
             const isScanning = d.scanState === 'scanning'
             return (
-              <div key={d.id} {...clickableDivProps(() => router.push(`/dominios/${d.id}`))}
+              <Reveal key={d.id} delay={Math.min(i, 8) * 45} style={{ height: '100%' }}>
+              <div {...clickableDivProps(() => router.push(`/dominios/${d.id}`))}
                 onMouseEnter={() => setHovered(d.id)} onMouseLeave={() => setHovered(null)}
-                style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1.25rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none' }}>
+                style={{ background: 'var(--surface)', border: `1px solid ${isH ? 'var(--border-mid)' : 'var(--border)'}`, borderRadius: 12, padding: '1.25rem', cursor: 'pointer', transition: 'all 0.13s', boxShadow: isH ? '0 6px 24px rgba(124,58,237,0.14)' : 'none', height: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name || d.domain}</div>
@@ -188,6 +224,7 @@ export default function DominiosPage() {
                   </button>
                 </div>
               </div>
+              </Reveal>
             )
           })}
         </div>
