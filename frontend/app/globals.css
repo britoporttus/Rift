@@ -85,6 +85,8 @@ a {
   background:linear-gradient(180deg, transparent, color-mix(in srgb, var(--purple) 18%, transparent) 55%, transparent);
   animation:scanY 2.6s cubic-bezier(.6,.1,.4,.9) infinite }
 @media (prefers-reduced-motion: reduce){ .rk-scanline{ animation:none; opacity:0 } }
+@property --gb { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+@keyframes gbRot { to { --gb:360deg } }
 
 /* ── Login page (split + radar orbital, v6) ── */
 @keyframes loginPulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.82)} }

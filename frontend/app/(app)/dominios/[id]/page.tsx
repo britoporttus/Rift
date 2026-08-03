@@ -11,6 +11,7 @@ import { AreaTrend, AreaPoint } from '@/components/ui/charts/AreaTrend'
 import { Beacon } from '@/components/ui/fx/Beacon'
 import { ScanSweep } from '@/components/ui/fx/ScanSweep'
 import { Magnetic } from '@/components/ui/fx/Magnetic'
+import { GradientBorder } from '@/components/ui/fx/GradientBorder'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
 import { VerificationCard } from '@/components/dominios/VerificationCard'
 import type { DomainScanRecord } from '@/lib/api'
@@ -268,9 +269,11 @@ export default function DominioDetailPage() {
 
       {/* Estado transitório do scan — some quando não há scan em curso. */}
       {isScanning && (
-        <div style={{ background: tint('var(--purple)', 8), border: '1px solid var(--border-mid)', borderRadius: 10, padding: '0.7rem 1rem', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: 'var(--purple-light)' }}>
-          <ScanSweep size={24} /> {STEP_LABEL[domain.scanStep || ''] || 'escaneando'}…
-        </div>
+        <GradientBorder radius={10}>
+          <div style={{ background: tint('var(--purple)', 8), borderRadius: 10, padding: '0.7rem 1rem', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: 'var(--purple-light)' }}>
+            <ScanSweep size={24} /> {STEP_LABEL[domain.scanStep || ''] || 'escaneando'}…
+          </div>
+        </GradientBorder>
       )}
       {domain.scanState === 'failed' && domain.scanError && (
         <div style={{ background: tint('var(--high)', 8), border: `1px solid ${tint('var(--high)', 30)}`, borderRadius: 10, padding: '0.7rem 1rem', fontSize: 12, color: 'var(--high)' }}>

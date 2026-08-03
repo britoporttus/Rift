@@ -7,6 +7,7 @@ import { useEngagementWS, WsMsg } from '@/hooks/useEngagementWS'
 import { mergeMessages } from '@/lib/mergeMessages'
 import { FindingsReport } from '@/components/findings/FindingsReport'
 import { ProgressRing } from '@/components/ui/charts/ProgressRing'
+import { CodeRain } from '@/components/ui/fx/CodeRain'
 import { ScheduleSettings } from '@/components/engagement/ScheduleSettings'
 import { ExecutionPanel } from '@/components/engagement/ExecutionPanel'
 import { ModelSwitcher } from '@/components/engagement/ModelSwitcher'
@@ -341,6 +342,13 @@ export default function EngagementPage() {
           </button>
         ))}
       </div>
+
+      {running && (
+        <div style={{ position: 'relative', overflow: 'hidden', height: 30, flexShrink: 0, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', paddingLeft: 16 }}>
+          <CodeRain opacity={0.4} />
+          <span style={{ position: 'relative', zIndex: 1, fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '.12em', color: 'var(--purple-light)' }}>▚ AGENTE TRABALHANDO…</span>
+        </div>
+      )}
 
       {/* Body */}
       {tab === 'exec' && (
