@@ -9,8 +9,20 @@
  * desligar (`enabled=false`) para contextos onde animação atrapalha, como a
  * geração de PDF por Chromium headless.
  *
- * Convenção do repo: estilo inline + variáveis CSS de globals.css. Nada de
- * bibliotecas de animação (framer-motion etc.) — rAF + transição CSS bastam.
+ * Convenção do repo: estilo inline + variáveis CSS de globals.css.
+ *
+ * ATUALIZAÇÃO 2026-08-04 — a regra "nada de bibliotecas de animação" que estava
+ * aqui foi revertida por decisão do operador. Entraram DUAS, cada uma com
+ * escopo fechado:
+ *   · Motion  → entrada/SAÍDA e layout de elementos no app, em
+ *               [[components/ui/motion]]. Existe porque CSS não anima o que sai
+ *               do DOM.
+ *   · GSAP    → só dentro do modal "Anatomia do ataque", carregado sob demanda.
+ *               Existe pela timeline com scrub e pelo DrawSVG/MotionPath.
+ *
+ * Este arquivo NÃO migrou: `useCountUp` e `useDrawProgress` produzem um número
+ * por frame para o React desenhar, e aí rAF já é a resposta certa — Motion não
+ * acrescentaria nada e só somaria indireção.
  */
 import { useEffect, useRef, useState } from 'react'
 

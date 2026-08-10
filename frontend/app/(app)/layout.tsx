@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { Sidebar } from '@/components/ui/Sidebar'
 import { crumbsFor } from '@/lib/nav'
+import { MotionProvider } from '@/components/ui/motion'
 
 const GRID_BG = {
   backgroundImage: 'linear-gradient(rgba(124,58,237,0.024) 1px,transparent 1px),linear-gradient(90deg,rgba(124,58,237,0.024) 1px,transparent 1px)',
@@ -110,19 +111,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
-      <Sidebar
-        user={user}
-        collapsed={collapsed}
-        onToggle={() => setCollapsed((c) => !c)}
-        onLogout={() => { logout(); router.replace('/login') }}
-      />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <TopBar crumbs={crumbs} />
-        <main style={{ flex: 1, overflow: 'auto', ...GRID_BG }}>
-          {children}
-        </main>
+    <MotionProvider>
+      <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
+        <Sidebar
+          user={user}
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((c) => !c)}
+          onLogout={() => { logout(); router.replace('/login') }}
+        />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <TopBar crumbs={crumbs} />
+          <main style={{ flex: 1, overflow: 'auto', ...GRID_BG }}>
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </MotionProvider>
   )
 }
