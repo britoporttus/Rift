@@ -42,10 +42,21 @@ test('computeScore: severidade "info" não pontua nem gera reason', () => {
 })
 
 test('computeScore: hosts vivos somam até o teto de 15', () => {
-  const r1 = computeScore({ assets: [{ alive: true }] }) // floor(1/3)+2 = 2
+  // Só HOST web vivo (type:'subdomain' + alive) conta — porta tem alive:true mas
+  // não é host (Bug 2 da Fase 2 de legibilidade). Daí o type nos fixtures.
+  const r1 = computeScore({ assets: [{ type: 'subdomain', alive: true }] }) // floor(1/3)+2 = 2
   assert.equal(r1.score, 2)
-  const r2 = computeScore({ assets: Array.from({ length: 50 }, () => ({ alive: true })) }) // teto 15
+  const r2 = computeScore({ assets: Array.from({ length: 50 }, () => ({ type: 'subdomain', alive: true })) }) // teto 15
   assert.equal(r2.score, 15)
+})
+
+test('computeScore: porta viva NÃO conta como host web vivo', () => {
+  // 8 portas alive:true de 1 host não devem inflar o score como se fossem 8 hosts.
+  const r = computeScore({ assets: [
+    { type: 'subdomain', alive: true },
+    ...Array.from({ length: 8 }, () => ({ type: 'port', alive: true })),
+  ] })
+  assert.equal(r.score, 2) // só o 1 host conta: floor(1/3)+2
 })
 
 test('computeScore: nunca passa de 100 mesmo somando todos os sinais no máximo', () => {

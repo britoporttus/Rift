@@ -15,6 +15,21 @@ test('primeiro scan (sem baseline): tudo é novo, nada pode ter "sumido"', () =>
   assert.deepEqual(r.missingAssets, [])
 })
 
+test('contagem por categoria: host vs porta/IP separados no diff (Bug 4)', () => {
+  const previous = [{ type: 'subdomain', value: 'api.x.com', fingerprint: 'fp1' }]
+  const current = [
+    { type: 'subdomain', value: 'api.x.com', fingerprint: 'fp1' },
+    { type: 'subdomain', value: 'novo.x.com', fingerprint: 'fp-host' },      // 1 host novo
+    { type: 'port', value: '1.2.3.4:80', fingerprint: 'fp-p1' },             // 3 portas novas
+    { type: 'port', value: '1.2.3.4:443', fingerprint: 'fp-p2' },
+    { type: 'port', value: '1.2.3.4:8080', fingerprint: 'fp-p3' },
+  ]
+  const r = computeAssetDiff({ previousAssets: previous, currentAssets: current, scopedTypes: ['subdomain'] })
+  assert.equal(r.newCount, 4, 'total de novos')
+  assert.equal(r.newHostCount, 1, 'só 1 subdomínio novo — o headline não pode dizer +4')
+  assert.equal(r.newOtherCount, 3, 'as 3 portas vão na linha "outros ativos"')
+})
+
 test('subdomínio novo (fingerprint que não existia antes) entra em newAssets', () => {
   const previous = [{ type: 'subdomain', value: 'api.x.com', fingerprint: 'fp1' }]
   const current = [

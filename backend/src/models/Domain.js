@@ -52,8 +52,13 @@ const domainSchema = new mongoose.Schema({
   lastScanBy:    { type: String, default: null },
 
   // --- Contadores derivados (recomputados ao fim de cada scan) ---
-  assetCount:  { type: Number, default: 0 },
-  aliveCount:  { type: Number, default: 0 },
+  // Grandezas que NÃO se sobrepõem (Fase 2 do roadmap de legibilidade): um host
+  // é 1 subdomínio, não N linhas. `assetCount` (total cru) fica só para o
+  // histórico do DomainScan; a UI lê os contadores por categoria abaixo.
+  assetCount:  { type: Number, default: 0 },   // total cru — não exibir; contém os demais
+  subdomainCount: { type: Number, default: 0 }, // hosts (nomes) descobertos
+  webAliveCount:  { type: Number, default: 0 }, // hosts que respondem HTTP
+  aliveCount:  { type: Number, default: 0 },   // = webAliveCount (compat com histórico antigo)
   leakCount:   { type: Number, default: 0 },
   exposureCount: { type: Number, default: 0 },
   portCount:   { type: Number, default: 0 },
@@ -83,6 +88,10 @@ const domainSchema = new mongoose.Schema({
     missingAssets: { type: [{ type: { type: String }, value: String }], default: [] },
     newCount:      { type: Number, default: 0 },
     missingCount:  { type: Number, default: 0 },
+    newHostCount:     { type: Number, default: 0 },   // subdomínios novos (exato)
+    missingHostCount: { type: Number, default: 0 },
+    newOtherCount:    { type: Number, default: 0 },   // portas/IPs novos
+    missingOtherCount:{ type: Number, default: 0 },
     scoreDelta:    { type: Number, default: 0 },
   },
 }, { timestamps: true, _id: false })

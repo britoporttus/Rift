@@ -38,7 +38,10 @@ function computeScore({ assets = [], leaks = [] } = {}) {
   }
 
   // 3) Tamanho da superfície viva (mais hosts vivos = mais superfície de ataque).
-  const alive = assets.filter((a) => a.alive).length
+  // Só HOST web vivo (subdomínio). Antes somava `a.alive` de qualquer tipo —
+  // portas têm alive:true, então "9 hosts web vivos" na verdade eram 1 host + 8
+  // portas. (Fase 2 do roadmap de legibilidade, Bug 2.)
+  const alive = assets.filter((a) => a.type === 'subdomain' && a.alive).length
   if (alive) {
     const pts = Math.min(15, Math.floor(alive / 3) + 2)
     score += pts
