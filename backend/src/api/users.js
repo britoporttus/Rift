@@ -16,6 +16,7 @@ function toDto(u) {
     email:     obj.email,
     name:      obj.name,
     role:      obj.role,
+    depth:     obj.depth || 'tecnico',
     provider:  obj.provider,
     lastLogin: obj.lastLogin || null,
     createdAt: obj.createdAt,
@@ -57,10 +58,12 @@ router.post('/', async (req, res) => {
 // souber disso. Se precisar de uma promoção/rebaixamento que sobreviva ao próximo
 // login de uma conta SSO, ajuste a associação de grupo no Azure AD, não aqui.
 router.patch('/:id', async (req, res) => {
-  const { role, name } = req.body ?? {}
+  const { role, name, depth } = req.body ?? {}
   const patch = {}
   if (role && ['admin', 'user'].includes(role)) patch.role = role
   if (name) patch.name = name
+  // Fase 6: profundidade de leitura (não mexe em token — não é acesso).
+  if (depth && ['tecnico', 'gestor', 'diretor'].includes(depth)) patch.depth = depth
 
   // BUG-2: não rebaixar o último admin (senão ninguém mais administra).
   if (patch.role === 'user') {

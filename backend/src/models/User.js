@@ -9,6 +9,11 @@ const userSchema = new mongoose.Schema({
   // modelo, painel admin, gestão de usuários nem relatório executivo, e não
   // dispara fase agressiva.
   role:         { type: String, enum: ['admin', 'user', 'client'], default: 'user' },
+  // Fase 6 (visões por papel): PROFUNDIDADE de leitura, ORTOGONAL a `role`. `role`
+  // é acesso (interno vs cliente); `depth` é o quanto a tela mostra —
+  // `tecnico` vê tudo, `gestor` vê o andamento das correções, `diretor` vê só o
+  // veredito. Operador interno pode alternar; cliente fica preso ao seu `depth`.
+  depth:        { type: String, enum: ['tecnico', 'gestor', 'diretor'], default: 'tecnico' },
   // Vínculo explícito com o tenant. Vence a resolução por domínio de e-mail
   // (ver tenancy.resolveTenant) — necessário para um consultor da Porttus operar
   // dentro do tenant de um cliente sem trocar de e-mail.
