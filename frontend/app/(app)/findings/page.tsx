@@ -27,9 +27,9 @@ const TYPE_LABEL: Record<string, string> = { vulnerability: 'Vulnerabilidade', w
 const TYPE_COLOR: Record<string, string> = { vulnerability: 'var(--critical)', weakness: 'var(--high)', observation: 'var(--info)' }
 const TYPES = ['vulnerability', 'weakness', 'observation'] as const
 
-const REM_LABEL: Record<string, string> = { open: 'Aberto', fixed: 'Corrigido', accepted_risk: 'Risco aceito', regressed: 'Regrediu' }
-const REM_COLOR: Record<string, string> = { open: 'var(--high)', fixed: 'var(--low)', accepted_risk: 'var(--muted)', regressed: 'var(--critical)' }
-const REM_STATUSES = ['open', 'fixed', 'accepted_risk', 'regressed'] as const
+const REM_LABEL: Record<string, string> = { open: 'Aberto', in_progress: 'Em correção', fixed: 'Corrigido', accepted_risk: 'Risco aceito', regressed: 'Regrediu' }
+const REM_COLOR: Record<string, string> = { open: 'var(--high)', in_progress: 'var(--purple-light)', fixed: 'var(--low)', accepted_risk: 'var(--muted)', regressed: 'var(--critical)' }
+const REM_STATUSES = ['open', 'in_progress', 'fixed', 'accepted_risk', 'regressed'] as const
 
 function exportCSV(findings: Finding[]) {
   const header = ['id', 'title', 'severity', 'cvss', 'engagement', 'description']

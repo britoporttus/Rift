@@ -11,6 +11,7 @@ import { VulnEducation } from '@/components/findings/VulnEducation'
 // Status de remediação — fecha o ciclo "achei → corrigi → confirmei"
 const REMEDIATION: Record<RemediationStatus, { label: string; color: string; icon: string }> = {
   open:          { label: 'Aberto',       color: '#F5892E', icon: '○' },
+  in_progress:   { label: 'Em correção',  color: '#7C3AED', icon: '◐' },
   fixed:         { label: 'Corrigido',    color: '#22c55e', icon: '✓' },
   regressed:     { label: 'Regrediu',     color: '#F04452', icon: '⚠' },
   accepted_risk: { label: 'Risco aceito', color: '#A6ACC0', icon: '◆' },
@@ -70,7 +71,8 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
     e.stopPropagation()
     if (s === (f.remediationStatus ?? 'open') || saving) return
     setSaving(true)
-    try { await api.findings.setStatus(f.id, s); onStatusChange(f.id, s) }
+    try { await api.findings.setStatus(f.id, { remediationStatus: s }); onStatusChange(f.id, s) }
+    catch (err) { alert(err instanceof Error ? err.message : 'Erro ao mudar estado') }
     finally { setSaving(false) }
   }
 
@@ -173,7 +175,7 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
             padding: '10px 0 12px', borderBottom: '1px solid rgba(46,49,73,.5)', marginBottom: 12,
           }}>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>Status:</span>
-            {(['open', 'fixed', 'accepted_risk'] as RemediationStatus[]).map(s => {
+            {(['open', 'in_progress', 'fixed', 'accepted_risk'] as RemediationStatus[]).map(s => {
               const active = (f.remediationStatus ?? 'open') === s
               const cfg = REMEDIATION[s]
               return (
@@ -406,7 +408,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
         }}>
           Todos ({total})
         </button>
-        {(['open', 'fixed', 'accepted_risk', 'regressed'] as RemediationStatus[]).map(s => {
+        {(['open', 'in_progress', 'fixed', 'accepted_risk', 'regressed'] as RemediationStatus[]).map(s => {
           const cfg = REMEDIATION[s]
           const count = remCount(s)
           const active = statusFilter === s

@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation'
 import { api, DomainSummary, Finding } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
-import { HBars } from '@/components/ui/charts/HBars'
 import { AreaTrend } from '@/components/ui/charts/AreaTrend'
 import { findingsPerDay } from '@/lib/trends'
 import { Tilt } from '@/components/ui/fx/Tilt'
@@ -14,9 +13,22 @@ import {
   SectionTitle, inputStyle, tint, Reveal,
 } from '@/components/ui/kit'
 import {
-  Globe, Plus, ShieldCheck, ShieldAlert, Radar, Loader2, Server,
-  AlertTriangle, Lock, Crosshair, FileText, TrendingUp,
+  Globe, Plus, ShieldCheck, ShieldAlert, Radar, Loader2,
+  AlertTriangle, Lock, Crosshair, FileText, TrendingUp, Trash2, History,
 } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+
+// Tempo relativo curto (pt-BR) para o painel "o que mudou".
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.round(diff / 60000)
+  if (m < 1) return 'agora'
+  if (m < 60) return `há ${m}min`
+  const h = Math.round(m / 60)
+  if (h < 24) return `há ${h}h`
+  const d = Math.round(h / 24)
+  return `há ${d}d`
+}
 
 const STEP_LABEL: Record<string, string> = {
   subdomains: 'subdomínios', dns: 'DNS', http: 'probe web',
@@ -28,6 +40,8 @@ function riskColor(level: string) { return SEV_COLOR[level] || SEV_COLOR.info }
 
 export default function DominiosPage() {
   const router = useRouter()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [domains, setDomains] = useState<DomainSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [newDomain, setNewDomain] = useState('')
@@ -35,6 +49,7 @@ export default function DominiosPage() {
   const [creating, setCreating] = useState(false)
   const [scanning, setScanning] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [findings, setFindings] = useState<Finding[]>([])
 
   const load = useCallback((spin = false) => {
@@ -72,22 +87,38 @@ export default function DominiosPage() {
     try { await api.domains.scan(id); await load() } catch (e) { alert(e instanceof Error ? e.message : 'Erro') } finally { setScanning(null) }
   }
 
+  // Remover pela LISTA: excluir só existia dentro do domínio, então limpar um
+  // cadastro de teste exigia entrar nele primeiro. `stopPropagation` é
+  // obrigatório — o cartão inteiro é clicável (clickableDivProps), e sem isso o
+  // clique na lixeira navega para o domínio antes de o confirm aparecer.
+  async function handleDelete(d: DomainSummary, ev: React.MouseEvent) {
+    ev.stopPropagation()
+    if (!confirm(`Excluir "${d.name || d.domain}" e os ativos coletados?\n\nAs credenciais em Vazamentos são preservadas.`)) return
+    setDeleting(d.id)
+    try { await api.domains.delete(d.id); await load() }
+    catch (e) { alert(e instanceof Error ? e.message : 'Erro ao excluir') }
+    finally { setDeleting(null) }
+  }
+
   const totalLeaks = domains.reduce((a, d) => a + (d.leakCount || 0), 0)
   const atRisk = domains.filter((d) => d.riskLevel === 'critical' || d.riskLevel === 'high').length
   const unauthorizedCount = domains.filter((d) => !d.authorized).length
   const findingsTrend = findingsPerDay(findings, 14)
-  const topExposed = domains
-    .filter((d) => (d.exposureCount || 0) > 0)
-    .sort((a, b) => b.exposureCount - a.exposureCount)
+  // "O que mudou" no lugar do ranking "mais expostos": ranking só informa com
+  // volume (com 2 e 1 exposições era decoração), e a pergunta que o
+  // monitoramento contínuo deve responder é o que entrou/saiu (Fase 2, item 2.5).
+  const recentChanges = domains
+    .filter((d) => d.lastDiff?.computedAt &&
+      ((d.lastDiff.newHostCount ?? 0) > 0 || (d.lastDiff.missingHostCount ?? 0) > 0 || (d.lastDiff.scoreDelta ?? 0) !== 0))
+    .sort((a, b) => new Date(b.lastDiff!.computedAt!).getTime() - new Date(a.lastDiff!.computedAt!).getTime())
     .slice(0, 6)
-    .map((d) => ({ label: d.domain, value: d.exposureCount, color: SEV_COLOR[d.riskLevel] || SEV_COLOR.info }))
 
   return (
     <Page>
       <PageHeader
         icon={<Globe size={19} color="var(--purple-light)" />}
-        title="Domínios"
-        subtitle="Análise de superfície (ASM) passiva e score de segurança por domínio — fornecedores, parceiros e ativos próprios."
+        title="Web / API"
+        subtitle="Superfície externa por domínio — subdomínios, portas e exposições. A base do pentest web, com e sem login."
         actions={
           <>
             <Btn href="/reports"><FileText size={14} /> Relatórios</Btn>
@@ -99,22 +130,29 @@ export default function DominiosPage() {
       {/* KPIs navegáveis: "em risco" leva para os achados que sustentam o número.
           Antes eram só números — o operador via "3 em risco" e não tinha para
           onde clicar. */}
+      {/* KPIs: "monitorados" e "em risco" sempre (respondem "onde olhar"); os
+          outros dois só quando têm sinal — um "0 vazados / 0 não-autorizados"
+          fixo era ruído na home (Fase 4). */}
       {!loading && domains.length > 0 && (
         <Reveal>
           <KpiRow>
             <Kpi label="Domínios monitorados" value={domains.length} color="var(--purple-light)" icon={<Globe size={18} />} countUp />
             <Kpi label="Em risco alto/crítico" value={atRisk} color="var(--high)" icon={<AlertTriangle size={18} />}
               href="/findings?severity=high" hint="ver achados de alta severidade" countUp />
-            <Kpi label="Não autorizados" value={unauthorizedCount} color="var(--medium)" icon={<Lock size={18} />}
-              hint="só coleta passiva" countUp />
-            <Kpi label="Credenciais vazadas" value={totalLeaks} color="var(--critical)" icon={<ShieldAlert size={18} />} countUp />
+            {unauthorizedCount > 0 && (
+              <Kpi label="Não autorizados" value={unauthorizedCount} color="var(--medium)" icon={<Lock size={18} />}
+                hint="só coleta passiva" countUp />
+            )}
+            {totalLeaks > 0 && (
+              <Kpi label="Credenciais vazadas" value={totalLeaks} color="var(--critical)" icon={<ShieldAlert size={18} />} countUp />
+            )}
           </KpiRow>
         </Reveal>
       )}
 
-      {/* Panorama visual: tendência de descobertas + ranking de exposição, lado
-          a lado. Ambos animam na entrada (curva desenha, barras crescem). */}
-      {!loading && (findings.length > 0 || topExposed.length > 0) && (
+      {/* Panorama visual: tendência de descobertas + o que mudou nos últimos
+          scans, lado a lado. */}
+      {!loading && (findings.length > 0 || recentChanges.length > 0) && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18, alignItems: 'start' }}>
           {findings.length > 0 && (
             <Reveal delay={60}>
@@ -126,11 +164,32 @@ export default function DominiosPage() {
               </Card>
             </Reveal>
           )}
-          {topExposed.length > 0 && (
+          {recentChanges.length > 0 && (
             <Reveal delay={120}>
               <Card pad="1.25rem 1.4rem">
-                <SectionTitle icon={<ShieldAlert size={13} />}>Domínios mais expostos</SectionTitle>
-                <div style={{ marginTop: 18 }}><HBars data={topExposed} /></div>
+                <SectionTitle icon={<History size={13} />}>O que mudou nos últimos scans</SectionTitle>
+                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column' }}>
+                  {recentChanges.map((d, i) => {
+                    const nh = d.lastDiff?.newHostCount ?? 0
+                    const mh = d.lastDiff?.missingHostCount ?? 0
+                    const ds = d.lastDiff?.scoreDelta ?? 0
+                    return (
+                      <div key={d.id} role="button" tabIndex={0}
+                        onClick={() => router.push(`/dominios/${d.id}`)}
+                        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && router.push(`/dominios/${d.id}`)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', cursor: 'pointer',
+                          borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
+                        <span style={{ fontSize: 12.5, color: 'var(--text)', fontFamily: 'var(--mono)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.domain}</span>
+                        <span style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, fontFamily: 'var(--mono)' }}>
+                          {nh > 0 && <span style={{ color: 'var(--low)' }}>+{nh} host</span>}
+                          {mh > 0 && <span style={{ color: 'var(--high)' }}>−{mh} host</span>}
+                          {ds !== 0 && <span style={{ color: ds > 0 ? 'var(--high)' : 'var(--low)' }}>{ds > 0 ? '▲' : '▼'} {Math.abs(ds)}</span>}
+                          <span style={{ color: 'var(--text-mute)' }}>{relTime(d.lastDiff!.computedAt!)}</span>
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </Card>
             </Reveal>
           )}
@@ -180,7 +239,7 @@ export default function DominiosPage() {
                   </div>
                   <div style={{ textAlign: 'center', flexShrink: 0 }}>
                     <div style={{ fontSize: 26, fontWeight: 700, color: rc, fontFamily: 'var(--mono)', lineHeight: 1 }}>{d.riskScore}</div>
-                    <div style={{ fontSize: 8, color: 'var(--text-mute)', letterSpacing: '0.1em', marginTop: 2 }}>SEGURANÇA</div>
+                    <div style={{ fontSize: 8, color: 'var(--text-mute)', letterSpacing: '0.1em', marginTop: 2 }}>EXPOSIÇÃO</div>
                   </div>
                 </div>
 
@@ -192,13 +251,19 @@ export default function DominiosPage() {
                   {d.leakCount > 0 && <Badge color="var(--critical)" icon={<ShieldAlert size={9} />}>{d.leakCount} vazado(s)</Badge>}
                 </div>
 
-                <div style={{ display: 'flex', gap: 14, marginBottom: 12 }}>
-                  <Stat icon={<Server size={12} />} label="ativos" value={d.assetCount} />
-                  <Stat icon={<Globe size={12} />} label="vivos" value={d.aliveCount} />
-                  <Stat icon={<AlertTriangle size={12} />} label="exposições" value={d.exposureCount} />
-                </div>
-
+                {/* Fase 4: os 3 números grandes saíram — repetiam o que a faixa de
+                    severidade já diz. Fica a faixa (o que importa) + uma linha de
+                    escala discreta. O detalhe por número vive dentro do domínio. */}
                 <SevStrip counts={d.severityCounts} />
+
+                <div style={{ fontSize: 10.5, color: 'var(--text-mute)', fontFamily: 'var(--mono)', marginBottom: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <span>{d.subdomainCount ?? d.assetCount} subdomínio(s)</span>
+                  <span style={{ color: 'var(--text-dim)' }}>·</span>
+                  <span>{d.portCount ?? 0} porta(s)</span>
+                  {(d.lastDiff?.newHostCount ?? 0) > 0 && (
+                    <><span style={{ color: 'var(--text-dim)' }}>·</span><span style={{ color: 'var(--low)' }}>+{d.lastDiff!.newHostCount} novo(s)</span></>
+                  )}
+                </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <div style={{ fontSize: 10.5, color: 'var(--text-mute)', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -212,10 +277,19 @@ export default function DominiosPage() {
                       <span>nunca escaneado</span>
                     )}
                   </div>
-                  <button onClick={(ev) => handleScan(d.id, ev)} disabled={isScanning || scanning === d.id}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: isScanning ? 'default' : 'pointer', fontFamily: 'inherit', background: tint('var(--purple)', 14), border: '1px solid var(--border-mid)', color: 'var(--purple-light)', opacity: isScanning ? 0.5 : 1, whiteSpace: 'nowrap' }}>
-                    {isScanning || scanning === d.id ? <Loader2 size={12} className="spin" /> : <Radar size={12} />} Escanear
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <button onClick={(ev) => handleScan(d.id, ev)} disabled={isScanning || scanning === d.id}
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: isScanning ? 'default' : 'pointer', fontFamily: 'inherit', background: tint('var(--purple)', 14), border: '1px solid var(--border-mid)', color: 'var(--purple-light)', opacity: isScanning ? 0.5 : 1, whiteSpace: 'nowrap' }}>
+                      {isScanning || scanning === d.id ? <Loader2 size={12} className="spin" /> : <Radar size={12} />} Escanear
+                    </button>
+                    {isAdmin && (
+                      <button onClick={(ev) => handleDelete(d, ev)} disabled={deleting === d.id}
+                        title={`Excluir ${d.domain}`} aria-label={`Excluir ${d.domain}`}
+                        style={{ display: 'flex', alignItems: 'center', padding: '5px 7px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-dim)', opacity: deleting === d.id ? 0.5 : 1 }}>
+                        {deleting === d.id ? <Loader2 size={12} className="spin" /> : <Trash2 size={12} />}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
               </Tilt>
@@ -233,7 +307,8 @@ export default function DominiosPage() {
 // Resumo de findings por severidade (exposições) — strip compacto na home. Só mostra
 // as classes com contagem > 0; se não há nenhuma, uma linha discreta de "sem exposições".
 const SEV_ROW: Array<'critical' | 'high' | 'medium' | 'low'> = ['critical', 'high', 'medium', 'low']
-const SEV_ABBR: Record<string, string> = { critical: 'C', high: 'A', medium: 'M', low: 'B' }
+// Palavra por extenso — o operador não decodifica C/A/M/B de cabeça (Fase 2, A).
+const SEV_WORD: Record<string, string> = { critical: 'Crítica', high: 'Alta', medium: 'Média', low: 'Baixa' }
 function SevStrip({ counts }: { counts?: Partial<Record<string, number>> }) {
   const active = SEV_ROW.filter((s) => (counts?.[s] || 0) > 0)
   return (
@@ -243,12 +318,13 @@ function SevStrip({ counts }: { counts?: Partial<Record<string, number>> }) {
       ) : active.map((s) => {
         const c = SEV_COLOR[s] || SEV_COLOR.info
         return (
-          <span key={s} title={`${counts?.[s]} ${s}`} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 700, fontFamily: 'var(--mono)',
-            borderRadius: 6, padding: '2px 7px', color: c,
+          <span key={s} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 600,
+            borderRadius: 6, padding: '2px 8px', color: c,
             background: `color-mix(in srgb, ${c} 13%, transparent)`, border: `1px solid color-mix(in srgb, ${c} 32%, transparent)`,
           }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: c }} />{SEV_ABBR[s]} {counts?.[s]}
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: c }} />{SEV_WORD[s]}
+            <b style={{ fontFamily: 'var(--mono)', fontWeight: 700 }}>{counts?.[s]}</b>
           </span>
         )
       })}
@@ -256,13 +332,3 @@ function SevStrip({ counts }: { counts?: Partial<Record<string, number>> }) {
   )
 }
 
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--mono)', display: 'flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ color: 'var(--text-mute)' }}>{icon}</span>{value}
-      </span>
-      <span style={{ fontSize: 9, color: 'var(--text-mute)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
-    </div>
-  )
-}

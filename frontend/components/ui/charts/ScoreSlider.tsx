@@ -34,10 +34,14 @@ export function ScoreSlider({ value, max = 100, label, color }: ScoreSliderProps
           </span>
         )}
       </div>
+      {/* Gradiente verde→vermelho: `value` é RISCO/EXPOSIÇÃO (maior = pior), então
+          valor baixo cai no verde (seguro) e alto no vermelho (exposto). Antes era
+          vermelho→verde, o que punha score baixo — bom — sobre o vermelho (a
+          inversão que o operador notou). Vale p/ domínio e rede interna. */}
       <div
         style={{
           position: 'relative', height: 8, borderRadius: 99,
-          background: 'linear-gradient(90deg,#F04452 0%,#F5892E 30%,#EAB308 55%,#22C55E 100%)',
+          background: 'linear-gradient(90deg,#22C55E 0%,#EAB308 45%,#F5892E 70%,#F04452 100%)',
         }}
       >
         <div

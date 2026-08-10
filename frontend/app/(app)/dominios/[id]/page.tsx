@@ -80,6 +80,18 @@ export default function DominioDetailPage() {
   const [history, setHistory] = useState<DomainScanRecord[]>([])
   const [shotOpen, setShotOpen] = useState<DomainAsset | null>(null)  // lightbox do recon visual
 
+  // Fase 3 (profundidade): seções abertas por controle do pai, para um número do
+  // topo abrir a lista que o sustenta. Set em vez de bool por seção — várias
+  // podem ficar abertas ao mesmo tempo (o usuário abre uma, depois outra).
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set())
+  const toggleSection = (key: string) =>
+    setOpenSections((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  // Abre a seção e rola até ela. rAF garante que o painel já expandiu antes do scroll.
+  const jumpTo = (key: string) => {
+    setOpenSections((prev) => new Set(prev).add(key))
+    requestAnimationFrame(() => document.getElementById(`sec-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+
   const load = useCallback(() => {
     return Promise.all([api.domains.get(id), api.domains.assets(id), api.engagements.list(), api.graph.domain(id), api.domains.history(id, 30)])
       .then(([d, a, engs, g, h]) => {
@@ -119,13 +131,13 @@ export default function DominioDetailPage() {
 
   const exposures = assets.filter((a) => a.type === 'exposure')
   const ports = assets.filter((a) => a.type === 'port')
-  const shots = assets.filter((a) => a.type === 'web' && a.screenshotPath)   // recon visual (Fase 4)
-  const subdomainCount = assets.length - exposures.length - ports.length
+  // screenshot vive no próprio subdomínio agora (não mais num asset 'web' à parte)
+  const shots = assets.filter((a) => a.type === 'subdomain' && a.screenshotPath)   // recon visual (Fase 4)
 
   // Agrupa as portas por IP (uma entrada por IP, não por porta) e amarra ao(s)
   // subdomínio(s) que resolvem pra ele. Muito mais limpo que a lista plana.
   const subsForIp = (ip?: string | null) => !ip ? [] :
-    assets.filter((a) => a.type === 'subdomain' && (a.ips || []).includes(ip)).map((a) => a.value)
+    assets.filter((a) => (a.type === 'subdomain' || a.type === 'web') && (a.ips || []).includes(ip)).map((a) => a.value)
   const ipGroups = Array.from(
     ports.reduce((m, p) => {
       const ip = p.ip || p.value
@@ -153,8 +165,10 @@ export default function DominioDetailPage() {
   const vulnNodes = graph ? graph.nodes.filter((n) => n.type === 'vuln') : []
   // Subdomínios em primeiro plano: a superfície real do domínio. Vivos primeiro,
   // depois por severidade. O IP passa a ser secundário (chip dentro da linha).
+  // Inclui 'web' legado (tipo aposentado): um scan pré-migração, ou em andamento,
+  // podia ter host gravado como 'web' — é subdomínio, não pode sumir da lista.
   const subdomains = assets
-    .filter((a) => a.type === 'subdomain')
+    .filter((a) => a.type === 'subdomain' || a.type === 'web')
     .sort((a, b) =>
       Number(b.alive) - Number(a.alive) ||
       SEV_ORDER.indexOf(a.severity as never) - SEV_ORDER.indexOf(b.severity as never) ||
@@ -164,8 +178,10 @@ export default function DominioDetailPage() {
   // porta/IP viram um resumo discreto (era "IP demais" na tela).
   const diffNewSubs = (domain.lastDiff?.newAssets || []).filter((a) => a.type === 'subdomain')
   const diffMissSubs = (domain.lastDiff?.missingAssets || []).filter((a) => a.type === 'subdomain')
-  const diffOtherNew = (domain.lastDiff?.newAssets.length || 0) - diffNewSubs.length
-  const diffOtherMiss = (domain.lastDiff?.missingAssets.length || 0) - diffMissSubs.length
+  // Conta exata do backend (os arrays acima são exemplos limitados a 20); fallback
+  // para a derivação antiga em scans antigos que não gravaram os campos.
+  const diffOtherNew = domain.lastDiff?.newOtherCount ?? ((domain.lastDiff?.newAssets.length || 0) - diffNewSubs.length)
+  const diffOtherMiss = domain.lastDiff?.missingOtherCount ?? ((domain.lastDiff?.missingAssets.length || 0) - diffMissSubs.length)
   // Série real do score ao longo dos scans (history vem do mais recente ao mais
   // antigo → invertemos para desenhar da esquerda p/ direita em ordem cronológica).
   const scoreSeries: AreaPoint[] = [...history].reverse().map((h) => ({
@@ -203,13 +219,22 @@ export default function DominioDetailPage() {
       />
 
       {/* Prova de posse: sem verificar, nada roda. Fica no topo porque é a
-          única coisa acionável enquanto pendente. */}
-      <VerificationCard
-        domainId={id}
-        domain={domain.domain}
-        verification={domain.verification}
-        onVerified={load}
-      />
+          única coisa acionável enquanto pendente.
+
+          OCULTO EM PRODUÇÃO (decisão do operador, 10/08/2026): o fluxo está
+          pronto e testado, mas ainda não vai ao ar — o banner "verificação
+          pendente" aparecia em todo domínio legado e roubava o topo da tela
+          sem que houvesse decisão a tomar. Para reativar, basta pôr
+          NEXT_PUBLIC_RIFT_DOMAIN_VERIFY=true no ambiente do frontend; o
+          componente e a rota da API continuam de pé, nada foi removido. */}
+      {process.env.NEXT_PUBLIC_RIFT_DOMAIN_VERIFY === 'true' && (
+        <VerificationCard
+          domainId={id}
+          domain={domain.domain}
+          verification={domain.verification}
+          onVerified={load}
+        />
+      )}
 
       {/* ── Veredito ─────────────────────────────────────────────────────────
           O topo responde uma pergunta só: "quão exposto está este domínio?".
@@ -220,14 +245,17 @@ export default function DominioDetailPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1.1fr) minmax(240px, 1fr)', gap: 28, alignItems: 'start' }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16 }}>
-              Score de segurança
+              Índice de exposição
             </div>
             <ScoreSlider value={domain.riskScore} max={100} label={RISK_LABEL[domain.riskLevel] || domain.riskLevel.toUpperCase()} color={rc(domain.riskLevel)} />
+            {/* Grandezas que não se contêm (Fase 2): subdomínio (host) e porta são
+                grãos distintos; antes "ativos" somava os dois e inflava o número. */}
             <div style={{ display: 'flex', gap: 26, marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
-              <HeroStat label="ativos" value={domain.assetCount} />
-              <HeroStat label="vivos" value={domain.aliveCount} color="var(--low)" />
-              <HeroStat label="exposições" value={domain.exposureCount} color={domain.exposureCount > 0 ? 'var(--high)' : 'var(--muted)'} />
-              {vulnNodes.length > 0 && <HeroStat label="vulns" value={vulnNodes.length} color="var(--critical)" />}
+              <HeroStat label="subdomínios" value={domain.subdomainCount ?? subdomains.length} onJump={subdomains.length > 0 ? () => jumpTo('subs') : undefined} />
+              <HeroStat label="vivos na web" value={domain.webAliveCount ?? domain.aliveCount} color="var(--low)" onJump={subdomains.length > 0 ? () => jumpTo('subs') : undefined} />
+              <HeroStat label="portas" value={domain.portCount ?? ports.length} onJump={ports.length > 0 ? () => jumpTo('ports') : undefined} />
+              <HeroStat label="exposições" value={domain.exposureCount} color={domain.exposureCount > 0 ? 'var(--high)' : 'var(--muted)'} onJump={exposures.length > 0 ? () => jumpTo('exposures') : undefined} />
+              {vulnNodes.length > 0 && <HeroStat label="vulns" value={vulnNodes.length} color="var(--critical)" onJump={() => jumpTo('risco')} />}
             </div>
           </div>
 
@@ -308,7 +336,7 @@ export default function DominioDetailPage() {
         <NavTile href={`/reports?domain=${id}`} icon={<FileText size={17} />}
           title="Relatórios" hint="executivo e técnico" />
         <NavTile href={`/mapa?domain=${id}`} icon={<Share2 size={17} />}
-          title="Mapa de superfície" hint={`${subdomainCount} subdomínio(s)`} />
+          title="Mapa de superfície" hint={`${subdomains.length} subdomínio(s)`} />
       </div>
 
       {/* ── Exige atenção ────────────────────────────────────────────────────
@@ -347,7 +375,7 @@ export default function DominioDetailPage() {
           secundário (aparece como chip dentro de cada linha). Aberto por padrão. */}
       {subdomains.length > 0 && (
         <Collapsible title="Subdomínios" icon={<Globe size={12} />} count={subdomains.length}
-          defaultOpen meta={`${aliveSubs} vivo(s)`}>
+          anchorId="sec-subs" defaultOpen meta={`${aliveSubs} vivo(s)`}>
           {subdomains.slice(0, 40).map((a) => <AssetRow key={a.id} a={a} />)}
           {subdomains.length > 40 && (
             <div style={{ fontSize: 11.5, color: 'var(--text-mute)', paddingLeft: 2 }}>
@@ -365,6 +393,7 @@ export default function DominioDetailPage() {
 
       {graph && graph.stats.vulns > 0 && (
         <Collapsible title="Panorama de risco" icon={<Bug size={12} />} count={vulnNodes.length}
+          anchorId="sec-risco" open={openSections.has('risco')} onToggle={() => toggleSection('risco')}
           meta="vulnerabilidades correlacionadas a este domínio">
           {(() => {
             const slices = SEV_ORDER
@@ -450,9 +479,12 @@ export default function DominioDetailPage() {
           {domain.lastDiff && domain.lastDiff.computedAt && (
             <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: R.row, padding: '0.9rem 1.1rem' }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>Desde o scan anterior</div>
+              {/* O headline conta HOST (subdomínio); porta/IP vão na linha
+                  "outros ativos" abaixo. Antes "+8 novos" eram 8 portas de 1 host
+                  (Bug 4). Fallback p/ newCount em scans antigos sem os campos. */}
               <div style={{ display: 'flex', gap: 26 }}>
-                <HeroStat label="novos" value={`+${domain.lastDiff.newCount}`} color={domain.lastDiff.newCount > 0 ? 'var(--low)' : 'var(--muted)'} />
-                <HeroStat label="sumiram" value={`−${domain.lastDiff.missingCount}`} color={domain.lastDiff.missingCount > 0 ? 'var(--high)' : 'var(--muted)'} />
+                <HeroStat label="novos subdomínios" value={`+${domain.lastDiff.newHostCount ?? domain.lastDiff.newCount}`} color={(domain.lastDiff.newHostCount ?? domain.lastDiff.newCount) > 0 ? 'var(--low)' : 'var(--muted)'} />
+                <HeroStat label="sumiram" value={`−${domain.lastDiff.missingHostCount ?? domain.lastDiff.missingCount}`} color={(domain.lastDiff.missingHostCount ?? domain.lastDiff.missingCount) > 0 ? 'var(--high)' : 'var(--muted)'} />
               </div>
               {(diffNewSubs.length > 0 || diffMissSubs.length > 0 || diffOtherNew > 0 || diffOtherMiss > 0) && (
                 <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -488,7 +520,7 @@ export default function DominioDetailPage() {
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 12.5, color: 'var(--text)', fontFamily: 'var(--mono)' }}>{fmtDate(h.ranAt)}</div>
                     <div style={{ fontSize: 10.5, color: 'var(--text-mute)', marginTop: 2 }}>
-                      {h.trigger === 'monitor' ? 'automático' : 'manual'} · {h.assetCount} ativos · {h.aliveCount} vivos
+                      {h.trigger === 'monitor' ? 'automático' : 'manual'} · {h.subdomainCount ?? h.assetCount} subdomínio(s) · {h.aliveCount} vivo(s)
                       {h.cveCount > 0 && <span style={{ color: 'var(--critical)', fontWeight: 700 }}> · {h.cveCount} CVE(s)</span>}
                     </div>
                   </div>
@@ -536,6 +568,7 @@ export default function DominioDetailPage() {
 
       {exposures.length > 0 && (
         <Collapsible title="Exposições" icon={<AlertTriangle size={12} />} count={exposures.length}
+          anchorId="sec-exposures" open={openSections.has('exposures')} onToggle={() => toggleSection('exposures')}
           meta={priority.length > 0 ? `${priority.length} acionável(is)` : 'todas informativas'}>
           {exposures.map((a) => <AssetRow key={a.id} a={a} />)}
         </Collapsible>
@@ -543,6 +576,7 @@ export default function DominioDetailPage() {
 
       {(ports.length > 0 || (domain.asnInfo && domain.asnInfo.length > 0)) && (
         <Collapsible title="Portas & serviços" icon={<Network size={12} />}
+          anchorId="sec-ports" open={openSections.has('ports')} onToggle={() => toggleSection('ports')}
           meta={`${ipGroups.length} IP(s)${riskyPortCount ? ` · ${riskyPortCount} porta(s) de risco` : ''}`}>
           {domain.asnInfo && domain.asnInfo.length > 0 && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
@@ -660,12 +694,26 @@ export default function DominioDetailPage() {
 
 // ── Peças locais ─────────────────────────────────────────────────────────────
 
-function HeroStat({ label, value, color = 'var(--text)' }: { label: string; value: React.ReactNode; color?: string }) {
-  return (
-    <div>
+// `onJump` transforma o número numa PORTA (Fase 3): clicar rola até a lista que
+// o sustenta e a abre. Sem onJump, é só um número (ex.: quando não há lista).
+function HeroStat({ label, value, color = 'var(--text)', onJump }: {
+  label: string; value: React.ReactNode; color?: string; onJump?: () => void
+}) {
+  const inner = (
+    <>
       <div style={{ fontSize: 19, fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1.1 }}>{value}</div>
-      <div style={{ fontSize: 9.5, color: 'var(--text-mute)', marginTop: 4, letterSpacing: '0.08em' }}>{label.toUpperCase()}</div>
-    </div>
+      <div style={{ fontSize: 9.5, color: 'var(--text-mute)', marginTop: 4, letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 4 }}>
+        {label.toUpperCase()}
+        {onJump && <ChevronRight size={10} style={{ opacity: 0.6 }} />}
+      </div>
+    </>
+  )
+  if (!onJump) return <div>{inner}</div>
+  return (
+    <button onClick={onJump} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}
+      title={`Ver ${label}`}>
+      {inner}
+    </button>
   )
 }
 
