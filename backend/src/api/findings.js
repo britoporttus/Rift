@@ -1,12 +1,13 @@
 const { Router } = require('express')
 const { requireAuth } = require('../auth')
-const Finding = require('../models/Finding')
-const Engagement = require('../models/Engagement')
-const ChatMessage = require('../models/ChatMessage')
+const { tenantScope } = require('../tenancy')
 const { cleanFindings } = require('../findings-count')
 
 const router = Router()
 router.use(requireAuth())
+// Frente 0: resolve o tenant do usuário e injeta req.db (models ligados ao
+// banco DELE). Sem tenant resolvido, nega — nunca segue para os models globais.
+router.use(tenantScope())
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 const REMEDIATION_STATES = ['open', 'fixed', 'regressed', 'accepted_risk']
@@ -72,10 +73,10 @@ router.get('/', async (req, res) => {
   if (severity)          filter.severity = severity
   if (remediationStatus) filter.remediationStatus = remediationStatus
 
-  const findings = await Finding.find(filter).lean()
+  const findings = await req.db.Finding.find(filter).lean()
   // Fonte única: exclui findings de engagements já removidos (órfãos) e deduplica
   // por (engagement, fingerprint). Sem isto o total global inflava (191 vs 44).
-  const existingIds = (await Engagement.find({}, { _id: 1 }).lean()).map((e) => e._id)
+  const existingIds = (await req.db.Engagement.find({}, { _id: 1 }).lean()).map((e) => e._id)
   const cleaned = sortBySeverity(cleanFindings(findings, existingIds)).map(toDto)
 
   if (!limit) return res.json(cleaned) // default: contrato antigo, sem paginação
@@ -90,7 +91,7 @@ router.patch('/:id/status', async (req, res) => {
   if (!REMEDIATION_STATES.includes(remediationStatus)) {
     return res.status(400).json({ error: `remediationStatus inválido (use: ${REMEDIATION_STATES.join(', ')})` })
   }
-  const finding = await Finding.findByIdAndUpdate(
+  const finding = await req.db.Finding.findByIdAndUpdate(
     req.params.id,
     { remediationStatus },
     { new: true }
@@ -108,11 +109,11 @@ const TRACE_WINDOW_MS = 30 * 60 * 1000
 const TRACE_TYPES = ['agent_action', 'agent_message']
 
 router.get('/:id/trace', async (req, res) => {
-  const finding = await Finding.findById(req.params.id).lean()
+  const finding = await req.db.Finding.findById(req.params.id).lean()
   if (!finding) return res.status(404).json({ error: 'finding não encontrado' })
 
   const at = finding.createdAt ? new Date(finding.createdAt) : new Date()
-  const messages = await ChatMessage.find({
+  const messages = await req.db.ChatMessage.find({
     engagementId: finding.engagementId,
     type: { $in: TRACE_TYPES },
     createdAt: { $gte: new Date(at.getTime() - TRACE_WINDOW_MS), $lte: at },
@@ -125,7 +126,7 @@ router.get('/:id/trace', async (req, res) => {
 })
 
 router.get('/:engagementId', async (req, res) => {
-  const findings = await Finding.find({ engagementId: req.params.engagementId }).lean()
+  const findings = await req.db.Finding.find({ engagementId: req.params.engagementId }).lean()
   // Dedup por fingerprint (mesma regra do total global) — re-scan não duplica.
   const cleaned = cleanFindings(findings, [req.params.engagementId])
   res.json(sortBySeverity(cleaned).map(toDto))

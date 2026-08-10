@@ -12,6 +12,11 @@ const DomainAsset = require('../src/models/DomainAsset')
 const LeakedCredential = require('../src/models/LeakedCredential')
 const LeakDomain = require('../src/models/LeakDomain')
 
+// Frente 0: os módulos recebem o `db` do tenant como 1º argumento. Este db falso
+// aponta para os MESMOS objetos de model que o teste monkeypatcha abaixo, então
+// os stubs continuam interceptando as chamadas.
+const db = { DomainAsset, LeakedCredential, LeakDomain }
+
 function dupKeyError() {
   const err = new Error('E11000 duplicate key error')
   err.code = 11000
@@ -27,7 +32,7 @@ test('upsertAsset: E11000 no upsert cai pra update puro (não perde a escrita)',
     return {}
   }
   try {
-    await upsertAsset('dom1', 'fp-x', { type: 'web', value: 'a.com' })
+    await upsertAsset(db, 'dom1', 'fp-x', { type: 'web', value: 'a.com' })
     assert.equal(calls.length, 2, 'deveria tentar o upsert e depois o retry como update')
     assert.equal(calls[0].opts.upsert, true)
     assert.equal(calls[1].opts, undefined, 'retry deveria ser update puro, sem upsert')
@@ -40,7 +45,7 @@ test('upsertAsset: erro que NÃO é duplicate key não tenta retry (comportament
   let calls = 0
   DomainAsset.findOneAndUpdate = async () => { calls++; throw new Error('erro genérico de conexão') }
   try {
-    await upsertAsset('dom1', 'fp-y', { type: 'web', value: 'b.com' })
+    await upsertAsset(db, 'dom1', 'fp-y', { type: 'web', value: 'b.com' })
     assert.equal(calls, 1, 'erro não-11000 não deveria disparar retry')
   } finally { DomainAsset.findOneAndUpdate = original }
 })
@@ -62,7 +67,7 @@ test('persistResults: E11000 no upsert de LeakedCredential cai pra update puro',
   LeakDomain.findOne = () => ({ lean: async () => null })
 
   try {
-    await persistResults('acme.com', {
+    await persistResults(db, 'acme.com', {
       breaches: [{ provider: 'dehashed', category: 'breach', account: 'a@acme.com' }],
       providerIds: ['dehashed'],
     })

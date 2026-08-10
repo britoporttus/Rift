@@ -7,6 +7,7 @@
 // (agent-runner.writeScopeYaml, que já prefere o context/{id}/scope.yaml aqui gerado).
 const fs = require('fs')
 const path = require('path')
+const { contextDir, clientDir } = require('./tenant-paths')
 const yaml = require('js-yaml')
 const { getFrameworkPath } = require('./frameworks')
 const { getDomainPack } = require('./domain-packs')
@@ -142,10 +143,10 @@ function buildStateDoc(eng, domainPackId) {
 
 // Escreve context/{id}/scope.yaml (+ dirs) e engagement-state.yaml (só se ainda
 // não existir — não sobrescreve estado de um run em andamento). Retorna o id.
-function writeEngagementScope(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH, domainPackId) {
+function writeEngagementScope(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH, domainPackId, tenantSlug) {
   const id     = deriveEngId(eng)
   const pack   = getDomainPack(domainPackId || eng.domainPackId)
-  const ctxDir = path.join(frameworkPath, 'context', id)
+  const ctxDir = contextDir(frameworkPath, tenantSlug, id)
   fs.mkdirSync(path.join(ctxDir, 'parsed'), { recursive: true })
   fs.mkdirSync(path.join(ctxDir, 'raw'), { recursive: true })
 
@@ -173,8 +174,8 @@ function writeEngagementScope(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH, domai
   const slug = eng.slug || ''
   const date = eng.date || ''
   if (slug && date) {
-    fs.mkdirSync(path.join(frameworkPath, 'clients', slug, date, 'findings'), { recursive: true })
-    fs.mkdirSync(path.join(frameworkPath, 'clients', slug, date, 'reports'), { recursive: true })
+    fs.mkdirSync(path.join(clientDir(frameworkPath, tenantSlug, slug, date), 'findings'), { recursive: true })
+    fs.mkdirSync(path.join(clientDir(frameworkPath, tenantSlug, slug, date), 'reports'), { recursive: true })
   }
   return id
 }
@@ -184,10 +185,10 @@ function writeEngagementScope(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH, domai
 // de re-execução do framework (skills/phase-state.md) vê recon/enum/vuln "concluídos"
 // e o agente PULA as fases — por isso cada re-run rendia MENOS. O scope.yaml
 // (autorização) e os findings em disco são preservados. Retorna o id ou null.
-function resetEngagementState(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH, domainPackId) {
+function resetEngagementState(eng, frameworkPath = DEFAULT_FRAMEWORK_PATH, domainPackId, tenantSlug) {
   const id = deriveEngId(eng)
   const pack = getDomainPack(domainPackId || eng.domainPackId)
-  const ctxDir = path.join(frameworkPath, 'context', id)
+  const ctxDir = contextDir(frameworkPath, tenantSlug, id)
   try {
     fs.mkdirSync(ctxDir, { recursive: true })
     // Reautoriza do zero: reescreve scope.yaml E engagement-state.yaml cientes do pack.

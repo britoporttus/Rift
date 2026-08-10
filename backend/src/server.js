@@ -11,7 +11,6 @@ const cookieParser = require('cookie-parser')
 const jwt = require('jsonwebtoken')
 
 const { connect } = require('./db')
-const ChatMessage = require('./models/ChatMessage')
 const { router: authRouter, JWT_SECRET, COOKIE_NAME, checkTokenVersion } = require('./auth')
 const { isAllowedOrigin } = require('./cors-policy')
 const { resolveWsToken } = require('./ws-auth')
@@ -28,6 +27,7 @@ const graphRouter = require('./api/graph')
 const internalNetworksRouter = require('./api/internal-networks')
 const asmScanner = require('./asm/scanner')
 const agentRunner = require('./agent-runner')
+const { resolveTenant, dbFor, forEachTenant, dbForSlug } = require('./tenancy')
 const findingsWatcher = require('./findings-watcher')
 const scheduler = require('./scheduler')
 const asmScheduler = require('./asm-scheduler')
@@ -41,8 +41,6 @@ const domainPacks = require('./domain-packs')
 const credVault = require('./cred-vault')
 const toolCheck = require('./tool-check')
 const jobs = require('./jobs')
-const ChatSession = require('./models/ChatSession')
-const Engagement = require('./models/Engagement')
 
 // Janela de contexto do modelo (tokens) — base do medidor de "memória".
 const CONTEXT_LIMIT = Number(process.env.CONTEXT_LIMIT) || 200000
@@ -118,8 +116,8 @@ function getSessionClients(engagementId, sessionId) {
 // A-STATE (1.3): persiste o estado E o motivo (stopReason) e transmite ambos.
 // O painel usa `reason` para SEMPRE mostrar por que parou/falhou — inclusive
 // após um refresh (o motivo vem persistido no engagement).
-async function setRunState(engagementId, state, reason = null) {
-  try { await updateEngagement(engagementId, { runState: state, stopReason: reason }) } catch {}
+async function setRunState(db, engagementId, state, reason = null) {
+  try { await updateEngagement(db, engagementId, { runState: state, stopReason: reason }) } catch {}
   broadcastEngagement(engagementId, { type: 'run_state', state, reason })
 }
 
@@ -216,10 +214,44 @@ httpServer.on('upgrade', async (req, socket, head) => {
       socket.destroy()
       return
     }
+
+    // ── Frente 0: POSSE do engagement ────────────────────────────────────────
+    // Antes daqui, o upgrade validava só "o JWT é válido?" e "veio um
+    // engagementId?" — nunca "este engagement é DESTE usuário?". Com dois
+    // tenants isso significa que um operador do cliente A, sabendo (ou
+    // adivinhando) o id de um engagement do cliente B, recebia o feed ao vivo
+    // do agente: comandos, saída de ferramenta, findings e checkpoints. É o
+    // vazamento mais grave da superfície, porque não passa por rota HTTP
+    // nenhuma e portanto não era coberto por nada.
+    //
+    // A checagem é uma leitura no banco DO TENANT do usuário: se o engagement
+    // não estiver lá, ele não é dele — não importa se existe em outro lugar.
+    const wsUser = { id: payload.sub, email: payload.email, role: payload.role, name: payload.name, tenantId: payload.tid || null }
+    let tenant
+    let db
+    try {
+      tenant = await resolveTenant(wsUser)
+      db = await dbFor(tenant)
+    } catch {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    const owned = await db.Engagement.exists({ _id: engagementId })
+    if (!owned) {
+      // 404, não 403: negar com "existe mas não é seu" já é um oráculo de
+      // existência entre tenants.
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
+      socket.destroy()
+      return
+    }
+
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws._user         = payload
       ws._engagementId = engagementId
       ws._sessionId    = sessionId
+      ws._tenant       = tenant
+      ws._db           = db
       wss.emit('connection', ws)
     })
   } catch {
@@ -230,6 +262,8 @@ httpServer.on('upgrade', async (req, socket, head) => {
 
 wss.on('connection', async (ws) => {
   const engId     = ws._engagementId
+  // Frente 0: models do banco DESTE tenant, resolvidos e validados no upgrade.
+  const db        = ws._db
   const sessionId = ws._sessionId || 'default'
   const user      = ws._user
 
@@ -245,14 +279,14 @@ wss.on('connection', async (ws) => {
 
   console.log(`[ws] ${user.email} → engagement ${engId} / session ${sessionId}`)
 
-  const engagement = await getEngagement(engId)
+  const engagement = await getEngagement(db, engId)
   if (engagement) {
     // Watcher por engagement: persiste findings, atualiza a contagem e transmite
     // ao vivo via notifier global (broadcast + count vivem dentro do watcher agora).
     // Observa os dirs de findings da VERSÃO escolhida (seletor A/B/C) — o watch
     // precisa casar com o cwd do run, senão os findings da versão não apareceriam.
     const fw = getFramework(engagement.frameworkId)
-    findingsWatcher.watch(engId, engagement.slug, engagement.date, engagement.name, fw, engagement.target)
+    findingsWatcher.watch(db, engId, engagement.slug, engagement.date, engagement.name, fw, engagement.target)
   }
 
   ws.send(JSON.stringify({ type: 'connection_ready', text: '🔗 Rift conectado.' }))
@@ -275,7 +309,7 @@ wss.on('connection', async (ws) => {
     const effectiveRun = liveRunning ? 'running' : (degraded ? 'stopped' : persistedRun)
     const reason = degraded ? 'interrupted' : (engagement.stopReason || null)
     if (degraded) {
-      updateEngagement(engId, { runState: 'stopped', stopReason: 'interrupted' }).catch(() => {})
+      updateEngagement(db, engId, { runState: 'stopped', stopReason: 'interrupted' }).catch(() => {})
     }
     ws.send(JSON.stringify({ type: 'run_state', state: effectiveRun, reason }))
   }
@@ -283,7 +317,7 @@ wss.on('connection', async (ws) => {
   // Reidrata o "Fluxo do run" (Jobs): manda o job mais recente a quem (re)conectou.
   // Sem isto, após uma queda de WS o pipeline de etapas congela — não há job_update no
   // ar quando nada muda de fase. listJobs ordena por updatedAt → [0] é o mais recente.
-  jobs.listJobs(engId, 1).then((list) => {
+  jobs.listJobs(db, engId, 1).then((list) => {
     if (list && list[0] && ws.readyState === 1) {
       ws.send(JSON.stringify({ type: 'job_update', job: list[0] }))
     }
@@ -291,7 +325,7 @@ wss.on('connection', async (ws) => {
 
   // Reidrata o medidor de contexto com o último valor conhecido desta sessão.
   if (sessionId !== 'default') {
-    ChatSession.findById(sessionId).lean()
+    db.ChatSession.findById(sessionId).lean()
       .then((s) => {
         if (s?.contextTokens && ws.readyState === 1) {
           ws.send(JSON.stringify({
@@ -337,12 +371,12 @@ const SKIP_TEXTS = new Set(['🔗 Rift conectado.', '⏹ Agente parado pelo oper
 async function maybeAutoNameSession(sessionId, text) {
   if (!sessionId || sessionId === 'default') return
   try {
-    const session = await ChatSession.findById(sessionId).lean()
+    const session = await db.ChatSession.findById(sessionId).lean()
     if (!session || session.name !== 'Chat') return // already has a custom name
 
     // Generate short name from message content
     const name = autoNameFromText(text)
-    if (name) await ChatSession.findByIdAndUpdate(sessionId, { name })
+    if (name) await db.ChatSession.findByIdAndUpdate(sessionId, { name })
   } catch {}
 }
 
@@ -375,13 +409,13 @@ function autoNameFromText(text) {
 function saveMsg(engId, sessionId, event) {
   if (!SAVE_TYPES.has(event.type)) return
   if (event.type === 'agent_message' && SKIP_TEXTS.has(event.text)) return
-  ChatMessage.create({ engagementId: engId, sessionId: sessionId || 'default', type: event.type, payload: event }).catch(() => {})
+  db.ChatMessage.create({ engagementId: engId, sessionId: sessionId || 'default', type: event.type, payload: event }).catch(() => {})
 }
 
 // Load recent conversation history for a specific session (last N messages)
 async function loadRecentHistory(engId, sessionId = 'default', limit = 8) {
   try {
-    const msgs = await ChatMessage.find({ engagementId: engId, sessionId })
+    const msgs = await db.ChatMessage.find({ engagementId: engId, sessionId })
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean()
@@ -450,7 +484,7 @@ async function handleMessage(msg, engId, sessionId, user) {
     // Auto-name session from first message + update lastMessageAt
     maybeAutoNameSession(sessionId, text).catch(() => {})
     if (sessionId !== 'default') {
-      ChatSession.findByIdAndUpdate(sessionId, { lastMessageAt: new Date() }).catch(() => {})
+      db.ChatSession.findByIdAndUpdate(sessionId, { lastMessageAt: new Date() }).catch(() => {})
     }
 
     if (agentRunner.isRunning(runnerKey)) {
@@ -461,7 +495,7 @@ async function handleMessage(msg, engId, sessionId, user) {
         text: '⏳ O agente ainda está processando o turno atual. Aguarde ele finalizar para enviar uma nova mensagem.',
       })
     } else {
-      const eng = await getEngagement(engId)
+      const eng = await getEngagement(db, engId)
       const slug = eng?.slug || eng?.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || ''
       const date = eng?.date || ''
       const engId2 = slug && date ? `${slug}-${date.replace(/-/g, '')}` : ''
@@ -474,13 +508,13 @@ async function handleMessage(msg, engId, sessionId, user) {
           type: 'agent_message',
           text: `⚠️ A versão do agente selecionada ("${framework.label}") não está disponível no servidor (pasta ausente). Escolha outra versão no seletor da tela do engagement.`,
         })
-        setRunState(engId, 'stopped', 'error')
+        setRunState(db, engId, 'stopped', 'error')
         return
       }
       // Re-aponta o watcher para os dirs DESTA versão caso o operador tenha trocado
       // a versão depois de conectar (idempotente se já estava correto).
       if (eng) {
-        try { findingsWatcher.watch(engId, eng.slug, eng.date, eng.name, framework, eng.target) } catch {}
+        try { findingsWatcher.watch(db, engId, eng.slug, eng.date, eng.name, framework, eng.target) } catch {}
       }
 
       // Load recent history for THIS session so the agent has conversational continuity.
@@ -536,21 +570,21 @@ async function handleMessage(msg, engId, sessionId, user) {
       const isAuthPack = domainPacks.needsCredentials(domainPack)
       // Chave por-ENGAGEMENT (mesma do POST /credentials) — a credencial é a "do próximo
       // run autenticado deste engagement", independente da sessão de chat.
-      const packVaultKey = `cred:${engId}`
+      const packVaultKey = `cred:${ws._tenant?.slug || 'no-tenant'}:${engId}`
       if (isAuthPack) {
         if (domainPacks.requiresRunner(domainPack)) {
           broadcastSession(engId, sessionId, { type: 'agent_message', text: `⚠️ O domínio "${domainPack.label}" exige um runner interno na rede do alvo (ainda não disponível). Azure/nuvem rodam da VPS; AD/SAP dependem do runner.` })
-          setRunState(engId, 'stopped', 'error'); return
+          setRunState(db, engId, 'stopped', 'error'); return
         }
         const creds = credVault.get(packVaultKey)
         if (!creds) {
           broadcastSession(engId, sessionId, { type: 'agent_message', text: `🔑 O domínio "${domainPack.label}" é autenticado. Forneça as credenciais antes de iniciar — elas ficam só em memória, por este run.` })
-          setRunState(engId, 'stopped', 'error'); return
+          setRunState(db, engId, 'stopped', 'error'); return
         }
         const missing = toolCheck.missingTools(domainPacks.requiredTools(domainPack))
         if (missing.length) {
           broadcastSession(engId, sessionId, { type: 'agent_message', text: `🛠️ Ferramentas ausentes no servidor para "${domainPack.label}": ${missing.join(', ')}. Instale-as e tente novamente.` })
-          setRunState(engId, 'stopped', 'error'); return
+          setRunState(db, engId, 'stopped', 'error'); return
         }
         credentialEnv = domainPacks.buildCredentialEnv(domainPack, creds)
       }
@@ -603,12 +637,12 @@ ${fwGuidance}
       if (msg.resetSession === true) {
         agentRunner.clearSession(runnerKey)
         if (sessionId !== 'default') {
-          await ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
+          await db.ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
         }
         // CRÍTICO: resetar também o engagement-state.yaml do framework. Sem isto, a
         // guarda de re-execução (skills/phase-state.md) vê recon/enum/vuln "concluídos"
         // e o agente PULA as fases → cada re-run rendia MENOS. scope + findings ficam.
-        if (eng) { try { resetEngagementState(eng, framework.path, domainPack.id) } catch (e) { console.warn('[reset] state:', e.message) } }
+        if (eng) { try { resetEngagementState(eng, framework.path, domainPack.id, ws._tenant?.slug) } catch (e) { console.warn('[reset] state:', e.message) } }
         broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
         broadcastSession(engId, sessionId, { type: 'phase_update', phase: 'recon', progress: 0 })
       }
@@ -616,7 +650,7 @@ ${fwGuidance}
       // Continuidade durável: recupera o claude session_id salvo no banco
       // (sobrevive a restart do backend). 'default' não tem doc — fica só em memória.
       const persisted = sessionId !== 'default'
-        ? await ChatSession.findById(sessionId).lean().catch(() => null)
+        ? await db.ChatSession.findById(sessionId).lean().catch(() => null)
         : null
       const resumeSessionId = persisted?.claudeSessionId || null
 
@@ -633,24 +667,24 @@ ${fwGuidance}
       const isReport = /\/pentest-report\b/.test(text)
       const budget = Number(eng?.scope?.spendingUsd)
       if (budget > 0 && !isCompact && !isReport) {
-        const spent = await sumUsageUsd(engId).catch(() => 0)
+        const spent = await sumUsageUsd(db, engId).catch(() => 0)
         if (spent >= budget) {
           broadcastSession(engId, sessionId, {
             type: 'agent_message',
             text: `🛑 Orçamento do engagement atingido: US$ ${spent.toFixed(2)} gastos de um teto de US$ ${budget.toFixed(2)} (definido no intake). Para continuar, aumente o "Gasto máximo" do engagement. Relatório (/pentest-report) e compactação seguem liberados.`,
           })
-          setRunState(engId, 'stopped', 'budget')
+          setRunState(db, engId, 'stopped', 'budget')
           return
         }
       }
 
       const persistClaudeSession = sessionId !== 'default'
-        ? (cid) => ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: cid }).catch(() => {})
+        ? (cid) => db.ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: cid }).catch(() => {})
         : undefined
 
       // A-STATE: marca o run como ativo (persiste + transmite run_state='running').
       // O painel de Execução espelha isto — trava o "Iniciar" e mostra "Parar".
-      setRunState(engId, 'running')
+      setRunState(db, engId, 'running')
 
       // Item 4: acompanha o maior % de contexto visto neste turno → decide auto-compact.
       let lastContextPercent = 0
@@ -660,7 +694,7 @@ ${fwGuidance}
       let jobId = null
       try {
         // job_update é transmitido pelo notifier global (jobs.setNotifier no boot).
-        jobId = await jobs.startJob({ engagementId: engId, sessionId, frameworkId: framework.id, domainPackId: domainPack.id })
+        jobId = await jobs.startJob(db, { engagementId: engId, sessionId, frameworkId: framework.id, domainPackId: domainPack.id })
       } catch (e) { console.warn('[jobs] start falhou:', e.message) }
 
       // AUTO-REPORT: dispara um turno EXTRA de geração de relatório ao fim de um run
@@ -672,20 +706,22 @@ ${fwGuidance}
       function triggerAutoReport() {
         const reportPrompt = `Gere agora o RELATÓRIO FINAL deste engagement (resumo executivo + relatório técnico) a partir dos findings já salvos em clients/${slug}/${date}/findings/. Salve os arquivos do relatório em clients/${slug}/${date}/reports/. Use a rotina de relatório do framework/pack (ex.: /pentest-report). NÃO execute novos testes nem re-scan — apenas consolide os findings existentes. Responda em pt-BR e informe os caminhos gerados ao terminar.`
         broadcastSession(engId, sessionId, { type: 'agent_message', text: '📝 Run concluído — gerando o relatório final automaticamente…' })
-        setRunState(engId, 'running')
+        setRunState(db, engId, 'running')
         agentRunner.run(
           runnerKey, engId2, reportPrompt,
           (event) => broadcastSession(engId, sessionId, event),
-          (usd, tokens) => appendUsage({ usd, tokens, engagementId: engId, engagementName: eng?.name, userId: user.id, userName: user.name, userEmail: user.email, ts: new Date() }).catch(() => {}),
+          (usd, tokens) => appendUsage(db, { usd, tokens, engagementId: engId, engagementName: eng?.name, userId: user.id, userName: user.name, userEmail: user.email, ts: new Date() }).catch(() => {}),
           (event) => saveMsg(engId, sessionId, event),
           eng, user,
           {
             frameworkPath: framework.path,
+            // Frente 0: o runner usa isto para o contexto do agente em disco.
+            tenantSlug: ws._tenant?.slug,
             systemContext: '',
             allowAggressive: isAdminUser,
             agentRole: domainPacks.needsCredentials(domainPack) ? 'authenticated' : 'blackbox',
             onClaudeSession: persistClaudeSession,
-            onClose: (c) => setRunState(engId, c === 0 ? 'completed' : 'stopped'),
+            onClose: (c) => setRunState(db, engId, c === 0 ? 'completed' : 'stopped'),
           },
         )
       }
@@ -695,7 +731,7 @@ ${fwGuidance}
       // passávamos um Set capturado no início, que morria na 1ª reconexão.
       agentRunner.run(
         runnerKey, engId2, text, (event) => broadcastSession(engId, sessionId, event),
-        (usd, tokens) => appendUsage({
+        (usd, tokens) => appendUsage(db, {
           usd, tokens,
           engagementId:   engId,
           engagementName: eng?.name,
@@ -710,12 +746,12 @@ ${fwGuidance}
           if (event.type === 'context_usage') {
             if (typeof event.percent === 'number') lastContextPercent = Math.max(lastContextPercent, event.percent)
             if (sessionId !== 'default') {
-              ChatSession.findByIdAndUpdate(sessionId, { contextTokens: event.tokens }).catch(() => {})
+              db.ChatSession.findByIdAndUpdate(sessionId, { contextTokens: event.tokens }).catch(() => {})
             }
           }
           // Jobs: a fase derivada da atividade real avança a etapa do fluxo (broadcast via notifier).
           if (event.type === 'phase_update' && jobId) {
-            jobs.advanceStep(jobId, event.phase).catch(() => {})
+            jobs.advanceStep(db, jobId, event.phase).catch(() => {})
           }
         },
         eng,
@@ -757,15 +793,16 @@ ${fwGuidance}
               timedOut:           info?.timedOut,
               phasesReached:      info?.phasesReached,
             })
-            setRunState(engId, runState, stopReason)
+            setRunState(db, engId, runState, stopReason)
             // Jobs: fecha o fluxo com o desfecho real + totais (findings/custo).
             if (jobId) {
               const [fc, spent] = await Promise.all([
-                countFindings(engId).catch(() => undefined),
-                sumUsageUsd(engId).catch(() => undefined),
+                countFindings(db, engId).catch(() => undefined),
+                sumUsageUsd(db, engId).catch(() => undefined),
               ])
               const jobStatus = ['completed', 'stopped', 'failed'].includes(runState) ? runState : 'stopped'
               jobs.closeJob(
+                db,
                 jobId,
                 { status: jobStatus, reason: stopReason, findingsCount: fc, spentUsd: spent, phasesReached: info?.phasesReached || [] },
               ).catch((e) => console.warn('[jobs] close falhou:', e.message))
@@ -775,7 +812,7 @@ ${fwGuidance}
             if (isCompact) {
               agentRunner.clearSession(runnerKey)
               if (sessionId !== 'default') {
-                ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
+                db.ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
               }
               broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
               broadcastSession(engId, sessionId, { type: 'agent_message', text: '🧹 Contexto compactado. O estado do engagement (fase, findings, escopo) está salvo em disco — a próxima mensagem inicia uma sessão enxuta.' })
@@ -790,7 +827,7 @@ ${fwGuidance}
               // mesma mecânica do /rift-compact, só que disparada por limite de contexto.
               agentRunner.clearSession(runnerKey)
               if (sessionId !== 'default') {
-                ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
+                db.ChatSession.findByIdAndUpdate(sessionId, { claudeSessionId: null, contextTokens: 0 }).catch(() => {})
               }
               broadcastSession(engId, sessionId, { type: 'context_usage', tokens: 0, limit: CONTEXT_LIMIT, percent: 0 })
               broadcastSession(engId, sessionId, {
@@ -804,7 +841,7 @@ ${fwGuidance}
             // (Iniciar/Continuar/Começar do zero); nunca para /pentest-report (evita loop)
             // nem para /rift-compact. Se o agente já gerou um relatório, apenas avisa.
             if (autoReport && runState === 'completed' && !isReport && !isCompact && slug && date) {
-              const reportsDir = require('path').join(framework.path, 'clients', slug, date, 'reports')
+              const reportsDir = require('path').join(require('./tenant-paths').readClientDir(framework.path, ws._tenant?.slug, slug, date), 'reports')
               let hasReport = false
               try {
                 const fsm = require('fs')
@@ -830,7 +867,7 @@ ${fwGuidance}
     agentRunner.stop(runnerKey)
     // A-STATE-3/5: grava 'stopped'/operador já (não espera o processo morrer) → o
     // painel troca "Parar" por "Continuar / Começar do zero" na hora. onClose reforça.
-    setRunState(engId, 'stopped', 'operator')
+    setRunState(db, engId, 'stopped', 'operator')
     broadcastSession(engId, sessionId, { type: 'agent_message', text: '⏹ Agente parado pelo operador.' })
   }
 }
@@ -842,9 +879,14 @@ connect()
     // A-STATE-4: no boot, nenhum processo claude sobrevive (stopAll matou tudo no
     // shutdown anterior). Qualquer engagement gravado como 'running' é órfão →
     // reconcilia para 'stopped' para o painel não "mentir" que ainda roda.
+    // Frente 0: fan-out por tenant. Um `updateMany` global reconciliaria só o
+    // banco compartilhado e deixaria os engagements de cada tenant mentindo
+    // "running" para sempre.
     try {
-      const r = await Engagement.updateMany({ runState: 'running' }, { $set: { runState: 'stopped', stopReason: 'interrupted' } })
-      if (r.modifiedCount) console.log(`[rift] reconciliados ${r.modifiedCount} engagement(s) 'running' → 'stopped' no boot`)
+      const results = await forEachTenant(async ({ db }) =>
+        (await db.Engagement.updateMany({ runState: 'running' }, { $set: { runState: 'stopped', stopReason: 'interrupted' } })).modifiedCount || 0)
+      const total = results.filter((r) => r.ok).reduce((n, r) => n + r.value, 0)
+      if (total) console.log(`[rift] reconciliados ${total} engagement(s) 'running' → 'stopped' no boot`)
     } catch (err) {
       console.warn('[rift] reconcile de runState falhou:', err?.message)
     }
@@ -875,6 +917,9 @@ connect()
     }
     httpServer.listen(PORT, () => {
       console.log(`[rift] backend em http://localhost:${PORT}`)
+      // P0-8: torna visível no log quando o agente está rodando com credencial
+      // compartilhada (assinatura pessoal) em vez de chave dedicada ao deployment.
+      agentRunner.warnIfSharedCredential()
     })
     scheduler.start()
     // Worker de Jobs: o único a despachar runs agendados/headless (lê a fila a cada ~2s).

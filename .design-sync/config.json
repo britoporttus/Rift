@@ -1,0 +1,16 @@
+{
+  "projectId": "753398c5-7585-4add-a118-087a7f739ace",
+  "shape": "package",
+  "pkg": "@rift/frontend",
+  "globalName": "RiftDS",
+  "tsconfig": "tsconfig.json",
+  "componentSrcMap": {
+    "Donut": "components/ui/charts/Donut.tsx",
+    "HBars": "components/ui/charts/HBars.tsx",
+    "ScoreSlider": "components/ui/charts/ScoreSlider.tsx",
+    "SI": "components/ui/SI.tsx"
+  },
+  "cssEntry": "app/globals.css",
+  "tokensGlob": "app/globals.css",
+  "readmeHeader": ".design-sync/conventions.md"
+}

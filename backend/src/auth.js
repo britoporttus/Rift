@@ -78,7 +78,11 @@ function signToken(user) {
     // de role/reset de senha, sem esperar a expiração de 12h. `|| 0` cobre users
     // criados antes do campo existir (default do schema já é 0, mas o objeto
     // passado aqui pode ser um .lean()/toObject() de um doc antigo em cache).
-    { sub: user._id || user.id, email: user.email, role: user.role, name: user.name, tv: user.tokenVersion || 0 },
+    // tid: tenant do usuário (Frente 0). Vai no token para o upgrade do
+    // WebSocket poder resolver o tenant sem uma ida ao banco por conexão. É só
+    // uma dica de performance — as rotas HTTP resolvem pelo `User` corrente,
+    // e o tenant no token é sempre reconferido contra o registry.
+    { sub: user._id || user.id, email: user.email, role: user.role, name: user.name, tid: user.tenantId || null, tv: user.tokenVersion || 0 },
     JWT_SECRET,
     { expiresIn: '12h' }
   )
@@ -143,7 +147,7 @@ function requireAuth(roles = []) {
 
       req.user = payload.user
         ? payload.user
-        : { id: payload.sub, email: payload.email, role: payload.role, name: payload.name }
+        : { id: payload.sub, email: payload.email, role: payload.role, name: payload.name, tenantId: payload.tid || null }
 
       if (roles.length > 0 && !roles.includes(req.user.role)) {
         return res.status(403).json({ error: 'Acesso negado' })

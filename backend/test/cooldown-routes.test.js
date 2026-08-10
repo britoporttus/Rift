@@ -9,6 +9,9 @@ const domainsRouter = require('../src/api/domains')
 const LeakDomain = require('../src/models/LeakDomain')
 const Domain = require('../src/models/Domain')
 
+// Frente 0: rotas usam req.db; db falso apontando para os models monkeypatchados.
+const db = { LeakDomain, Domain }
+
 function fakeRes() {
   const res = { statusCode: null, body: null, headers: {} }
   res.status = (code) => { res.statusCode = code; return res }
@@ -27,7 +30,7 @@ test('POST /api/leaks/search: 429 quando busca recente (cooldown ativo)', async 
   LeakDomain.findOne = () => ({ select: () => ({ lean: async () => ({ lastSearchAt: new Date() }) }) })
   try {
     const handle = findHandler(leaksRouter, 'post', '/search')
-    const req = { body: { domain: 'fornecedor.com' }, user: { role: 'user' } }
+    const req = { db, body: { domain: 'fornecedor.com' }, user: { role: 'user' } }
     const res = fakeRes()
     await handle(req, res, (err) => { throw err })
     assert.equal(res.statusCode, 429)
@@ -42,10 +45,10 @@ test('POST /api/leaks/search: 429 quando busca recente (cooldown ativo)', async 
 
 test('POST /api/domains/:id/scan: 429 quando scan recente (cooldown ativo)', async () => {
   const original = Domain.findById
-  Domain.findById = async () => ({ _id: 'd1', scanState: 'done', lastScanAt: new Date(), authorized: false })
+  Domain.findById = async () => ({ _id: 'd1', scanState: 'done', lastScanAt: new Date(), authorized: false, verification: { status: 'verified' } })
   try {
     const handle = findHandler(domainsRouter, 'post', '/:id/scan')
-    const req = { params: { id: 'd1' }, body: {}, user: { role: 'user' } }
+    const req = { db, params: { id: 'd1' }, body: {}, user: { role: 'user' } }
     const res = fakeRes()
     await handle(req, res, (err) => { throw err })
     assert.equal(res.statusCode, 429)
@@ -55,10 +58,10 @@ test('POST /api/domains/:id/scan: 429 quando scan recente (cooldown ativo)', asy
 
 test('POST /api/domains/:id/scan: scanState=scanning continua barrado com 409 (não regride pro 429)', async () => {
   const original = Domain.findById
-  Domain.findById = async () => ({ _id: 'd1', scanState: 'scanning', lastScanAt: new Date(), authorized: false })
+  Domain.findById = async () => ({ _id: 'd1', scanState: 'scanning', lastScanAt: new Date(), authorized: false, verification: { status: 'verified' } })
   try {
     const handle = findHandler(domainsRouter, 'post', '/:id/scan')
-    const req = { params: { id: 'd1' }, body: {}, user: { role: 'user' } }
+    const req = { db, params: { id: 'd1' }, body: {}, user: { role: 'user' } }
     const res = fakeRes()
     await handle(req, res, (err) => { throw err })
     assert.equal(res.statusCode, 409)

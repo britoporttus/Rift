@@ -2,9 +2,7 @@ const { Router } = require('express')
 const os = require('os')
 const { execSync } = require('child_process')
 const { requireAuth } = require('../auth')
-const { readUsage } = require('../store')
 const { computeSkuUsage } = require('../sku')
-const Usage = require('../models/Usage')
 
 const router = Router()
 router.use(requireAuth(['admin']))
@@ -38,11 +36,41 @@ router.get('/metrics', (_req, res) => {
   })
 })
 
+// Frente 0: o painel admin é a ÚNICA superfície que legitimamente agrega entre
+// tenants (é a visão da operação, não a de um cliente). Ele já está atrás de
+// `requireAuth(['admin'])`, e admin é papel interno — `client` nunca chega aqui.
+//
+// A agregação é um fan-out por tenant, não uma query global: mesmo aqui não
+// existe mais "uma coleção com tudo". O custo é N queries por request; aceitável
+// para um painel de operação, e o caminho de escala é o espelho de Usage no
+// control plane (decisão de 2026-08-01), não voltar à coleção compartilhada.
+async function usageAcrossTenants() {
+  const { forEachTenant } = require('../tenancy')
+  const results = await forEachTenant(({ tenant, db }) =>
+    db.Usage.find().sort({ ts: -1 }).lean().then((rows) => rows.map((r) => ({ ...r, tenantSlug: tenant.slug }))))
+  return results.filter((r) => r.ok).flatMap((r) => r.value || [])
+}
+
+// `Usage.ts` é `Date` no schema, mas registros antigos gravaram string. O
+// agrupamento por dia fazia `(entry.ts || '').slice(0,10)` — que estoura com
+// `TypeError: slice is not a function` assim que encontra um Date de verdade.
+// Bug pré-existente que só apareceu agora porque o fan-out garante que a rota
+// realmente lê registros. Normaliza os dois formatos para 'YYYY-MM-DD'.
+function dayOf(entry) {
+  const v = entry?.ts ?? entry?.date
+  if (!v) return null
+  if (v instanceof Date) return isNaN(v) ? null : v.toISOString().slice(0, 10)
+  const s = String(v)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  const d = new Date(s)
+  return isNaN(d) ? null : d.toISOString().slice(0, 10)
+}
+
 router.get('/usage', async (_req, res) => {
-  const all = await readUsage()
+  const all = await usageAcrossTenants()
   const byDay = {}
   for (const entry of all) {
-    const day = (entry.ts || entry.date || '').slice(0, 10)
+    const day = dayOf(entry)
     if (!day) continue
     if (!byDay[day]) byDay[day] = { date: day, usd: 0, tokens: 0 }
     byDay[day].usd += entry.usd || 0
@@ -55,7 +83,7 @@ router.get('/usage', async (_req, res) => {
 // operador declarou o teto do plano em SKU_LIMIT_USD. Sem limite → available:false
 // (a UI mostra "indisponível — integração não configurada", sem simular).
 router.get('/sku', async (_req, res) => {
-  const all = await readUsage()
+  const all = await usageAcrossTenants()
   const spentUsd    = all.reduce((s, e) => s + (e.usd || 0), 0)
   const tokensTotal = all.reduce((s, e) => s + (e.tokens || 0), 0)
   const limitUsd    = Number(process.env.SKU_LIMIT_USD) || null
@@ -64,7 +92,7 @@ router.get('/sku', async (_req, res) => {
 })
 
 router.get('/usage/by-user', async (_req, res) => {
-  const all = await Usage.find({ userId: { $exists: true } }).sort({ ts: -1 }).lean()
+  const all = (await usageAcrossTenants()).filter((e) => e.userId)
 
   // group by user → day → engagement
   const byUser = {}
@@ -77,7 +105,7 @@ router.get('/usage/by-user', async (_req, res) => {
     u.totalUsd    += e.usd    || 0
     u.totalTokens += e.tokens || 0
 
-    const day = (e.ts || '').toString().slice(0, 10)
+    const day = dayOf(e)
     if (!u.days[day]) u.days[day] = { date: day, usd: 0, tokens: 0, engagements: {} }
     const d = u.days[day]
     d.usd    += e.usd    || 0

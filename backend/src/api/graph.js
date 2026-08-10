@@ -1,11 +1,6 @@
 const { Router } = require('express')
 const { requireAuth } = require('../auth')
-const Domain = require('../models/Domain')
-const DomainAsset = require('../models/DomainAsset')
-const Finding = require('../models/Finding')
-const LeakedCredential = require('../models/LeakedCredential')
-const LeakDomain = require('../models/LeakDomain')
-const Engagement = require('../models/Engagement')
+const { tenantScope } = require('../tenancy')
 const { createBuilder, addDomainBundle, normHost, hostMatchesDomain } = require('../graph/build')
 
 // Módulo Vazamentos "em construção" (reforma de UX 2026-07): por padrão o Mapa não
@@ -18,6 +13,9 @@ const LEAKS_ENABLED = process.env.RIFT_LEAKS_ENABLED === '1'
 //   GET /api/graph            → grafo GLOBAL (todos os domínios + hubs compartilhados)
 const router = Router()
 router.use(requireAuth())
+// Frente 0: resolve o tenant do usuário e injeta req.db (models ligados ao
+// banco DELE). Sem tenant resolvido, nega — nunca segue para os models globais.
+router.use(tenantScope())
 
 // P1-18 (auditoria 2026-07-20): o grafo GLOBAL fazia `find()` sem `.limit()` em
 // 6 coleções A CADA requisição, sem cache — o custo de MONTAR o payload cresce
@@ -65,20 +63,20 @@ function findingsForDomain(domainStr, engagements, findingsByEng) {
 
 // ── Grafo de UM domínio ─────────────────────────────────────────────────────────
 router.get('/domain/:id', async (req, res) => {
-  const domain = await Domain.findById(req.params.id).lean()
+  const domain = await req.db.Domain.findById(req.params.id).lean()
   if (!domain) return res.status(404).json({ error: 'not found' })
 
   const [assets, leaks, leakDomain, engagements] = await Promise.all([
-    DomainAsset.find({ domainId: domain._id }).lean(),
-    LeakedCredential.find({ domain: domain.domain }).lean(),
-    LeakDomain.findOne({ domain: domain.domain }).lean(),
-    Engagement.find({}, { _id: 1, target: 1 }).lean(),
+    req.db.DomainAsset.find({ domainId: domain._id }).lean(),
+    req.db.LeakedCredential.find({ domain: domain.domain }).lean(),
+    req.db.LeakDomain.findOne({ domain: domain.domain }).lean(),
+    req.db.Engagement.find({}, { _id: 1, target: 1 }).lean(),
   ])
 
   const engIds = engagements
     .filter((e) => hostMatchesDomain(normHost(e.target), domain.domain))
     .map((e) => e._id)
-  const findings = engIds.length ? await Finding.find({ engagementId: { $in: engIds } }).lean() : []
+  const findings = engIds.length ? await req.db.Finding.find({ engagementId: { $in: engIds } }).lean() : []
 
   const b = createBuilder()
   addDomainBundle(b, {
@@ -97,12 +95,12 @@ router.get('/', async (req, res) => {
   if (cached && req.query.fresh !== '1') return res.json(cached)
 
   const [domains, assets, leaks, leakDomains, engagements, findings] = await Promise.all([
-    Domain.find().lean(),
-    DomainAsset.find().lean(),
-    LeakedCredential.find().lean(),
-    LeakDomain.find({}, { domain: 1, agg: 1 }).lean(),
-    Engagement.find({}, { _id: 1, target: 1 }).lean(),
-    Finding.find().lean(),
+    req.db.Domain.find().lean(),
+    req.db.DomainAsset.find().lean(),
+    req.db.LeakedCredential.find().lean(),
+    req.db.LeakDomain.find({}, { domain: 1, agg: 1 }).lean(),
+    req.db.Engagement.find({}, { _id: 1, target: 1 }).lean(),
+    req.db.Finding.find().lean(),
   ])
 
   const assetsByDomainId = groupBy(assets, 'domainId')

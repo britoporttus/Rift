@@ -1,11 +1,9 @@
 const { Router } = require('express')
 const { v4: uuid } = require('uuid')
 const { requireAuth } = require('../auth')
+const { tenantScope } = require('../tenancy')
+const { planAllows, planFor } = require('../plans')
 const { readEngagements, getEngagement, createEngagement, updateEngagement, deleteEngagement } = require('../store')
-const ChatMessage = require('../models/ChatMessage')
-const ChatSession = require('../models/ChatSession')
-const Finding = require('../models/Finding')
-const Usage = require('../models/Usage')
 const findingsWatcher = require('../findings-watcher')
 const scheduler = require('../scheduler')
 const { writeEngagementScope } = require('../scope')
@@ -16,6 +14,9 @@ const jobs = require('../jobs')
 
 const router = Router()
 router.use(requireAuth())
+// Frente 0: resolve o tenant do usuário e injeta req.db (models ligados ao
+// banco DELE). Sem tenant resolvido, nega — nunca segue para os models globais.
+router.use(tenantScope())
 
 function toDto(e) {
   return { ...e, id: e._id }
@@ -24,18 +25,18 @@ function toDto(e) {
 // Custo ACUMULADO do engagement = soma dos registros de Usage (cada turno do agente
 // grava um). O custo mostrado na UI vem daqui (persiste entre reloads); os eventos
 // cost_update do WS só somam o turno em andamento por cima deste baseline.
-async function costFor(engagementId) {
-  const [row] = await Usage.aggregate([
+async function costFor(db, engagementId) {
+  const [row] = await db.Usage.aggregate([
     { $match: { engagementId } },
     { $group: { _id: null, usd: { $sum: '$usd' }, tokens: { $sum: '$tokens' } } },
   ])
   return { costUsd: row?.usd || 0, tokensTotal: row?.tokens || 0 }
 }
 
-router.get('/', async (_req, res) => {
-  const engs = await readEngagements()
+router.get('/', async (req, res) => {
+  const engs = await readEngagements(req.db)
   // Uma agregação só, agrupada por engagement (evita N queries).
-  const rows = await Usage.aggregate([
+  const rows = await req.db.Usage.aggregate([
     { $group: { _id: '$engagementId', usd: { $sum: '$usd' }, tokens: { $sum: '$tokens' } } },
   ])
   const byId = Object.fromEntries(rows.map((r) => [String(r._id), r]))
@@ -46,13 +47,21 @@ router.get('/', async (_req, res) => {
 })
 
 router.get('/:id', async (req, res) => {
-  const e = await getEngagement(req.params.id)
+  const e = await getEngagement(req.db, req.params.id)
   if (!e) return res.status(404).json({ error: 'not found' })
-  const cost = await costFor(req.params.id)
+  const cost = await costFor(req.db, req.params.id)
   res.json({ ...toDto(e), ...cost })
 })
 
 router.post('/', async (req, res) => {
+  // O agente de IA é o que o plano cobra (ver src/plans.js): o free monitora a
+  // superfície, mas não dispara pentest.
+  if (!planAllows(req.tenant, 'canRunPentest')) {
+    return res.status(403).json({
+      error: `O plano ${planFor(req.tenant).label} não inclui pentest conduzido pelo agente. O monitoramento de superfície continua ativo.`,
+      code: 'PLAN_NO_PENTEST',
+    })
+  }
   const { name, target, scope, domainPackId } = req.body ?? {}
   // A-INTAKE: nome é opcional (default = alvo). Só o alvo é obrigatório — mesma
   // filosofia da skill pentest-intake ("só o alvo é obrigatório, o resto tem default").
@@ -64,7 +73,7 @@ router.post('/', async (req, res) => {
   const pack = isRunnableDomainPackId(domainPackId) ? domainPackId : 'web'
 
   const now = new Date()
-  const engagement = await createEngagement({
+  const engagement = await createEngagement(req.db, {
     _id: uuid(),
     name: finalName,
     target: String(target).trim(),
@@ -86,7 +95,7 @@ router.post('/', async (req, res) => {
 
   // A-INTAKE-3: materializa scope.yaml + engagement-state.yaml (idle) no framework.
   // Best-effort: uma falha de FS não deve impedir a criação do engagement no Mongo.
-  try { writeEngagementScope(engagement, getFrameworkPath(engagement.frameworkId), pack) } catch (err) {
+  try { writeEngagementScope(engagement, getFrameworkPath(engagement.frameworkId), pack, req.tenant?.slug) } catch (err) {
     console.warn('[engagements] falha ao escrever scope do intake:', err?.message)
   }
 
@@ -130,7 +139,7 @@ router.patch('/:id', async (req, res) => {
   } else if (adminOnly.some((k) => req.body[k] !== undefined)) {
     return res.status(403).json({ error: 'Apenas administradores podem alterar target/scope' })
   }
-  const updated = await updateEngagement(req.params.id, patch)
+  const updated = await updateEngagement(req.db, req.params.id, patch)
   if (!updated) return res.status(404).json({ error: 'not found' })
   res.json(toDto(updated))
 })
@@ -140,11 +149,11 @@ router.delete('/:id', requireAuth(['admin']), async (req, res) => {
   // BUG-1: para o watcher e apaga TUDO que pertence ao engagement — senão sobram
   // findings órfãos no banco global e um chokidar observando um dir morto.
   try { findingsWatcher.unwatch(id) } catch {}
-  await deleteEngagement(id)
+  await deleteEngagement(req.db, id)
   await Promise.all([
-    Finding.deleteMany({ engagementId: id }).catch(() => {}),
-    ChatMessage.deleteMany({ engagementId: id }).catch(() => {}),
-    ChatSession.deleteMany({ engagementId: id }).catch(() => {}),
+    req.db.Finding.deleteMany({ engagementId: id }).catch(() => {}),
+    req.db.ChatMessage.deleteMany({ engagementId: id }).catch(() => {}),
+    req.db.ChatSession.deleteMany({ engagementId: id }).catch(() => {}),
   ])
   res.status(204).end()
 })
@@ -155,7 +164,7 @@ const FREQ = ['daily', 'weekly']
 const PHASES = ['recon', 'recon_enum', 'full']
 
 router.patch('/:id/schedule', requireAuth(['admin']), async (req, res) => {
-  const e = await getEngagement(req.params.id)
+  const e = await getEngagement(req.db, req.params.id)
   if (!e) return res.status(404).json({ error: 'not found' })
 
   const cur = e.schedule || {}
@@ -176,13 +185,13 @@ router.patch('/:id/schedule', requireAuth(['admin']), async (req, res) => {
   if (next.enabled && !next.nextRunAt) next.nextRunAt = new Date()
   if (!next.enabled) next.nextRunAt = null
 
-  const updated = await updateEngagement(req.params.id, { schedule: next })
+  const updated = await updateEngagement(req.db, req.params.id, { schedule: next })
   res.json(toDto(updated))
 })
 
 // Disparo manual imediato (admin) — útil para testar e para um "scan agora".
 router.post('/:id/run-now', requireAuth(['admin']), async (req, res) => {
-  const e = await getEngagement(req.params.id)
+  const e = await getEngagement(req.db, req.params.id)
   if (!e) return res.status(404).json({ error: 'not found' })
   // Usa a config de schedule existente (ou defaults seguros) para o run manual.
   const sched = e.schedule && e.schedule.phases ? e.schedule : { phases: 'full', autoExploit: false, costCeilingUsd: 5 }
@@ -198,10 +207,13 @@ router.post('/:id/run-now', requireAuth(['admin']), async (req, res) => {
 // Chave por-ENGAGEMENT (não por-sessão): a credencial é "a do próximo run autenticado
 // deste engagement". Evita descasar a chave entre o intake e o run. O server.js usa a
 // MESMA chave no gate. Ver src/cred-vault.js e domain-packs (ETAPA 1).
-function vaultKey(id) { return `cred:${id}` }
+// Frente 0: o TENANT entra na chave. Sem ele, dois tenants com o mesmo
+// engagementId (possível: o id vem do cliente em import/restore) compartilhariam
+// a mesma entrada do cofre — credencial de um cliente alcançável pelo run de outro.
+function vaultKey(tenantSlug, id) { return `cred:${tenantSlug || 'no-tenant'}:${id}` }
 
 router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
-  const e = await getEngagement(req.params.id)
+  const e = await getEngagement(req.db, req.params.id)
   if (!e) return res.status(404).json({ error: 'not found' })
   const pack = getDomainPack(e.domainPackId)
   if (!needsCredentials(pack)) {
@@ -211,7 +223,7 @@ router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
   if (!creds || typeof creds !== 'object') return res.status(400).json({ error: 'credentials (objeto) obrigatório' })
   const { ok, missing } = validateCredentials(pack, creds)
   if (!ok) return res.status(400).json({ error: `Campos obrigatórios ausentes: ${missing.join(', ')}` })
-  const key = vaultKey(req.params.id)
+  const key = vaultKey(req.tenant?.slug, req.params.id)
   credVault.set(key, creds)
   res.status(201).json({ ok: true, ...credVault.describe(key) })   // só metadados
 })
@@ -225,12 +237,12 @@ router.post('/:id/credentials', requireAuth(['admin']), async (req, res) => {
 // segurança: describe() só devolve metadados (nunca valores), e a MUTAÇÃO
 // (submeter/limpar credencial) já é corretamente bloqueada pro `user` no POST/DELETE.
 router.get('/:id/credentials', async (req, res) => {
-  const meta = credVault.describe(vaultKey(req.params.id))
+  const meta = credVault.describe(vaultKey(req.tenant?.slug, req.params.id))
   res.json(meta ? { set: true, ...meta } : { set: false })
 })
 
 router.delete('/:id/credentials', requireAuth(['admin']), async (req, res) => {
-  credVault.clear(vaultKey(req.params.id))
+  credVault.clear(vaultKey(req.tenant?.slug, req.params.id))
   res.status(204).end()
 })
 
@@ -238,7 +250,7 @@ router.delete('/:id/credentials', requireAuth(['admin']), async (req, res) => {
 router.get('/:id/messages', async (req, res) => {
   const limit     = Math.min(parseInt(req.query.limit ?? '500'), 1000)
   const sessionId = req.query.sessionId || 'default'
-  const msgs = await ChatMessage.find({ engagementId: req.params.id, sessionId })
+  const msgs = await req.db.ChatMessage.find({ engagementId: req.params.id, sessionId })
     .sort({ createdAt: 1 })
     .limit(limit)
     .lean()
@@ -247,12 +259,12 @@ router.get('/:id/messages', async (req, res) => {
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
 router.get('/:id/sessions', async (req, res) => {
-  const sessions = await ChatSession.find({ engagementId: req.params.id })
+  const sessions = await req.db.ChatSession.find({ engagementId: req.params.id })
     .sort({ lastMessageAt: -1 })
     .lean()
 
   // Attach message count per session
-  const counts = await ChatMessage.aggregate([
+  const counts = await req.db.ChatMessage.aggregate([
     { $match: { engagementId: req.params.id } },
     { $group: { _id: '$sessionId', count: { $sum: 1 } } },
   ])
@@ -283,16 +295,16 @@ router.get('/:id/sessions', async (req, res) => {
 
 // Jobs/Work deste engagement — histórico de runs com o fluxo de etapas (fases).
 router.get('/:id/jobs', async (req, res) => {
-  const list = await jobs.listJobs(req.params.id).catch(() => [])
+  const list = await jobs.listJobs(req.db, req.params.id).catch(() => [])
   res.json(list)
 })
 
 router.post('/:id/sessions', async (req, res) => {
-  const engagement = await getEngagement(req.params.id)
+  const engagement = await getEngagement(req.db, req.params.id)
   if (!engagement) return res.status(404).json({ error: 'not found' })
 
   const name = (req.body?.name || 'Novo chat').trim().slice(0, 80)
-  const session = await ChatSession.create({ engagementId: req.params.id, name })
+  const session = await req.db.ChatSession.create({ engagementId: req.params.id, name })
   res.status(201).json({
     id: session._id,
     name: session.name,
@@ -303,7 +315,7 @@ router.post('/:id/sessions', async (req, res) => {
 })
 
 router.patch('/:id/sessions/:sid', async (req, res) => {
-  const session = await ChatSession.findOneAndUpdate(
+  const session = await req.db.ChatSession.findOneAndUpdate(
     { _id: req.params.sid, engagementId: req.params.id },
     { name: (req.body?.name || '').trim().slice(0, 80) },
     { new: true }
@@ -313,8 +325,8 @@ router.patch('/:id/sessions/:sid', async (req, res) => {
 })
 
 router.delete('/:id/sessions/:sid', async (req, res) => {
-  await ChatSession.deleteOne({ _id: req.params.sid, engagementId: req.params.id })
-  await ChatMessage.deleteMany({ engagementId: req.params.id, sessionId: req.params.sid })
+  await req.db.ChatSession.deleteOne({ _id: req.params.sid, engagementId: req.params.id })
+  await req.db.ChatMessage.deleteMany({ engagementId: req.params.id, sessionId: req.params.sid })
   res.status(204).end()
 })
 

@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { User } from '@/lib/api'
 import { SI } from '@/components/ui/SI'
+import { isActive } from '@/lib/nav'
+import { can } from '@/lib/viewer'
 
 const C = {
   bg: 'var(--bg)',
@@ -36,20 +38,49 @@ const Ico = {
   logout:    (s?: number, c?: string) => <SI s={s || 13} c={c}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></SI>,
   chevLeft:  (s?: number, c?: string) => <SI s={s || 14} c={c || C.textMute} sw={2}><polyline points="15 18 9 12 15 6" /></SI>,
   chevRight: (s?: number, c?: string) => <SI s={s || 14} c={c || C.textMute} sw={2}><polyline points="9 18 15 12 9 6" /></SI>,
+  plus:      (s?: number, c?: string) => <SI s={s || 14} c={c} sw={2.5}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></SI>,
 }
 
-// Navegação reorganizada (reforma de UX 2026-07): a entrada é Domínios (a home).
+// Navegação reorganizada (ciclo de coesão 2026-08): a entrada é Domínios (a home).
 // Dashboard saiu do menu (raiz → Domínios; métricas seguem no Admin). Vazamentos
 // está "em construção" — fora do menu por enquanto (a rota vira stub, ver /vazamentos).
-const NAV_ALL = [
-  { href: '/dominios',    icon: 'globe'    as const, label: 'Domínios',   adminOnly: false },
-  { href: '/rede-interna', icon: 'network' as const, label: 'Rede Interna', adminOnly: false },
-  { href: '/mapa',        icon: 'share2'   as const, label: 'Mapa',       adminOnly: false },
-  { href: '/findings',    icon: 'alert'    as const, label: 'Findings',   adminOnly: false },
-  { href: '/reports',     icon: 'file'     as const, label: 'Relatórios', adminOnly: false },
-  { href: '/admin/users', icon: 'users'    as const, label: 'Usuários',   adminOnly: true  },
-  { href: '/admin',       icon: 'settings' as const, label: 'Admin',      adminOnly: true  },
+//
+// Agrupada em três blocos porque a lista plana de 7 itens não dizia o que era
+// coleta (superfície) e o que era resultado (findings/relatórios) — o operador
+// lia tudo com o mesmo peso. "Novo Pentest" saiu da lista e virou ação primária
+// no topo: era alcançável só a partir de /dominios, o que escondia a ação
+// central do produto de quem estivesse em qualquer outra tela.
+type NavItem = { href: string; icon: keyof typeof Ico; label: string; adminOnly?: boolean }
+type NavGroup = { title: string; items: NavItem[] }
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    title: 'Superfície',
+    items: [
+      { href: '/dominios',     icon: 'globe',   label: 'Domínios' },
+      { href: '/rede-interna', icon: 'network', label: 'Rede Interna' },
+      { href: '/mapa',         icon: 'share2',  label: 'Mapa' },
+    ],
+  },
+  {
+    title: 'Resultados',
+    items: [
+      { href: '/findings', icon: 'alert', label: 'Findings' },
+      { href: '/reports',  icon: 'file',  label: 'Relatórios' },
+    ],
+  },
+  {
+    title: 'Sistema',
+    items: [
+      { href: '/admin/users', icon: 'users',    label: 'Usuários', adminOnly: true },
+      { href: '/admin',       icon: 'settings', label: 'Admin',    adminOnly: true },
+    ],
+  },
 ]
+
+// `isActive` mora em lib/nav.js (testado em test/nav.test.js) — o `startsWith`
+// cru que existia aqui acendia DOIS itens em `/admin/users`, porque
+// "/admin/users".startsWith("/admin") é verdadeiro.
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/)
@@ -66,7 +97,14 @@ interface SidebarProps {
 
 export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
   const path = usePathname()
-  const NAV = NAV_ALL.filter((n) => !n.adminOnly || user.role === 'admin')
+  const groups = NAV_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((n) => !n.adminOnly || user.role === 'admin') }))
+    .filter((g) => g.items.length > 0)
+  const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href))
+  const novoActive = path.startsWith('/novo-pentest')
+  // Frente 0: disparar pentest é ação da operação. O cliente acompanha o
+  // resultado do trabalho contratado — não opera a ferramenta.
+  const showNovoPentest = can(user.role, 'viewAgentInternals')
 
   return (
     <aside style={{
@@ -107,55 +145,89 @@ export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
         )}
       </div>
 
+      {/* Ação primária — sempre acessível, de qualquer tela (só operação) */}
+      {showNovoPentest && <div style={{ padding: collapsed ? '0.6rem 0.5rem 0.2rem' : '0.75rem 0.6rem 0.3rem', flexShrink: 0 }}>
+        <Link href="/novo-pentest" title={collapsed ? 'Novo Pentest' : undefined} style={{ textDecoration: 'none' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: collapsed ? 0 : 8, padding: collapsed ? '0.5rem 0' : '0.55rem 0.75rem',
+            borderRadius: 8,
+            background: novoActive ? C.purpleD : C.purple,
+            color: 'white', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+            boxShadow: `0 0 16px ${C.purpleGlowStrong}`, transition: 'filter 0.12s',
+          }}
+            onMouseEnter={(e) => (e.currentTarget.style.filter = 'brightness(1.1)')}
+            onMouseLeave={(e) => (e.currentTarget.style.filter = 'none')}
+          >
+            {Ico.plus(14, 'white')}
+            {!collapsed && <span style={{ whiteSpace: 'nowrap' }}>Novo Pentest</span>}
+          </div>
+        </Link>
+      </div>}
+
       {/* Nav */}
       <nav style={{
         flex: 1, overflowY: 'auto',
-        padding: collapsed ? '0.6rem 0' : '0.6rem 0.5rem',
+        padding: collapsed ? '0.4rem 0' : '0.4rem 0.5rem',
         display: 'flex', flexDirection: 'column', gap: 2,
       }}>
-        {NAV.map(({ href, icon, label }) => {
-          const active = path === href || (href !== '/dashboard' && path.startsWith(href))
-          return (
-            <Link key={href} href={href} style={{ textDecoration: 'none' }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: collapsed ? 'center' : 'flex-start',
-                gap: collapsed ? 0 : 10,
-                padding: collapsed ? '0.5rem 0' : '0.5rem 0.875rem',
-                borderRadius: collapsed ? 0 : 5,
-                borderLeft: collapsed ? 'none' : `2px solid ${active ? C.purple : 'transparent'}`,
-                background: active ? C.purpleDim : 'transparent',
-                color: active ? C.purpleL : C.textMute,
-                fontSize: 12.5, fontWeight: active ? 500 : 400,
-                cursor: 'pointer',
-                transition: 'all 0.12s',
-                position: 'relative',
-              }}
-                onMouseEnter={(e) => {
-                  if (!active) {
-                    e.currentTarget.style.background = 'rgba(124,58,237,0.05)'
-                    e.currentTarget.style.color = C.textSub
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!active) {
-                    e.currentTarget.style.background = 'transparent'
-                    e.currentTarget.style.color = C.textMute
-                  }
-                }}
-                title={collapsed ? label : undefined}
-              >
-                <span style={{ color: active ? C.purple : C.textMute, transition: 'color 0.12s', flexShrink: 0 }}>
-                  {Ico[icon](14)}
-                </span>
-                {!collapsed && (
-                  <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{label}</span>
-                )}
-              </div>
-            </Link>
-          )
-        })}
+        {groups.map((group, gi) => (
+          <div key={group.title} style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: gi === 0 ? 0 : 14 }}>
+            {collapsed
+              ? gi > 0 && <div style={{ height: 1, background: C.border, margin: '4px 0.6rem 6px' }} />
+              : (
+                <div style={{
+                  fontSize: 8.5, fontWeight: 700, color: C.textMute, letterSpacing: '0.16em',
+                  textTransform: 'uppercase', padding: '0 0.875rem', marginBottom: 4, whiteSpace: 'nowrap',
+                }}>
+                  {group.title}
+                </div>
+              )}
+            {group.items.map(({ href, icon, label }) => {
+              const active = isActive(path, href, allHrefs)
+              return (
+                <Link key={href} href={href} style={{ textDecoration: 'none' }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    gap: collapsed ? 0 : 10,
+                    padding: collapsed ? '0.5rem 0' : '0.5rem 0.875rem',
+                    borderRadius: collapsed ? 0 : 5,
+                    borderLeft: collapsed ? 'none' : `2px solid ${active ? C.purple : 'transparent'}`,
+                    background: active ? C.purpleDim : 'transparent',
+                    color: active ? C.purpleL : C.textMute,
+                    fontSize: 12.5, fontWeight: active ? 500 : 400,
+                    cursor: 'pointer',
+                    transition: 'all 0.12s',
+                    position: 'relative',
+                  }}
+                    onMouseEnter={(e) => {
+                      if (!active) {
+                        e.currentTarget.style.background = 'rgba(124,58,237,0.05)'
+                        e.currentTarget.style.color = C.textSub
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!active) {
+                        e.currentTarget.style.background = 'transparent'
+                        e.currentTarget.style.color = C.textMute
+                      }
+                    }}
+                    title={collapsed ? label : undefined}
+                  >
+                    <span style={{ color: active ? C.purple : C.textMute, transition: 'color 0.12s', flexShrink: 0 }}>
+                      {Ico[icon](14)}
+                    </span>
+                    {!collapsed && (
+                      <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{label}</span>
+                    )}
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Toggle button */}

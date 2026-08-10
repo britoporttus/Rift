@@ -13,10 +13,6 @@ const fs = require('fs')
 const net = require('net')
 const dns = require('dns').promises
 
-const Domain = require('../models/Domain')
-const DomainAsset = require('../models/DomainAsset')
-const DomainScan = require('../models/DomainScan')
-const LeakedCredential = require('../models/LeakedCredential')
 const { runTool, hasBin } = require('./binaries')
 const { computeScore } = require('./score')
 const { computeAssetDiff } = require('./diff')
@@ -94,8 +90,8 @@ async function mapPool(items, size, fn) {
   return out
 }
 
-async function setStep(domainId, step) {
-  await Domain.findByIdAndUpdate(domainId, { $set: { scanStep: step } }).catch(() => {})
+async function setStep(db, domainId, step) {
+  await db.Domain.findByIdAndUpdate(domainId, { $set: { scanStep: step } }).catch(() => {})
 }
 
 // P1-17: com fingerprint agora `unique`, duas escritas concorrentes pro MESMO
@@ -103,14 +99,14 @@ async function setStep(domainId, step) {
 // MongoDB garante que só um insert vence e o outro recebe E11000. Antes disso
 // era silenciosamente engolido (perdendo a atualização); agora faz 1 retry
 // como update puro (o doc já existe, criado pela escrita concorrente).
-async function upsertAsset(domainId, fp, fields) {
+async function upsertAsset(db, domainId, fp, fields) {
   const now = new Date()
   const set = { $set: { ...fields, domainId, fingerprint: fp, lastSeen: now }, $setOnInsert: { firstSeen: now } }
   try {
-    await DomainAsset.findOneAndUpdate({ fingerprint: fp }, set, { upsert: true, new: false })
+    await db.DomainAsset.findOneAndUpdate({ fingerprint: fp }, set, { upsert: true, new: false })
   } catch (err) {
     if (err && err.code === 11000) {
-      await DomainAsset.findOneAndUpdate({ fingerprint: fp }, { $set: set.$set }).catch(() => {})
+      await db.DomainAsset.findOneAndUpdate({ fingerprint: fp }, { $set: set.$set }).catch(() => {})
     }
     // outros erros: mesmo comportamento de antes (não derruba o scan por um asset).
   }
@@ -158,7 +154,7 @@ async function stageDns(domainId, hosts) {
     const safe = isProbeSafe(ips)
     if (!safe) console.warn(`[asm] host bloqueado p/ probe ativo (IP privado/loopback/metadata): ${host}`)
     const resolves = (ips.length > 0 || !!cname) && safe
-    await upsertAsset(domainId, `${domainId}:host:${host}`, {
+    await upsertAsset(db, domainId, `${domainId}:host:${host}`, {
       type: 'subdomain', value: host, ips, cname, source: 'subfinder+dns',
     })
     // Fase 3 (passivo): CNAME pendente → candidato a subdomain takeover. Puramente
@@ -166,7 +162,7 @@ async function stageDns(domainId, hosts) {
     // autorização. A confirmação por corpo HTTP fica pro nuclei (stageTakeover).
     const tk = detectTakeover({ host, cname, ips, nxdomain })
     if (tk) {
-      await upsertAsset(domainId, `${domainId}:takeover:${host}`, {
+      await upsertAsset(db, domainId, `${domainId}:takeover:${host}`, {
         type: 'exposure', value: host, severity: tk.severity,
         label: tk.label, cname: tk.cname, source: 'dns-takeover',
       })
@@ -199,7 +195,7 @@ async function stageHttp(domainId, hosts) {
     const tls = get(j, 'tls') || {}
     const isAdmin = ADMIN_RE.test(`${title || ''} ${get(j, 'url') || ''}`)
     alive++
-    await upsertAsset(domainId, `${domainId}:host:${cleanHost}`, {
+    await upsertAsset(db, domainId, `${domainId}:host:${cleanHost}`, {
       type: 'web', value: cleanHost, alive: true,
       statusCode: typeof status === 'number' ? status : null,
       title: title || null,
@@ -239,7 +235,7 @@ async function stageNuclei(domainId, aliveHosts) {
     const tid = get(j, 'template-id', 'templateID') || 'exposure'
     const cveId = extractCveId(info, tid)
     n++
-    await upsertAsset(domainId, `${domainId}:exp:${tid}:${matched}`, {
+    await upsertAsset(db, domainId, `${domainId}:exp:${tid}:${matched}`, {
       type: 'exposure', value: matched, alive: true,
       severity: ['critical', 'high', 'medium', 'low'].includes(info.severity) ? info.severity : 'info',
       label: info.name || tid, cveId, source: 'nuclei',
@@ -276,7 +272,7 @@ async function stageTakeover(domainId, hosts) {
     n++
     // Confirmado é mais grave que o candidato passivo: no mínimo high.
     const sev = ['critical', 'high', 'medium'].includes(info.severity) ? info.severity : 'high'
-    await upsertAsset(domainId, `${domainId}:takeover-ok:${host}:${tid}`, {
+    await upsertAsset(db, domainId, `${domainId}:takeover-ok:${host}:${tid}`, {
       type: 'exposure', value: host, alive: true, severity: sev,
       label: `Subdomain takeover confirmado — ${info.name || tid}`, source: 'nuclei-takeover',
     })
@@ -289,7 +285,7 @@ async function stageTakeover(domainId, hosts) {
 // temporário (httpx grava em ./output/screenshot); os PNGs são movidos pro storage
 // permanente (screenshots.js) e o caminho relativo vai pro asset 'web'. Não-fatal:
 // Chrome pode travar/faltar — o scan não pode cair por causa de uma foto.
-async function stageScreenshots(domainId, aliveHosts) {
+async function stageScreenshots(db, domainId, aliveHosts) {
   if (!SCREENSHOT_ENABLED || !CHROME_BIN || !hasBin('httpx') || !aliveHosts.length) return 0
   const hosts = aliveHosts.slice(0, SCREENSHOT_MAX)
   let work
@@ -313,7 +309,7 @@ async function stageScreenshots(domainId, aliveHosts) {
       if (!host) continue
       const rel = storeScreenshot(domainId, host, srcAbs)
       if (!rel) continue
-      await DomainAsset.updateOne({ domainId, type: 'web', value: host }, { $set: { screenshotPath: rel } }).catch(() => {})
+      await db.DomainAsset.updateOne({ domainId, type: 'web', value: host }, { $set: { screenshotPath: rel } }).catch(() => {})
       n++
     }
     return n
@@ -370,7 +366,7 @@ async function stagePortScan(domainId, ips, { fromNeighbor = false, providerFor 
         ? `${base.label ? base.label.replace(' exposto à internet', '') : `porta ${port}`} · ${prov.name} (SaaS de terceiro)`
         : (base.label || (fromNeighbor ? `Porta ${port} aberta (vizinho de netblock)` : `Porta ${port} aberta`))
       n++
-      await upsertAsset(domainId, `${domainId}:port:${ip}:${port}`, {
+      await upsertAsset(db, domainId, `${domainId}:port:${ip}:${port}`, {
         type: 'port', value: `${ip}:${port}`, ip, port, proto: 'tcp',
         alive: true, severity, label,
         fromNeighbor, thirdParty, provider: thirdParty ? prov.name : null, source: 'portscan',
@@ -383,9 +379,35 @@ async function stagePortScan(domainId, ips, { fromNeighbor = false, providerFor 
 
 // ── entrada principal ─────────────────────────────────────────────────────────
 // Fire-and-forget: a API chama sem await; o estado vive no Domain (polling no front).
-async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
-  const dom = await Domain.findById(domainId)
+/**
+ * Prova de posse: um domínio só é escaneável depois de verificado.
+ *
+ * Decisão do operador (2026-08-03): bloqueia TUDO — nem a coleta passiva roda —
+ * e ninguém dispensa, nem admin. O gate mora aqui, no scanner, e não só na
+ * rota: assim o scheduler, um job ou uma rota futura não contornam por
+ * esquecimento (mesmo raciocínio do gate de `authorized` no ingest de leaks).
+ *
+ * `legacy` = cadastrado antes da regra existir. NÃO conta como verificado; é
+ * deixado passar para não parar a operação que já roda, mas aparece como
+ * pendência na UI. Um dia é só rodar a verificação de verdade.
+ */
+function scanBlockReason(dom) {
+  const status = dom?.verification?.status
+  if (status === 'verified' || status === 'legacy') return null
+  return `Domínio "${dom.domain}" não teve a posse verificada. `
+    + 'Publique o registro TXT ou o arquivo em /.well-known/ e verifique antes de escanear.'
+}
+
+async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
+  const dom = await db.Domain.findById(domainId)
   if (!dom) return
+  const blocked = scanBlockReason(dom)
+  if (blocked) {
+    await db.Domain.findByIdAndUpdate(domainId, { $set: { scanState: 'failed', scanStep: null, scanError: blocked } }).catch(() => {})
+    const err = new Error(blocked)
+    err.code = 'DOMAIN_NOT_VERIFIED'
+    throw err
+  }
   const domain = dom.domain
   const authorized = !!dom.authorized
 
@@ -393,7 +415,7 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
   // (ver asm/diff.js). `scopedTypes` decide quais tipos este scan de fato vai
   // re-verificar (espelha exatamente o gating de stageHttp/stageNuclei abaixo).
   const previousScore = dom.riskScore || 0
-  const previousAssets = await DomainAsset.find({ domainId }).select('type value fingerprint severity').lean()
+  const previousAssets = await db.DomainAsset.find({ domainId }).select('type value fingerprint severity').lean()
   const scopedTypes = ['subdomain']
   if (authorized) scopedTypes.push('web')
   if (authorized && NUCLEI_ENABLED) scopedTypes.push('exposure')
@@ -402,7 +424,7 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
   // scan e poluiriam o "novo/sumido". A lista de portas é um retrato do estado
   // atual (re-derivada e limpa a cada scan), não um delta.
 
-  await Domain.findByIdAndUpdate(domainId, { $set: {
+  await db.Domain.findByIdAndUpdate(domainId, { $set: {
     scanState: 'scanning', scanStep: 'subdomains', scanError: null,
     scanStartedAt: new Date(), lastScanBy: userName || null,
   } })
@@ -411,7 +433,7 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
     // Limpa nameservers (ns1/dns/resolver) que scans ANTIGOS gravaram — assets de
     // subdomínio não são apagados em re-scan, então sem isto o ns1 antigo ficaria
     // pra sempre mesmo já tendo saído da enumeração (feedback do operador).
-    await DomainAsset.deleteMany({
+    await db.DomainAsset.deleteMany({
       domainId, type: { $in: ['subdomain', 'web', 'exposure', 'port'] },
       value: { $regex: '^(ns\\d*|dns\\d*|resolver)\\.', $options: 'i' },
     }).catch(() => {})
@@ -420,7 +442,7 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
     const hosts = await stageSubdomains(domain)
 
     // 2) DNS (passivo)
-    await setStep(domainId, 'dns')
+    await setStep(db, domainId, 'dns')
     const resolved = await stageDns(domainId, hosts)
     const liveHosts = resolved.filter((r) => r && r.resolves).map((r) => r.host)
 
@@ -430,14 +452,14 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
     // literal cadastrado como "domínio") chegar ao probe ativo sem checagem.
     let httpRes = { probed: 0, alive: 0 }
     if (authorized) {
-      await setStep(domainId, 'http')
+      await setStep(db, domainId, 'http')
       httpRes = await stageHttp(domainId, liveHosts)
     }
 
     // 3b) nuclei (opcional, autorizado + env)
     if (authorized && NUCLEI_ENABLED) {
-      await setStep(domainId, 'exposures')
-      const aliveAssets = await DomainAsset.find({ domainId, type: 'web', alive: true }).select('value').lean()
+      await setStep(db, domainId, 'exposures')
+      const aliveAssets = await db.DomainAsset.find({ domainId, type: 'web', alive: true }).select('value').lean()
       await stageNuclei(domainId, aliveAssets.map((a) => a.value))
     }
 
@@ -445,28 +467,28 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
     // Sobre os hosts que resolvem (a heurística passiva de CNAME pendente já rodou
     // no stageDns, sem autorização). Ver Fase 3.
     if (authorized && TAKEOVER_ENABLED) {
-      await setStep(domainId, 'takeover')
+      await setStep(db, domainId, 'takeover')
       await stageTakeover(domainId, liveHosts)
     }
 
     // 3b-3) recon visual (screenshots) dos hosts vivos — autorizado. Ver Fase 4.
     if (authorized && SCREENSHOT_ENABLED && CHROME_BIN) {
-      await setStep(domainId, 'screenshots')
-      const aliveWeb = await DomainAsset.find({ domainId, type: 'web', alive: true }).select('value').lean()
-      await stageScreenshots(domainId, aliveWeb.map((a) => a.value))
+      await setStep(db, domainId, 'screenshots')
+      const aliveWeb = await db.DomainAsset.find({ domainId, type: 'web', alive: true }).select('value').lean()
+      await stageScreenshots(db, domainId, aliveWeb.map((a) => a.value))
     }
 
     // 3c) port scan (naabu) — só autorizado. Nos IPs PRÓPRios do domínio (os que
     // resolveram para IP não-bloqueado), mais os vizinhos do netblock (Fase 2).
     if (authorized && PORTSCAN_ENABLED) {
-      await setStep(domainId, 'ports')
+      await setStep(db, domainId, 'ports')
       const ownIps = [...new Set(resolved.filter((r) => r && r.resolves).flatMap((r) => r.ips || []))]
         .filter((ip) => !isBlockedIp(ip))
 
       // Clean slate: portas são um retrato do estado ATUAL, re-derivado a cada
       // scan. Apaga tudo antes de re-escanear — senão os IPs de mail que rotacionam
       // (Microsoft 365/MailChimp) acumulam indefinidamente e ficam sem rótulo.
-      await DomainAsset.deleteMany({ domainId, type: 'port' }).catch(() => {})
+      await db.DomainAsset.deleteMany({ domainId, type: 'port' }).catch(() => {})
 
       // ASN/holder por IP ANTES do scan: identifica quem é provedor SaaS/e-mail
       // (pra rotular a porta) e quais faixas o alvo possui (pra expandir). É só
@@ -479,7 +501,7 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
           // não só uns poucos. As chamadas RIPEstat rodam em paralelo (asn.js).
           const r = await lookupNetblocks(ownIps, { targetDomain: domain, maxPrefixIps: ASN_MAX_PREFIX_IPS, maxIps: 80 })
           cidrs = r.cidrs
-          await Domain.findByIdAndUpdate(domainId, { $set: { asnInfo: r.asns } }).catch(() => {})
+          await db.Domain.findByIdAndUpdate(domainId, { $set: { asnInfo: r.asns } }).catch(() => {})
           // Classifica por IP exato E por PREFIXO: um único lookup de qualquer IP
           // do bloco da Microsoft (52.96.0.0/14) classifica TODOS os 52.97.x, mesmo
           // os que não foram consultados individualmente (robusto a lacunas do lookup).
@@ -508,23 +530,23 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
 
     // 4) score + contadores (o sinal de vazamento vem do módulo Vazamentos, por
     //    string de domínio — não rodamos leak aqui; ASM = superfície).
-    await setStep(domainId, 'scoring')
-    const { score, level } = await recomputeDomain(domainId)
+    await setStep(db, domainId, 'scoring')
+    const { score, level } = await recomputeDomain(db, domainId)
 
     // 5) diff de superfície vs. o scan anterior (novo/sumido + Δscore).
-    const currentAssets = await DomainAsset.find({ domainId }).select('type value fingerprint severity cveId alive').lean()
+    const currentAssets = await db.DomainAsset.find({ domainId }).select('type value fingerprint severity cveId alive').lean()
     const diff = computeAssetDiff({ previousAssets, currentAssets, scopedTypes })
     const now = new Date()
     const scoreDelta = score - previousScore
 
-    await Domain.findByIdAndUpdate(domainId, { $set: {
+    await db.Domain.findByIdAndUpdate(domainId, { $set: {
       scanState: 'done', scanStep: 'done', lastScanAt: now,
       lastDiff: { ...diff, computedAt: now, scoreDelta },
     } })
 
     // 6) histórico de monitoramento — 1 registro por execução, pra a linha do
     //    tempo mostrar que o monitoramento é contínuo (ver models/DomainScan).
-    await DomainScan.create({
+    await db.DomainScan.create({
       domainId, ranAt: now, trigger, authorized,
       assetCount: currentAssets.length,
       aliveCount: currentAssets.filter((a) => a.alive).length,
@@ -534,7 +556,7 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
       newCount: diff.newCount, missingCount: diff.missingCount, scoreDelta,
     }).catch((e) => console.warn('[asm] falha ao gravar histórico de scan:', e?.message))
   } catch (err) {
-    await Domain.findByIdAndUpdate(domainId, { $set: {
+    await db.Domain.findByIdAndUpdate(domainId, { $set: {
       scanState: 'failed', scanStep: null, scanError: String(err?.message || err).slice(0, 300),
     } }).catch(() => {})
   }
@@ -543,14 +565,14 @@ async function runScan(domainId, { userName, trigger = 'manual' } = {}) {
 // Recomputa contadores + score a partir do estado persistido (idempotente). O
 // sinal de vazamento vem por STRING de domínio (módulo Vazamentos escreve por
 // domain), então o score reflete buscas de exposição feitas para este domínio.
-async function recomputeDomain(domainId) {
-  const dom = await Domain.findById(domainId).lean()
+async function recomputeDomain(db, domainId) {
+  const dom = await db.Domain.findById(domainId).lean()
   const [assets, leaks] = await Promise.all([
-    DomainAsset.find({ domainId }).lean(),
-    LeakedCredential.find({ domain: dom ? dom.domain : '__none__' }).lean(),
+    db.DomainAsset.find({ domainId }).lean(),
+    db.LeakedCredential.find({ domain: dom ? dom.domain : '__none__' }).lean(),
   ])
   const { score, level, reasons } = computeScore({ assets, leaks: LEAKS_ENABLED ? leaks : [] })
-  await Domain.findByIdAndUpdate(domainId, { $set: {
+  await db.Domain.findByIdAndUpdate(domainId, { $set: {
     assetCount: assets.length,
     aliveCount: assets.filter((a) => a.alive).length,
     exposureCount: assets.filter((a) => a.type === 'exposure').length,
@@ -563,9 +585,12 @@ async function recomputeDomain(domainId) {
 
 // No boot, scans interrompidos ficam presos em 'scanning' (processo in-process
 // não sobrevive a restart) → reconcilia para 'failed'/interrupted.
-async function recoverInterruptedScans() {
+// Frente 0: roda no boot, sem request — precisa varrer TODOS os tenants. Se
+// recebesse um `db` só, recuperaria o scan de um tenant e deixaria os outros
+// presos em 'scanning' para sempre.
+async function recoverInterruptedScansFor(db) {
   try {
-    const r = await Domain.updateMany(
+    const r = await db.Domain.updateMany(
       { scanState: 'scanning' },
       { $set: { scanState: 'failed', scanStep: null, scanError: 'interrompido (restart do backend)' } }
     )
@@ -573,4 +598,11 @@ async function recoverInterruptedScans() {
   } catch { return 0 }
 }
 
-module.exports = { runScan, recomputeDomain, recoverInterruptedScans, isProbeSafe, upsertAsset, extractCveId }
+module.exports = { runScan, scanBlockReason, recomputeDomain, recoverInterruptedScansFor, recoverInterruptedScans, isProbeSafe, upsertAsset, extractCveId }
+
+// Fan-out por tenant do recover de boot (ver recoverInterruptedScansFor).
+async function recoverInterruptedScans() {
+  const { forEachTenant } = require('../tenancy')
+  const results = await forEachTenant(({ db }) => recoverInterruptedScansFor(db))
+  return results.filter((r) => r.ok).reduce((n, r) => n + (r.value || 0), 0)
+}

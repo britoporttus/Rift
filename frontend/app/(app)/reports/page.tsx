@@ -1,14 +1,17 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
-import { api, Engagement, ReportFile } from '@/lib/api'
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
+import { api, Engagement, ReportFile, DomainSummary } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { useEscapeClose } from '@/hooks/useEscapeClose'
-import { SI } from '@/components/ui/SI'
-
-const EyeIco    = (s?: number, c?: string) => <SI s={s || 12} c={c || 'var(--muted)'}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></SI>
-const DlIco     = (s?: number, c?: string) => <SI s={s || 12} c={c || 'white'}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></SI>
-const FileIco   = (s?: number, c?: string) => <SI s={s || 14} c={c || 'var(--muted)'}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></SI>
-const XIco      = (s?: number, c?: string) => <SI s={s || 16} c={c || 'var(--muted)'} sw={2}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></SI>
+import { engagementMatchesDomain } from '@/lib/domainMatch'
+import {
+  Page, PageHeader, Card, Btn, Collapsible, EmptyState, Kpi, KpiRow, tint,
+} from '@/components/ui/kit'
+import {
+  FileText, Eye, Download, X, Globe, Target, Briefcase, Layers, Paperclip,
+} from 'lucide-react'
 
 interface PreviewState {
   name: string
@@ -18,18 +21,33 @@ interface PreviewState {
 }
 
 export default function ReportsPage() {
+  // Suspense: a view lê ?engagement=/?domain= via useSearchParams.
+  return (
+    <Suspense fallback={<Page><div style={{ color: 'var(--text-mute)', fontSize: 12, letterSpacing: '0.1em' }}>CARREGANDO…</div></Page>}>
+      <ReportsView />
+    </Suspense>
+  )
+}
+
+function ReportsView() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const params = useSearchParams()
+  const scopeEngagement = params.get('engagement') || ''
+  const scopeDomainId   = params.get('domain') || ''
+
   const [engagements, setEngagements] = useState<Engagement[]>([])
+  const [domains, setDomains]         = useState<DomainSummary[]>([])
   const [reports, setReports]         = useState<Record<string, ReportFile[]>>({})
   const [loading, setLoading]         = useState(true)
   const [preview, setPreview]         = useState<PreviewState | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
 
   useEffect(() => {
-    api.engagements.list()
-      .then(async (engs) => {
+    Promise.all([api.engagements.list(), api.domains.list().catch(() => [] as DomainSummary[])])
+      .then(async ([engs, doms]) => {
         setEngagements(engs)
+        setDomains(doms)
         const pairs = await Promise.all(
           engs.map((e) => api.reports.list(e.id).then((files) => [e.id, files] as const).catch(() => [e.id, []] as const))
         )
@@ -90,92 +108,176 @@ export default function ReportsPage() {
     }
   }, [])
 
+  const scopeDomain = domains.find((d) => d.id === scopeDomainId) || null
+
   // Mostra qualquer engagement que TENHA o que relatar: findings no banco (relatório
   // gerado pelo Rift) OU arquivos narrativos do agente. Antes só listava arquivos crus.
-  const withReports = engagements.filter((e) => (e.findingsCount ?? 0) > 0 || (reports[e.id]?.length ?? 0) > 0)
+  const withReports = useMemo(() => engagements.filter((e) => {
+    if (scopeEngagement && e.id !== scopeEngagement) return false
+    if (scopeDomain && !engagementMatchesDomain(e.target, scopeDomain.domain)) return false
+    return (e.findingsCount ?? 0) > 0 || (reports[e.id]?.length ?? 0) > 0
+  }), [engagements, reports, scopeEngagement, scopeDomain])
+
+  const scopedEngagement = engagements.find((e) => e.id === scopeEngagement) || null
   const totalFiles = withReports.reduce((a, e) => a + (reports[e.id]?.length ?? 0), 0)
+  const totalFindings = withReports.reduce((a, e) => a + (e.findingsCount ?? 0), 0)
+  const scoped = !!(scopeDomain || scopedEngagement)
+
+  // Domínio de origem de cada engagement — dá o caminho de volta ao assessment.
+  const domainFor = (e: Engagement) => domains.find((d) => engagementMatchesDomain(e.target, d.domain)) || null
 
   return (
-    <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: 12, animation: 'fadeIn 0.2s ease' }}>
+    <Page>
+      <PageHeader
+        icon={<FileText size={19} color="var(--purple-light)" />}
+        title="Relatórios"
+        subtitle={
+          scopeDomain ? <>Relatórios dos pentests de <strong style={{ color: 'var(--text)' }}>{scopeDomain.domain}</strong>.</>
+            : 'Relatório executivo (C-level) e técnico por engagement, gerados a partir dos achados — visualize no navegador ou baixe em PDF.'
+        }
+        eyebrow={
+          scopeDomain ? { href: `/dominios/${scopeDomain.id}`, label: scopeDomain.domain }
+            : scopedEngagement ? { href: `/engagement/${scopedEngagement.id}`, label: scopedEngagement.name }
+            : undefined
+        }
+      />
 
-      {/* Page header */}
-      <div style={{ flexShrink: 0 }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.01em' }}>Relatórios</div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-mute)', marginTop: 2 }}>
-          {totalFiles} {totalFiles === 1 ? 'arquivo' : 'arquivos'} · {withReports.length} {withReports.length === 1 ? 'engagement' : 'engagements'}
+      {scoped && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          background: tint('var(--purple)', 8), border: '1px solid var(--border-mid)',
+          borderRadius: 10, padding: '0.6rem 0.95rem', fontSize: 12, color: 'var(--purple-light)',
+        }}>
+          {scopeDomain ? <Globe size={14} /> : <Target size={14} />}
+          <span>Escopo: <strong>{scopeDomain ? scopeDomain.domain : scopedEngagement?.name}</strong></span>
+          <Link href="/reports" style={{
+            marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 11.5, color: 'var(--muted)', textDecoration: 'none',
+          }}>
+            <X size={12} /> ver todos
+          </Link>
         </div>
-      </div>
+      )}
+
+      {!loading && withReports.length > 0 && (
+        <KpiRow>
+          <Kpi label="Engagements com relatório" value={withReports.length} color="var(--purple-light)" icon={<Briefcase size={18} />} />
+          <Kpi label="Achados cobertos" value={totalFindings} color="var(--high)" icon={<Layers size={18} />} />
+          <Kpi label="Arquivos do agente" value={totalFiles} color="var(--info)" icon={<Paperclip size={18} />}
+            hint="narrativas geradas durante o run" />
+        </KpiRow>
+      )}
 
       {loading ? (
         <div style={{ color: 'var(--text-mute)', textAlign: 'center', padding: '3rem', fontSize: 12, letterSpacing: '0.1em' }}>CARREGANDO...</div>
       ) : withReports.length === 0 ? (
-        <div style={{
-          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-          padding: '3rem', textAlign: 'center', color: 'var(--text-mute)',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem', opacity: 0.4 }}>{FileIco(32)}</div>
-          <p style={{ fontSize: 13 }}>Nenhum relatório disponível.</p>
-          <p style={{ fontSize: 11, marginTop: 4, color: 'var(--text-dim)' }}>
-            Use <span style={{ color: 'var(--purple-light)' }}>/pentest-report</span> no chat para gerar.
-          </p>
-        </div>
+        <EmptyState
+          icon={<FileText size={32} />}
+          title="Nenhum relatório disponível."
+          hint="Relatórios são gerados a partir dos achados de um engagement. Rode um pentest para produzir o primeiro."
+          action={<Btn variant="primary" href="/novo-pentest">Novo Pentest</Btn>}
+        />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {withReports.map((e, ri) => {
             const nf = e.findingsCount ?? 0
+            const files = reports[e.id] ?? []
+            const dom = domainFor(e)
             return (
-              <div key={e.id} style={{
-                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-                padding: '0.9rem 1.2rem', display: 'flex', alignItems: 'center', gap: 12,
-                animation: `rowIn 0.3s ease both`, animationDelay: `${ri * 50}ms`,
-              }}>
-                <span style={{ color: 'var(--purple)', opacity: 0.85 }}>{FileIco(15, 'var(--purple)')}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{e.name}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-mute)', marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>{e.target}</div>
+              <Card key={e.id} pad="1rem 1.2rem" style={{ animation: `rowIn 0.3s ease both`, animationDelay: `${Math.min(ri, 12) * 50}ms` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{
+                    width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', color: 'var(--purple-light)',
+                    background: tint('var(--purple)', 14), border: '1px solid var(--border-mid)',
+                  }}>
+                    <FileText size={16} />
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <Link href={`/engagement/${e.id}`} style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}>
+                      {e.name}
+                    </Link>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-mute)', marginTop: 3, fontFamily: 'var(--mono)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span>{e.target}</span>
+                      {dom && (
+                        <Link href={`/dominios/${dom.id}`} title="Abrir assessment do domínio"
+                          style={{ color: 'var(--purple-light)', textDecoration: 'none', fontFamily: 'inherit' }}>
+                          · domínio
+                        </Link>
+                      )}
+                      {nf > 0 && (
+                        <Link href={`/findings?engagement=${e.id}`} title="Ver os achados deste engagement"
+                          style={{ color: 'var(--purple-light)', textDecoration: 'none', fontFamily: 'inherit' }}>
+                          · {nf} achado{nf === 1 ? '' : 's'}
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
+                    {nf > 0 && (
+                      <Btn variant="primary" onClick={() => openGenerated(e, 'technical')} disabled={previewLoading}>
+                        <Eye size={13} /> Técnico
+                      </Btn>
+                    )}
+                    {nf > 0 && isAdmin && (
+                      <Btn onClick={() => openGenerated(e, 'executive')} disabled={previewLoading}>
+                        <Eye size={13} /> Executivo
+                      </Btn>
+                    )}
+                    {nf > 0 && (
+                      <a href={api.reports.pdfUrl(e.id, 'technical')} download
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0.5rem 0.95rem',
+                          borderRadius: 7, fontSize: 12.5, fontWeight: 700, textDecoration: 'none',
+                          background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)',
+                        }}>
+                        <Download size={13} /> PDF
+                      </a>
+                    )}
+                  </div>
                 </div>
-                <span style={{ fontSize: 10, color: 'var(--text-mute)', whiteSpace: 'nowrap', marginRight: 4 }}>
-                  {nf} finding{nf === 1 ? '' : 's'}
-                </span>
-                {nf > 0 && (
-                  <button
-                    onClick={() => openGenerated(e, 'technical')}
-                    disabled={previewLoading}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
-                      fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-                      background: 'var(--purple)', color: '#fff', border: 'none',
-                    }}
-                  >
-                    {EyeIco(12, '#fff')} Ver relatório
-                  </button>
+
+                {/* Arquivos narrativos escritos pelo agente durante o run.
+                    Eram buscados e contados no cabeçalho, mas nunca renderizados
+                    — ficavam inacessíveis pela UI. */}
+                {files.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <Collapsible title="Arquivos do agente" icon={<Paperclip size={12} />} count={files.length}
+                      meta="gerados durante a execução">
+                      {files.map((f) => (
+                        <div key={f.name} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          background: 'var(--bg)', border: '1px solid var(--border)',
+                          borderRadius: 8, padding: '0.55rem 0.8rem',
+                        }}>
+                          <FileText size={13} color="var(--text-mute)" />
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {f.name}
+                          </span>
+                          <button onClick={() => openPreview(f)} disabled={previewLoading} title="Visualizar"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 6,
+                              fontSize: 11, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+                              background: tint('var(--purple)', 12), color: 'var(--purple-light)', border: '1px solid var(--border-mid)',
+                            }}>
+                            <Eye size={11} /> Ver
+                          </button>
+                          <a href={f.url} download title="Baixar"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 6,
+                              fontSize: 11, fontWeight: 600, textDecoration: 'none',
+                              background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)',
+                            }}>
+                            <Download size={11} />
+                          </a>
+                        </div>
+                      ))}
+                    </Collapsible>
+                  </div>
                 )}
-                {nf > 0 && isAdmin && (
-                  <button
-                    onClick={() => openGenerated(e, 'executive')}
-                    disabled={previewLoading}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
-                      fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
-                      background: 'transparent', color: 'var(--purple-light)', border: '1px solid var(--border-hi)',
-                    }}
-                  >
-                    {EyeIco(12, 'var(--purple-light)')} Ver executivo
-                  </button>
-                )}
-                {nf > 0 && (
-                  <a
-                    href={api.reports.pdfUrl(e.id, 'technical')} download
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
-                      fontSize: 11.5, fontWeight: 600, textDecoration: 'none',
-                      background: 'transparent', color: 'var(--purple-light)', border: '1px solid var(--border-hi)',
-                    }}
-                  >
-                    {DlIco(11, 'var(--purple-light)')} PDF
-                  </a>
-                )}
-              </div>
+              </Card>
             )
           })}
         </div>
@@ -201,7 +303,7 @@ export default function ReportsPage() {
             style={{
               width: '90%', maxWidth: 1180, height: '92vh',
               background: 'var(--surface)', border: '1px solid var(--border-mid)',
-              borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              borderRadius: 10, display: 'flex', flexDirection: 'column', overflow: 'hidden',
               boxShadow: '0 24px 80px rgba(0,0,0,0.85)',
             }}
           >
@@ -210,19 +312,22 @@ export default function ReportsPage() {
               borderBottom: '1px solid var(--border)',
               background: 'var(--panel)', gap: 10, flexShrink: 0,
             }}>
-              <span style={{ color: 'var(--info)' }}>{FileIco(14, 'var(--info)')}</span>
-              <span style={{ flex: 1, fontSize: 12, color: 'var(--muted)', fontWeight: 500, fontFamily: "'JetBrains Mono', monospace" }}>{preview.name}</span>
+              <FileText size={14} color="var(--purple-light)" />
+              <span style={{ flex: 1, fontSize: 12, color: 'var(--muted)', fontWeight: 500, fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {preview.name}
+              </span>
               <a href={preview.downloadUrl} download style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '0.28rem 0.7rem',
-                background: 'var(--purple)', border: 'none', borderRadius: 5,
-                fontSize: 10, color: 'white', fontWeight: 600, textDecoration: 'none', marginRight: 8,
+                background: 'var(--purple)', border: 'none', borderRadius: 6,
+                fontSize: 10.5, color: 'white', fontWeight: 600, textDecoration: 'none', marginRight: 8,
               }}>
-                {DlIco()} Baixar PDF
+                <Download size={11} /> Baixar PDF
               </a>
-              <button onClick={closePreview} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text)')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--muted)')}>
-                {XIco()}
+              <button onClick={closePreview} aria-label="Fechar"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, display: 'flex' }}
+                onMouseEnter={(ev) => (ev.currentTarget.style.color = 'var(--text)')}
+                onMouseLeave={(ev) => (ev.currentTarget.style.color = 'var(--muted)')}>
+                <X size={16} />
               </button>
             </div>
             <iframe
@@ -236,6 +341,6 @@ export default function ReportsPage() {
           </div>
         </div>
       )}
-    </div>
+    </Page>
   )
 }

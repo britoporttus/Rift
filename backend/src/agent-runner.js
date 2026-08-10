@@ -231,7 +231,10 @@ function writeScopeYaml(engagement, frameworkPath = FRAMEWORK_PATH) {
   if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true })
 
   // Create context dir + subdirs for this engagement
-  const ctxDir = path.join(frameworkPath, 'context', id)
+  // Frente 0: o contexto do agente vive sob o tenant. Sem isso o agente — que
+  // roda Bash com o framework como cwd — enxerga o contexto de todos os
+  // clientes com um `ls context/`.
+  const ctxDir = readContextDir(frameworkPath, opts.tenantSlug, id)
   if (!fs.existsSync(ctxDir)) fs.mkdirSync(ctxDir, { recursive: true })
   const parsedDir = path.join(ctxDir, 'parsed')
   if (!fs.existsSync(parsedDir)) fs.mkdirSync(parsedDir, { recursive: true })
@@ -359,13 +362,63 @@ const KILL_GRACE_MS  = Number(process.env.KILL_GRACE_MS) || 5000
 // então qualquer segredo no ambiente (JWT_SECRET, MONGO_URI, AZURE_*,
 // ADMIN_PASSWORD…) seria exfiltrável por prompt injection. Passamos só o mínimo
 // que o CLI do Claude precisa para rodar.
+const { readContextDir } = require('./tenant-paths')
+
 const ENV_ALLOWLIST = [
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR',
   'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_RUNTIME_DIR',
-  // Credenciais do próprio Claude CLI (assinatura/API) — necessárias para o agente.
-  'ANTHROPIC_API_KEY', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CONFIG_DIR',
   'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
 ]
+
+// ── P0-8: credencial do agente ───────────────────────────────────────────────
+// A auditoria assumiu que ANTHROPIC_API_KEY/CLAUDE_CODE_OAUTH_TOKEN estavam no
+// ambiente. Não estão: o CLI autentica pelo arquivo ~/.claude/.credentials.json
+// (a ASSINATURA pessoal do operador). Ou seja, o vetor de exfiltração real não
+// é `env | base64` — é ler o arquivo, já que o agente roda Bash arbitrário com
+// HOME no ambiente.
+//
+// O que dá para resolver EM CÓDIGO (aqui): suportar uma credencial dedicada ao
+// deployment, e passar SÓ ELA — nunca duas credenciais no mesmo processo. Com
+// `RIFT_AGENT_ANTHROPIC_API_KEY` setada, o agente usa uma chave de API própria,
+// monitorável e revogável no console da Anthropic sem derrubar a conta pessoal,
+// e `CLAUDE_CONFIG_DIR` aponta para um diretório dedicado (`RIFT_AGENT_CONFIG_DIR`)
+// para o CLI não cair no perfil pessoal.
+//
+// O que NÃO dá para resolver aqui (fica como ação de infra, ver docs/PLANO-MESTRE
+// §3.1): isolamento de verdade do arquivo de credencial exige rodar o agente com
+// outro usuário de SO/container — enquanto HOME apontar para o home do operador,
+// um `cat` alcança o arquivo. Egress filtering de rede e rotação idem.
+const AGENT_CONFIG_DIR = process.env.RIFT_AGENT_CONFIG_DIR || null
+
+function agentCredential(env = process.env) {
+  if (env.RIFT_AGENT_ANTHROPIC_API_KEY) {
+    return { vars: { ANTHROPIC_API_KEY: env.RIFT_AGENT_ANTHROPIC_API_KEY }, kind: 'dedicated-api-key' }
+  }
+  if (env.ANTHROPIC_API_KEY) {
+    return { vars: { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY }, kind: 'shared-api-key' }
+  }
+  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+    return { vars: { CLAUDE_CODE_OAUTH_TOKEN: env.CLAUDE_CODE_OAUTH_TOKEN }, kind: 'shared-oauth-token' }
+  }
+  // Sem nada no env: o CLI resolve pelo arquivo de credencial do HOME.
+  return { vars: {}, kind: 'subscription-file' }
+}
+
+// Aviso único no boot — a dívida de infra fica visível no log em vez de
+// silenciosamente esquecida.
+let credentialWarned = false
+function warnIfSharedCredential() {
+  if (credentialWarned) return
+  credentialWarned = true
+  const { kind } = agentCredential()
+  if (kind === 'dedicated-api-key') return
+  console.warn(
+    `[agent-runner] P0-8: agente usando credencial COMPARTILHADA (${kind}). ` +
+    'Defina RIFT_AGENT_ANTHROPIC_API_KEY (chave dedicada a este deployment) ' +
+    'para poder monitorar custo anômalo e revogar sem derrubar a conta pessoal.'
+  )
+}
 // Ferramentas ProjectDiscovery vivem em go/bin. Precisam ter PRECEDÊNCIA sobre
 // homônimos do sistema: /usr/bin/httpx é o httpx do Python ("next generation HTTP
 // client"), que NÃO entende `-l subs.txt` → a enumeração de hosts vivos falhava e o
@@ -379,6 +432,11 @@ function buildAgentEnv(extra) {
   for (const key of ENV_ALLOWLIST) {
     if (process.env[key] !== undefined) env[key] = process.env[key]
   }
+  // Exatamente UMA credencial no processo do agente (ver agentCredential).
+  Object.assign(env, agentCredential().vars)
+  // Perfil dedicado do CLI, quando configurado — evita o agente herdar o
+  // perfil/credencial pessoal do operador via CLAUDE_CONFIG_DIR padrão.
+  if (AGENT_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = AGENT_CONFIG_DIR
   const merged = { ...env, ...extra }
   // Prepend dos dirs de tooling (precedência sobre homônimos do sistema).
   for (const dir of [LOCAL_BIN, AGENT_TOOL_PATH]) {
@@ -926,4 +984,4 @@ function clearSession(sessionId) {
   claudeSessions.delete(sessionId)
 }
 
-module.exports = { run, stop, stopAll, sendInput, isRunning, isEngagementRunning, clearSession, buildAgentEnv, ENV_ALLOWLIST, inferPhaseFromEvent, PHASE_ORDER, extractMilestones, buildToolUseEvent, toWsEvent, CLAUDE_BIN, MAX_CONCURRENT_SESSIONS, runningSessions, reconcileOrphanedProcesses, persistPid, removePid, readPidFile, isGroupAlive, PID_FILE }
+module.exports = { run, stop, stopAll, sendInput, isRunning, isEngagementRunning, clearSession, buildAgentEnv, ENV_ALLOWLIST, agentCredential, warnIfSharedCredential, inferPhaseFromEvent, PHASE_ORDER, extractMilestones, buildToolUseEvent, toWsEvent, CLAUDE_BIN, MAX_CONCURRENT_SESSIONS, runningSessions, reconcileOrphanedProcesses, persistPid, removePid, readPidFile, isGroupAlive, PID_FILE }

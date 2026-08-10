@@ -22,6 +22,27 @@ const domainSchema = new mongoose.Schema({
   authorizedAt:      { type: Date, default: null },
   authorizationNote: { type: String, default: null },
 
+  // --- Prova de posse (2026-08-03) ---
+  // `authorized` continua sendo a autorização COMERCIAL/contratual. Isto aqui é
+  // outra coisa: a prova TÉCNICA de que quem cadastrou controla o domínio.
+  // Necessário porque, com cliente self-service, cadastrar o domínio de um
+  // terceiro faria o scan sair do NOSSO IP — o ônus seria nosso.
+  //
+  // Decisão do operador: bloqueia TUDO (nem passivo roda) e ninguém dispensa.
+  // `legacy` existe só para os domínios cadastrados ANTES da regra: não são
+  // tratados como verificados, e sim como pendentes de regularização — fica
+  // explícito na UI em vez de virar aprovação silenciosa.
+  verification: {
+    status:     { type: String, enum: ['pending', 'verified', 'failed', 'legacy'], default: 'pending', index: true },
+    method:     { type: String, enum: ['dns', 'http', null], default: null },
+    token:      { type: String, default: null },
+    issuedAt:   { type: Date, default: null },
+    verifiedAt: { type: Date, default: null },
+    lastCheckAt:{ type: Date, default: null },
+    lastError:  { type: String, default: null },
+    attempts:   { type: Number, default: 0 },
+  },
+
   // --- Estado do scan (o front faz polling disto) ---
   scanState:  { type: String, enum: ['idle', 'scanning', 'done', 'failed'], default: 'idle', index: true },
   scanStep:   { type: String, default: null },   // subdomains | dns | http | urls | leaks | done
