@@ -93,9 +93,13 @@ export const api = {
       const qs = new URLSearchParams(params as Record<string, string>).toString()
       return req<Finding[]>(`/findings${qs ? `?${qs}` : ''}`)
     },
-    setStatus: (id: string, remediationStatus: RemediationStatus) =>
-      req<Finding>(`/findings/${id}/status`, { method: 'PATCH', body: JSON.stringify({ remediationStatus }) }),
+    setStatus: (id: string, patch: { remediationStatus?: RemediationStatus; owner?: string | null; dueDate?: string | null; note?: string }) =>
+      req<Finding>(`/findings/${id}/status`, { method: 'PATCH', body: JSON.stringify(patch) }),
     trace: (id: string) => req<FindingTrace>(`/findings/${id}/trace`),
+  },
+  overview: {
+    gestor:  () => req<GestorOverview>(`/overview/gestor`),
+    diretor: () => req<DiretorOverview>(`/overview/diretor`),
   },
   reports: {
     list: (engagementId: string) => req<ReportFile[]>(`/reports/${engagementId}`),
@@ -252,10 +256,14 @@ export interface DomainSummary {
   scanStep?: string | null
   scanError?: string | null
   lastScanAt?: string | null
-  assetCount: number
-  aliveCount: number
+  assetCount: number          // total cru — não exibir (contém os demais)
+  subdomainCount?: number     // hosts descobertos
+  webAliveCount?: number      // hosts que respondem HTTP
+  aliveCount: number          // == webAliveCount (compat)
+  portCount?: number
   leakCount: number
   exposureCount: number
+  lastDiff?: DomainDiff       // o que mudou no último scan (a API já devolve na lista)
   severityCounts?: Partial<Record<'critical' | 'high' | 'medium' | 'low', number>>
   riskScore: number
   riskLevel: 'critical' | 'high' | 'medium' | 'low' | 'info'
@@ -273,6 +281,10 @@ export interface DomainDiff {
   missingAssets: Array<{ type: string; value: string }>
   newCount: number
   missingCount: number
+  newHostCount?: number       // subdomínios novos (exato)
+  missingHostCount?: number
+  newOtherCount?: number      // portas/IPs novos
+  missingOtherCount?: number
   scoreDelta: number
 }
 
@@ -284,7 +296,9 @@ export interface DomainScanRecord {
   trigger: 'manual' | 'monitor'
   authorized: boolean
   assetCount: number
+  subdomainCount?: number
   aliveCount: number
+  portCount?: number
   exposureCount: number
   cveCount: number
   riskScore: number
@@ -318,8 +332,6 @@ export interface DomainDetail extends DomainSummary {
   authorizedBy?: string | null
   authorizedAt?: string | null
   authorizationNote?: string | null
-  lastDiff?: DomainDiff
-  portCount?: number
   asnInfo?: AsnInfo[]
 }
 
@@ -585,10 +597,13 @@ export interface AgentModelInfo {
   available: AgentModelOption[]
 }
 
+export type Depth = 'tecnico' | 'gestor' | 'diretor'
+
 export interface User {
   id: string
   email: string
   role: 'admin' | 'user' | 'client'
+  depth?: Depth
   name: string
 }
 
@@ -596,6 +611,30 @@ export interface UserFull extends User {
   provider: 'local' | 'microsoft'
   lastLogin: string | null
   createdAt: string
+}
+
+// Visões por papel (Fase 6) — agregações do backend (src/overview.js).
+export interface GestorOverview {
+  metrics: {
+    open: number; inProgress: number; overdue: number
+    avgFixDays: number | null; onTimePct: number | null
+    backlogBySev: Record<'critical' | 'high' | 'medium' | 'low' | 'info', number>
+  }
+  queue: Array<{
+    id: string; title: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+    engagementId?: string; engagementName?: string
+    target: string | null; location: string | null
+    remediationStatus: RemediationStatus
+    owner: string | null; dueDate: string | null; overdue: boolean
+  }>
+}
+export interface DiretorHotspot { id: string; domain: string; score: number; level: 'critical' | 'high' | 'medium' | 'low' | 'info' }
+export interface DiretorOverview {
+  posture: { score: number; level: 'critical' | 'high' | 'medium' | 'low' | 'info'; worstDomain: string | null; worstDomainId: string | null; verdict: string }
+  hotspots: DiretorHotspot[]
+  kpis: { criticalsOpen: number; inProgress: number; overdue: number }
+  trend: Array<{ date: string; score: number }>
+  domainCount: number
 }
 
 export interface EngagementSchedule {
@@ -679,7 +718,8 @@ export interface ReportNarrativeStatus {
   generatedAt?: string
 }
 
-export type RemediationStatus = 'open' | 'fixed' | 'regressed' | 'accepted_risk'
+export type RemediationStatus = 'open' | 'in_progress' | 'fixed' | 'regressed' | 'accepted_risk'
+export interface StatusEvent { status: RemediationStatus; at: string; by?: string; note?: string | null }
 
 export interface Finding {
   id: string
@@ -698,6 +738,9 @@ export interface Finding {
   state?: 'confirmed' | 'probable' | 'informational' | 'false_positive'
   confidence?: 'high' | 'medium' | 'low'
   remediationStatus?: RemediationStatus
+  owner?: string | null
+  dueDate?: string | null
+  statusHistory?: StatusEvent[]
   fingerprint?: string
   firstSeen?: string | null
   lastSeen?: string | null

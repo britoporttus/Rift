@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/lib/api'
+import { homeForDepth, effectiveDepth } from '@/lib/depth'
 import { ScrambleText } from '@/components/ui/fx/ScrambleText'
 import { Aurora } from '@/components/ui/fx/Aurora'
 
@@ -608,7 +609,7 @@ function LoginPageInner() {
       // Troca o código de uso único por um cookie de sessão (nada trafega na URL).
       api.auth.exchange(code)
         .then(() => refreshUser())
-        .then(() => router.replace('/dominios'))
+        .then((u) => router.replace(homeForDepth(effectiveDepth(u))))
         .catch(() => setSsoError(ERROR_MESSAGES['token_exchange_failed']))
     } else if (err) {
       setSsoError(ERROR_MESSAGES[err] || `Erro SSO: ${err}`)
@@ -616,8 +617,9 @@ function LoginPageInner() {
   }, [searchParams, router, refreshUser])
 
   const handleLogin = async (email: string, password: string) => {
-    await login(email, password)
-    router.replace('/dominios')
+    const u = await login(email, password)
+    // Fase 6: cada profundidade tem sua casa (diretor → /executivo, gestor → /painel).
+    router.replace(homeForDepth(effectiveDepth(u)))
   }
 
   return <LoginScreen onLogin={handleLogin} ssoError={ssoError} />

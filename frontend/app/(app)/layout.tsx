@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
+import { DepthSwitcher } from '@/components/ui/DepthSwitcher'
 import { Sidebar } from '@/components/ui/Sidebar'
 import { crumbsFor } from '@/lib/nav'
 import { MotionProvider } from '@/components/ui/motion'
@@ -15,19 +16,21 @@ const GRID_BG = {
 // Rótulo por prefixo de rota. O `novo` de cada módulo tem nome próprio para o
 // breadcrumb não ficar "Domínios › novo".
 const PAGE_NAMES: Record<string, string> = {
-  '/dominios': 'Domínios',
+  '/dominios': 'Web / API',   // menu por ambiente (Fase 1): o inventário de domínios é o alvo Web/API
   '/novo-pentest': 'Novo Pentest',
   '/novo-pentest/web': 'Web / API',
   '/rede-interna': 'Rede Interna',
   '/rede-interna/novo': 'Configurar',
+  '/painel': 'Painel de correções',
+  '/executivo': 'Panorama executivo',
   '/engagement': 'Pentests',
   '/engagement/novo': 'Novo escopo',
   '/vazamentos': 'Vazamentos',
   '/mapa': 'Mapa de Superfície',
-  '/findings': 'Findings',
+  '/findings': 'Achados',
   '/reports': 'Relatórios',
   '/admin/users': 'Usuários',
-  '/admin': 'Admin',
+  '/admin': 'Configurações',
 }
 
 // `crumbsFor` mora em lib/nav.js (testado em test/nav.test.js). Antes era
@@ -70,7 +73,8 @@ function TopBar({ crumbs }: { crumbs: Array<{ href: string; label: string }> }) 
       </nav>
 
       {/* Right side */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
+        <DepthSwitcher />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
             width: 5, height: 5, borderRadius: '50%', background: 'var(--low)',
