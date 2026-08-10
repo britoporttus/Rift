@@ -12,6 +12,7 @@ import { findingType } from '@/lib/findingClassify'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
 import { Donut } from '@/components/ui/charts/Donut'
 import { VulnEducation } from '@/components/findings/VulnEducation'
+import { AnimatePresence, m, itemLista } from '@/components/ui/motion'
 import { AreaTrend } from '@/components/ui/charts/AreaTrend'
 import { findingsPerDay } from '@/lib/trends'
 import {
@@ -310,19 +311,28 @@ function FindingsView() {
         />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* AnimatePresence: ao mudar filtro/severidade os itens que saem são
+              animados antes de sumir do DOM — com CSS puro eles piscavam fora. */}
+          <AnimatePresence initial={false} mode="popLayout">
           {filtered.map((f, i) => {
             const color = SEV_COLOR[f.severity] ?? 'var(--muted)'
             const isExpanded = expanded === f.id
             const rs: RemediationStatus = f.remediationStatus ?? 'open'
             return (
-              <div key={`${f.engagement_id}-${f.id}`}
+              <m.div key={`${f.engagement_id}-${f.id}`}
+                layout
+                custom={i}
+                variants={itemLista}
+                initial="oculto"
+                animate="visivel"
+                exit="saindo"
                 {...clickableDivProps(() => setExpanded(isExpanded ? null : f.id))}
                 style={{
                   background: 'var(--surface)',
                   border: `1px solid ${isExpanded ? 'var(--border-mid)' : 'var(--border)'}`,
                   borderLeft: `3px solid ${color}`,
                   borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                  transition: 'border-color 0.12s', animation: `fadeIn 0.18s ease ${Math.min(i, 12) * 0.03}s both`,
+                  transition: 'border-color 0.12s',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', padding: '0.8rem 1rem', gap: 10 }}>
@@ -385,9 +395,10 @@ function FindingsView() {
                     )}
                   </div>
                 )}
-              </div>
+              </m.div>
             )
           })}
+          </AnimatePresence>
         </div>
       )}
     </Page>
