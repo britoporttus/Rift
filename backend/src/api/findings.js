@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { requireAuth } = require('../auth')
 const { tenantScope } = require('../tenancy')
 const { cleanFindings } = require('../findings-count')
+const { REMEDIATION_STATES, canTransition, defaultDueDate } = require('../finding-lifecycle')
 
 const router = Router()
 router.use(requireAuth())
@@ -10,7 +11,6 @@ router.use(requireAuth())
 router.use(tenantScope())
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
-const REMEDIATION_STATES = ['open', 'fixed', 'regressed', 'accepted_risk']
 
 function toDto(f) {
   return {
@@ -33,6 +33,9 @@ function toDto(f) {
     state:             f.state,
     confidence:        f.confidence,
     remediationStatus: f.remediationStatus || 'open',
+    owner:             f.owner || null,
+    dueDate:           f.dueDate || null,
+    statusHistory:     f.statusHistory || [],
     fingerprint:       f.fingerprint,
     firstSeen:         f.firstSeen || (f.createdAt ? new Date(f.createdAt).toISOString() : null),
     lastSeen:          f.lastSeen,
@@ -84,19 +87,45 @@ router.get('/', async (req, res) => {
   res.json({ items, total, page: p, limit: lim })
 })
 
-// PATCH /api/findings/:id/status — operador marca o estado de remediação
-// (open → fixed → accepted_risk). Fecha o ciclo "achei → corrigi → confirmei".
+// PATCH /api/findings/:id/status — operador move o ciclo de vida do achado:
+// estado (open → in_progress → fixed/accepted_risk), dono e prazo. Grava o
+// histórico de transição (quem, quando) — é o que a visão de gestor lê para
+// responder "o que está sendo corrigido".
 router.patch('/:id/status', async (req, res) => {
-  const { remediationStatus } = req.body ?? {}
-  if (!REMEDIATION_STATES.includes(remediationStatus)) {
-    return res.status(400).json({ error: `remediationStatus inválido (use: ${REMEDIATION_STATES.join(', ')})` })
+  const { remediationStatus, owner, dueDate } = req.body ?? {}
+  const current = await req.db.Finding.findById(req.params.id).lean()
+  if (!current) return res.status(404).json({ error: 'finding não encontrado' })
+
+  const set = {}
+  const push = []
+  const by = req.user?.name || req.user?.email || 'operador'
+
+  if (remediationStatus !== undefined) {
+    if (!REMEDIATION_STATES.includes(remediationStatus)) {
+      return res.status(400).json({ error: `remediationStatus inválido (use: ${REMEDIATION_STATES.join(', ')})` })
+    }
+    const from = current.remediationStatus || 'open'
+    if (remediationStatus !== from) {
+      // `regressed` é atribuído só pelo sistema; ainda assim aceitamos a saída
+      // dele para os estados permitidos (o operador trata como um "aberto").
+      if (!canTransition(from, remediationStatus)) {
+        return res.status(409).json({ error: `transição inválida: ${from} → ${remediationStatus}` })
+      }
+      set.remediationStatus = remediationStatus
+      // Ao entrar em correção sem prazo definido, deriva um do SLA da severidade.
+      if (remediationStatus === 'in_progress' && !current.dueDate && dueDate === undefined) {
+        set.dueDate = defaultDueDate(current.severity, new Date())
+      }
+      push.push({ status: remediationStatus, at: new Date(), by, note: req.body?.note || null })
+    }
   }
-  const finding = await req.db.Finding.findByIdAndUpdate(
-    req.params.id,
-    { remediationStatus },
-    { new: true }
-  ).lean()
-  if (!finding) return res.status(404).json({ error: 'finding não encontrado' })
+  if (owner !== undefined) set.owner = owner ? String(owner).slice(0, 120) : null
+  if (dueDate !== undefined) set.dueDate = dueDate ? new Date(dueDate) : null
+
+  const update = { $set: set }
+  if (push.length) update.$push = { statusHistory: { $each: push } }
+
+  const finding = await req.db.Finding.findByIdAndUpdate(req.params.id, update, { new: true }).lean()
   res.json(toDto(finding))
 })
 
