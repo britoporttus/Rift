@@ -40,7 +40,11 @@
 html,
 body {
   max-width: 100vw;
-  overflow-x: hidden;
+  /* `clip` e não `hidden`: com `hidden` aqui, o <body> vira um contêiner de
+     rolagem e QUALQUER `position: sticky` dentro dele para de grudar na
+     viewport (foi o que deixou o ato orbital da home em branco). `clip` corta
+     o transbordo horizontal igual, sem criar contêiner de rolagem. */
+  overflow-x: clip;
   background-color: var(--bg);
   color: var(--text);
   font-family: 'Space Grotesk', sans-serif;
