@@ -5,7 +5,7 @@ const { Router } = require('express')
 const { requireAuth } = require('../auth')
 const { tenantScope } = require('../tenancy')
 const { cleanFindings } = require('../findings-count')
-const { gestorOverview, diretorOverview, postureTrend } = require('../overview')
+const { gestorOverview, diretorOverview, postureTrend, kanbanBoard } = require('../overview')
 
 const router = Router()
 router.use(requireAuth())
@@ -33,6 +33,23 @@ router.get('/gestor', async (req, res) => {
     for (const q of out.queue) q.target = byId.get(String(q.engagementId)) || q.engagementName || null
   }
   res.json(out)
+})
+
+// GET /api/overview/board?scope=mine|all — quadro Kanban de correção.
+// `mine` filtra pelos achados cujo dono é o usuário (o "meus achados" do técnico).
+router.get('/board', async (req, res) => {
+  const { findings } = await loadData(req.db)
+  const ownerFilter = req.query.scope === 'mine' ? (req.user?.name || req.user?.email || null) : null
+  const board = kanbanBoard(findings, new Date(), { ownerFilter })
+  // Enriquece cada card com o ALVO (Engagement.target), como na fila do gestor.
+  const allCards = Object.values(board.columns).flat()
+  const ids = [...new Set(allCards.map((c) => c.engagementId).filter(Boolean))]
+  if (ids.length) {
+    const engs = await req.db.Engagement.find({ _id: { $in: ids } }).select('target name').lean().catch(() => [])
+    const byId = new Map(engs.map((e) => [String(e._id), e.target || e.name]))
+    for (const c of allCards) c.target = byId.get(String(c.engagementId)) || c.engagementName || null
+  }
+  res.json(board)
 })
 
 // GET /api/overview/diretor — veredito + postura + tendência + 3 KPIs.

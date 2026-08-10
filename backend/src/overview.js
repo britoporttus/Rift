@@ -163,4 +163,43 @@ function postureTrend(scans, days, now) {
     .map(([date, score]) => ({ date, score }))
 }
 
-module.exports = { gestorOverview, diretorOverview, postureTrend, isActionable, isOpen, OPEN_STATES, SEV_ORDER }
+// ── Kanban de correção (evolução das Fases 5+6) ─────────────────────────────
+// Achados acionáveis agrupados por estado de remediação, para um quadro estilo
+// Azure DevOps. `ownerFilter` (opcional) = só os do técnico. Cards ordenados por
+// prazo estourado, depois severidade. Colunas seguem REMEDIATION_STATES úteis.
+const BOARD_COLUMNS = ['open', 'in_progress', 'fixed', 'accepted_risk']
+
+function kanbanBoard(findings, now, { ownerFilter = null } = {}) {
+  const act = findings.filter(isActionable).filter((f) => !ownerFilter || f.owner === ownerFilter)
+  const card = (f) => ({
+    id: f._id || f.id,
+    title: f.title,
+    severity: f.severity,
+    engagementId: f.engagementId,
+    engagementName: f.engagementName,
+    target: null,        // preenchido pelo endpoint
+    location: f.location || null,
+    remediationStatus: f.remediationStatus || 'open',
+    owner: f.owner || null,
+    dueDate: f.dueDate || null,
+    overdue: !!(f.dueDate && new Date(f.dueDate) < now && isOpen(f)),
+  })
+  const sortCards = (arr) => arr.sort((a, b) =>
+    Number(b.overdue) - Number(a.overdue) ||
+    SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(b.severity) ||
+    (a.dueDate ? new Date(a.dueDate).getTime() : Infinity) - (b.dueDate ? new Date(b.dueDate).getTime() : Infinity))
+
+  const columns = {}
+  for (const col of BOARD_COLUMNS) columns[col] = []
+  for (const f of act) {
+    const st = f.remediationStatus || 'open'
+    // `regressed` mora na coluna "Aberto" (é acionável), mas o card guarda o
+    // status real para exibir o selo "regrediu".
+    const col = st === 'regressed' ? 'open' : (BOARD_COLUMNS.includes(st) ? st : 'open')
+    columns[col].push(card(f))
+  }
+  for (const col of BOARD_COLUMNS) sortCards(columns[col])
+  return { columns, counts: Object.fromEntries(BOARD_COLUMNS.map((c) => [c, columns[c].length])) }
+}
+
+module.exports = { gestorOverview, diretorOverview, postureTrend, kanbanBoard, isActionable, isOpen, OPEN_STATES, SEV_ORDER, BOARD_COLUMNS }

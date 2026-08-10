@@ -5,8 +5,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { api, GestorOverview } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
-import { Page, PageHeader, Card, Kpi, KpiRow, SectionTitle, Skeleton, EmptyState, Reveal, tint } from '@/components/ui/kit'
-import { ClipboardList, Clock, AlertTriangle, CheckCircle2, TimerReset, User as UserIcon, Globe } from 'lucide-react'
+import { Page, PageHeader, Card, Btn, Kpi, KpiRow, SectionTitle, Skeleton, EmptyState, Reveal, tint } from '@/components/ui/kit'
+import { ClipboardList, Clock, AlertTriangle, CheckCircle2, TimerReset, User as UserIcon, Globe, KanbanSquare } from 'lucide-react'
 
 const SEV_ROW = ['critical', 'high', 'medium', 'low'] as const
 const SEV_WORD: Record<string, string> = { critical: 'Crítica', high: 'Alta', medium: 'Média', low: 'Baixa', info: 'Info' }
@@ -40,6 +40,7 @@ export default function PainelGestorPage() {
         icon={<ClipboardList size={19} color="var(--purple-light)" />}
         title="Painel de correções"
         subtitle="O andamento das correções: o que está aberto, em correção, e o que já estourou o prazo."
+        actions={<Btn href="/correcoes"><KanbanSquare size={14} /> Abrir quadro</Btn>}
       />
 
       {loading ? (

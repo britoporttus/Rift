@@ -1,6 +1,6 @@
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { gestorOverview, diretorOverview, postureTrend, isActionable, isOpen } = require('../src/overview')
+const { gestorOverview, diretorOverview, postureTrend, kanbanBoard, isActionable, isOpen } = require('../src/overview')
 
 const NOW = new Date('2026-08-10T12:00:00Z')
 const past = (d) => new Date(NOW.getTime() - d * 86400000)
@@ -94,6 +94,31 @@ test('postureTrend: pior índice por dia, dentro da janela, cronológico', () =>
   assert.equal(t[0].date < t[1].date, true, 'ordem cronológica')
   const day1 = t.find((p) => p.date === past(1).toISOString().slice(0, 10))
   assert.equal(day1.score, 68, 'pior índice do dia')
+})
+
+test('kanban: agrupa por coluna; regrediu cai em "aberto"; conta certo', () => {
+  const findings = [
+    { _id: '1', state: 'confirmed', severity: 'high', remediationStatus: 'open' },
+    { _id: '2', state: 'confirmed', severity: 'critical', remediationStatus: 'in_progress' },
+    { _id: '3', state: 'confirmed', severity: 'medium', remediationStatus: 'regressed' },   // → coluna open
+    { _id: '4', state: 'confirmed', severity: 'low', remediationStatus: 'fixed' },
+    { _id: '5', state: 'informational', severity: 'info', remediationStatus: 'open' },        // não acionável → fora
+  ]
+  const { columns, counts } = kanbanBoard(findings, NOW)
+  assert.equal(counts.open, 2, 'open + regressed')
+  assert.equal(counts.in_progress, 1)
+  assert.equal(counts.fixed, 1)
+  assert.ok(columns.open.some((c) => c.id === '3'), 'regrediu está na coluna aberto')
+  assert.ok(!columns.open.some((c) => c.id === '5'), 'informativo não entra')
+})
+
+test('kanban: scope "mine" filtra pelo dono', () => {
+  const findings = [
+    { _id: '1', state: 'confirmed', severity: 'high', remediationStatus: 'in_progress', owner: 'Ana' },
+    { _id: '2', state: 'confirmed', severity: 'high', remediationStatus: 'in_progress', owner: 'Beto' },
+  ]
+  const { counts } = kanbanBoard(findings, NOW, { ownerFilter: 'Ana' })
+  assert.equal(counts.in_progress, 1)
 })
 
 test('isActionable / isOpen', () => {

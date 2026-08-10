@@ -42,6 +42,7 @@ const Ico = {
   cloud:     (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" /></SI>,
   directory: (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M12 2l9 4.5v11L12 22l-9-4.5v-11L12 2z" /><circle cx="12" cy="10" r="2.4" /><path d="M8.5 16a3.5 3.5 0 017 0" /></SI>,
   sap:       (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 15V9l3 6 3-6v6M17 9v6" /></SI>,
+  kanban:    (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v13M15 3v8" /></SI>,
 }
 
 // Navegação por AMBIENTE TESTADO (Fase 1 do roadmap de legibilidade, 2026-08-10).
@@ -69,9 +70,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Resultado',
     items: [
-      { href: '/findings', icon: 'alert',  label: 'Achados' },
-      { href: '/reports',  icon: 'file',   label: 'Relatórios' },
-      { href: '/mapa',     icon: 'share2', label: 'Mapa' },
+      { href: '/findings',  icon: 'alert',   label: 'Achados' },
+      { href: '/correcoes', icon: 'kanban',  label: 'Correções' },
+      { href: '/reports',   icon: 'file',    label: 'Relatórios' },
+      { href: '/mapa',      icon: 'share2',  label: 'Mapa' },
     ],
   },
   {

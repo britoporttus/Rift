@@ -100,6 +100,7 @@ export const api = {
   overview: {
     gestor:  () => req<GestorOverview>(`/overview/gestor`),
     diretor: () => req<DiretorOverview>(`/overview/diretor`),
+    board:   (scope: 'all' | 'mine' = 'all') => req<KanbanBoardData>(`/overview/board?scope=${scope}`),
   },
   reports: {
     list: (engagementId: string) => req<ReportFile[]>(`/reports/${engagementId}`),
@@ -628,6 +629,19 @@ export interface GestorOverview {
     owner: string | null; dueDate: string | null; overdue: boolean
   }>
 }
+export interface BoardCard {
+  id: string; title: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  engagementId?: string; engagementName?: string
+  target: string | null; location: string | null
+  remediationStatus: RemediationStatus
+  owner: string | null; dueDate: string | null; overdue: boolean
+}
+export type BoardColumn = 'open' | 'in_progress' | 'fixed' | 'accepted_risk'
+export interface KanbanBoardData {
+  columns: Record<BoardColumn, BoardCard[]>
+  counts: Record<BoardColumn, number>
+}
+
 export interface DiretorHotspot { id: string; domain: string; score: number; level: 'critical' | 'high' | 'medium' | 'low' | 'info' }
 export interface DiretorOverview {
   posture: { score: number; level: 'critical' | 'high' | 'medium' | 'low' | 'info'; worstDomain: string | null; worstDomainId: string | null; verdict: string }

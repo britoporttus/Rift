@@ -22,6 +22,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/rede-interna': 'Rede Interna',
   '/rede-interna/novo': 'Configurar',
   '/painel': 'Painel de correções',
+  '/correcoes': 'Quadro de correções',
   '/executivo': 'Panorama executivo',
   '/engagement': 'Pentests',
   '/engagement/novo': 'Novo escopo',
