@@ -19,6 +19,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/dominios': 'Web / API',   // menu por ambiente (Fase 1): o inventário de domínios é o alvo Web/API
   '/novo-pentest': 'Novo Pentest',
   '/novo-pentest/web': 'Web / API',
+  '/harness': 'Teste de conexão',
   '/rede-interna': 'Rede Interna',
   '/rede-interna/novo': 'Configurar',
   '/painel': 'Painel de correções',

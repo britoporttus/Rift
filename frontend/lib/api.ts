@@ -106,6 +106,12 @@ export const api = {
     events: (limit = 50, unseen = false) => req<{ events: MonitorEvent[]; unseen: number }>(`/monitor/events?limit=${limit}${unseen ? '&unseen=1' : ''}`),
     markSeen: () => req<{ ok: boolean }>(`/monitor/events/seen`, { method: 'POST' }),
   },
+  harness: {
+    session: (body: {
+      loginUrl: string; username: string; password: string
+      usernameField?: string; passwordField?: string; protectedUrl?: string; successContains?: string
+    }) => req<SessionCheckResult>(`/harness/session`, { method: 'POST', body: JSON.stringify(body) }),
+  },
   reports: {
     list: (engagementId: string) => req<ReportFile[]>(`/reports/${engagementId}`),
     // URL do relatório GERADO pelo Rift (a partir dos findings). Usada direto no
@@ -644,6 +650,16 @@ export type BoardColumn = 'open' | 'in_progress' | 'fixed' | 'accepted_risk'
 export interface KanbanBoardData {
   columns: Record<BoardColumn, BoardCard[]>
   counts: Record<BoardColumn, number>
+}
+
+// Harness de sessão (#3) — resultado do pré-voo de login (sem IA).
+export interface SessionCheckResult {
+  verdict: 'ok' | 'failed' | 'inconclusive' | 'error'
+  sessionEstablished?: boolean
+  sustained?: boolean | null
+  reasons?: string[]
+  evidence?: { cookies?: string[]; status?: number; redirect?: string; protectedStatus?: number; successMarker?: boolean; failureMarker?: boolean }
+  error?: string
 }
 
 export interface MonitorEvent {

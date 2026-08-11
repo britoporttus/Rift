@@ -84,10 +84,9 @@ A ordem é decisão fechada; não re-discutir sem motivo novo.
 |---|---|---|
 | **2b** | ASM monitoramento risk-triggered | §1.1 |
 | **3** | Agente 2 autenticado + harness de sessão | — |
-| **4** | BYOK nível 1 (Claude Agent SDK) — chave própria + custo previsível | Frente 0 |
-| **5** | Correlação leve de credenciais (domínio→empresa→funcionários) | — |
-| **6** | Integrações / abas de conexão (ticketing + MCP) | Frente 0 |
-| **6b** | Cloud: Azure + Entra ID a sério (postura de identidade) | — |
+| **4** | Correlação leve de credenciais (domínio→empresa→funcionários) | — |
+| **5** | Integrações / abas de conexão (ticketing + MCP) | Frente 0 |
+| **5b** | Cloud: Azure + Entra ID a sério (postura de identidade) | — |
 
 ---
 
@@ -108,6 +107,7 @@ Registrado para **não ser re-proposto** sem contexto novo.
 
 | Item | Estado | Por quê |
 |---|---|---|
+| BYOK (traga sua chave de IA / Agent SDK) | ❌ | **Descartado pelo operador em 2026-08-10** — não se quer essa ideia dentro da plataforma; a inferência segue na assinatura Claude Code existente. |
 | Coleta própria de stealer logs (Vazamentos) | ❌ | "buy, not build" — não vale construir o pipeline de coleta. Fica a correlação. |
 | Inverter o índice para `100 − risco` | ❌ | avaliado 2026-08-10; renomear para "Índice de exposição" resolve sem quebrar o histórico. |
 | Ambiente de staging | ❌ | criado e abandonado no mesmo dia (2026-07-23); o operador trabalha direto em produção. |
