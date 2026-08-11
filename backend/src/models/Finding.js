@@ -35,9 +35,19 @@ const findingSchema = new mongoose.Schema({
   mitre:          { type: String, default: null },
   discoveredBy:   { type: String, default: null },
 
-  // --- Rastreamento de regressão (re-scans) ---
+  // --- Ciclo de vida (Fase 5) — o operador é dono destes; o watcher não os
+  //     sobrescreve em re-scan. `in_progress` = "em correção". `regressed` = o
+  //     scanner viu de novo algo que estava `fixed`. `false_positive` mora em
+  //     `state` (acima). Prazo derivado de política por severidade, sobrescrevível. ---
   fingerprint:        { type: String, default: null, index: true },
-  remediationStatus:  { type: String, enum: ['open', 'fixed', 'regressed', 'accepted_risk'], default: 'open' },
+  remediationStatus:  { type: String, enum: ['open', 'in_progress', 'fixed', 'regressed', 'accepted_risk'], default: 'open', index: true },
+  owner:              { type: String, default: null },   // quem está corrigindo
+  dueDate:            { type: Date, default: null },     // prazo de correção
+  statusHistory:      { type: [{ status: String, at: Date, by: String, note: String }], default: [] },
+  // Integração de ticketing (#5): ref externa quando o achado virou ticket.
+  ticketUrl:          { type: String, default: null },
+  ticketRef:          { type: String, default: null },   // ex.: "#42"
+  ticketType:         { type: String, default: null },   // 'github' | …
   firstSeen:          { type: String, default: null },
   lastSeen:           { type: String, default: null },
 }, { timestamps: true })

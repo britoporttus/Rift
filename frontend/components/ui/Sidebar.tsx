@@ -1,10 +1,11 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { User } from '@/lib/api'
+import { User, Depth } from '@/lib/api'
 import { SI } from '@/components/ui/SI'
 import { isActive } from '@/lib/nav'
 import { can } from '@/lib/viewer'
+import { effectiveDepth } from '@/lib/depth'
 
 const C = {
   bg: 'var(--bg)',
@@ -39,41 +40,61 @@ const Ico = {
   chevLeft:  (s?: number, c?: string) => <SI s={s || 14} c={c || C.textMute} sw={2}><polyline points="15 18 9 12 15 6" /></SI>,
   chevRight: (s?: number, c?: string) => <SI s={s || 14} c={c || C.textMute} sw={2}><polyline points="9 18 15 12 9 6" /></SI>,
   plus:      (s?: number, c?: string) => <SI s={s || 14} c={c} sw={2.5}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></SI>,
+  cloud:     (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" /></SI>,
+  directory: (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M12 2l9 4.5v11L12 22l-9-4.5v-11L12 2z" /><circle cx="12" cy="10" r="2.4" /><path d="M8.5 16a3.5 3.5 0 017 0" /></SI>,
+  sap:       (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 15V9l3 6 3-6v6M17 9v6" /></SI>,
+  kanban:    (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v13M15 3v8" /></SI>,
+  shield:    (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M12 3l8 3.5V12c0 4.4-3.4 7.4-8 8.5C7.4 19.4 4 16.4 4 12V6.5z" /></SI>,
+  plug:      (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M9 2v6M15 2v6M7 8h10v3a5 5 0 0 1-10 0zM12 16v6" /></SI>,
 }
 
-// Navegação reorganizada (ciclo de coesão 2026-08): a entrada é Domínios (a home).
-// Dashboard saiu do menu (raiz → Domínios; métricas seguem no Admin). Vazamentos
-// está "em construção" — fora do menu por enquanto (a rota vira stub, ver /vazamentos).
-//
-// Agrupada em três blocos porque a lista plana de 7 itens não dizia o que era
-// coleta (superfície) e o que era resultado (findings/relatórios) — o operador
-// lia tudo com o mesmo peso. "Novo Pentest" saiu da lista e virou ação primária
-// no topo: era alcançável só a partir de /dominios, o que escondia a ação
-// central do produto de quem estivesse em qualquer outra tela.
-type NavItem = { href: string; icon: keyof typeof Ico; label: string; adminOnly?: boolean }
+// Navegação por AMBIENTE TESTADO (Fase 1 do roadmap de legibilidade, 2026-08-10).
+// A divisão antiga (Superfície / Resultados / Sistema) descrevia o PROCESSO
+// interno do Rift; ninguém abre o menu pensando "vou na superfície". O eixo certo
+// é o que o cliente contratou: o alvo. "Domínios" deixou de ser item — virou a
+// lista de entrada de "Web / API" (a rota segue /dominios). "Mapa" saiu de alvo:
+// é uma LENTE sobre tudo, então foi para Resultado. Cloud/AD/SAP entram como
+// `soon` — o menu vira o roadmap visível, e isso vende. "Novo Pentest" segue
+// como ação primária no topo (não é um alvo, é uma ação sobre um alvo).
+// `depths`: para CLIENTE, quais profundidades veem o item (barreira real). Item
+// sem `depths` = todas. Operador interno (admin/user) ignora `depths` — vê tudo,
+// porque alterna livremente (a profundidade é só a casa dele, não uma prisão).
+type NavItem = { href: string; icon: keyof typeof Ico; label: string; adminOnly?: boolean; soon?: boolean; depths?: Depth[] }
 type NavGroup = { title: string; items: NavItem[] }
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    title: 'Superfície',
+    title: 'Painéis',
     items: [
-      { href: '/dominios',     icon: 'globe',   label: 'Domínios' },
-      { href: '/rede-interna', icon: 'network', label: 'Rede Interna' },
-      { href: '/mapa',         icon: 'share2',  label: 'Mapa' },
+      { href: '/painel',    icon: 'grid',   label: 'Painel do gestor', depths: ['tecnico', 'gestor'] },
+      { href: '/executivo', icon: 'shield', label: 'Panorama executivo', depths: ['tecnico', 'gestor', 'diretor'] },
     ],
   },
   {
-    title: 'Resultados',
+    title: 'Alvos',
     items: [
-      { href: '/findings', icon: 'alert', label: 'Findings' },
-      { href: '/reports',  icon: 'file',  label: 'Relatórios' },
+      { href: '/dominios',     icon: 'globe',     label: 'Web / API', depths: ['tecnico'] },
+      { href: '/rede-interna', icon: 'network',   label: 'Rede Interna', depths: ['tecnico'] },
+      { href: '/cloud',        icon: 'cloud',     label: 'Cloud', soon: true, depths: ['tecnico'] },
+      { href: '/ad',           icon: 'directory', label: 'Active Directory', soon: true, depths: ['tecnico'] },
+      { href: '/sap',          icon: 'sap',       label: 'SAP', soon: true, depths: ['tecnico'] },
     ],
   },
   {
-    title: 'Sistema',
+    title: 'Resultado',
     items: [
-      { href: '/admin/users', icon: 'users',    label: 'Usuários', adminOnly: true },
-      { href: '/admin',       icon: 'settings', label: 'Admin',    adminOnly: true },
+      { href: '/findings',  icon: 'alert',   label: 'Achados', depths: ['tecnico', 'gestor'] },
+      { href: '/correcoes', icon: 'kanban',  label: 'Correções', depths: ['tecnico', 'gestor'] },
+      { href: '/reports',   icon: 'file',    label: 'Relatórios' },   // todas as profundidades
+      { href: '/mapa',      icon: 'share2',  label: 'Mapa', depths: ['tecnico', 'gestor'] },
+    ],
+  },
+  {
+    title: 'Conta',
+    items: [
+      { href: '/conexoes',    icon: 'plug',     label: 'Conexões', depths: [] },   // [] = nenhum cliente; só operador interno
+      { href: '/admin/users', icon: 'users',    label: 'Usuários',       adminOnly: true },
+      { href: '/admin',       icon: 'settings', label: 'Configurações',  adminOnly: true },
     ],
   },
 ]
@@ -97,8 +118,15 @@ interface SidebarProps {
 
 export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
   const path = usePathname()
+  // Restrição por profundidade (Fase 6): só o CLIENTE é barrado — operador interno
+  // alterna livremente, então vê tudo. Cliente diretor vê só executivo+relatórios,
+  // gestor vê o mundo de resultado, técnico vê tudo (do tenant dele).
+  const isClient = user.role === 'client'
+  const clientDepth = effectiveDepth(user)
   const groups = NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((n) => !n.adminOnly || user.role === 'admin') }))
+    .map((g) => ({ ...g, items: g.items.filter((n) =>
+      (!n.adminOnly || user.role === 'admin') &&
+      (!isClient || !n.depths || n.depths.includes(clientDepth))) }))
     .filter((g) => g.items.length > 0)
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href))
   const novoActive = path.startsWith('/novo-pentest')
@@ -183,8 +211,34 @@ export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
                   {group.title}
                 </div>
               )}
-            {group.items.map(({ href, icon, label }) => {
+            {group.items.map(({ href, icon, label, soon }) => {
               const active = isActive(path, href, allHrefs)
+              // Item "em breve": não navega (a rota não existe — link seria quebrado).
+              // Fica visível e esmaecido para comunicar o roadmap do produto.
+              if (soon) {
+                return (
+                  <div key={href} aria-disabled="true" title={collapsed ? `${label} — em breve` : undefined}
+                    style={{
+                      display: 'flex', alignItems: 'center',
+                      justifyContent: collapsed ? 'center' : 'flex-start',
+                      gap: collapsed ? 0 : 10,
+                      padding: collapsed ? '0.5rem 0' : '0.5rem 0.875rem',
+                      borderRadius: collapsed ? 0 : 5, borderLeft: collapsed ? 'none' : '2px solid transparent',
+                      color: C.textMute, fontSize: 12.5, opacity: 0.5, cursor: 'default',
+                    }}>
+                    <span style={{ color: C.textMute, flexShrink: 0 }}>{Ico[icon](14)}</span>
+                    {!collapsed && (
+                      <>
+                        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{label}</span>
+                        <span style={{
+                          fontSize: 7.5, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+                          color: C.textMute, border: `1px solid ${C.border}`, borderRadius: 4, padding: '1px 4px', whiteSpace: 'nowrap',
+                        }}>em breve</span>
+                      </>
+                    )}
+                  </div>
+                )
+              }
               return (
                 <Link key={href} href={href} style={{ textDecoration: 'none' }}>
                   <div style={{

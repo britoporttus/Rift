@@ -181,7 +181,7 @@ export function SectionTitle({ children, icon, color = 'var(--muted)', right }: 
  * que colapsado ainda informe. `defaultOpen=false` é o padrão de propósito:
  * a tela abre com a leitura de alto nível, não com tudo expandido.
  */
-export function Collapsible({ title, icon, meta, children, defaultOpen = false, color = 'var(--muted)', count }: {
+export function Collapsible({ title, icon, meta, children, defaultOpen = false, color = 'var(--muted)', count, open: openProp, onToggle, anchorId }: {
   title: React.ReactNode
   icon?: React.ReactNode
   /** resumo curto mostrado à direita mesmo quando fechado */
@@ -190,13 +190,22 @@ export function Collapsible({ title, icon, meta, children, defaultOpen = false, 
   defaultOpen?: boolean
   color?: string
   count?: number
+  /** modo controlado: quando `open`/`onToggle` são passados, o pai manda no
+   *  estado (usado para "abrir a seção ao clicar no número que a sustenta"). */
+  open?: boolean
+  onToggle?: () => void
+  /** id de âncora no wrapper — alvo de scrollIntoView vindo de um HeroStat */
+  anchorId?: string
 }) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [openState, setOpenState] = useState(defaultOpen)
+  const controlled = openProp !== undefined
+  const open = controlled ? openProp : openState
+  const setOpen = () => (controlled ? onToggle?.() : setOpenState((v) => !v))
   const panelId = useId()
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: R.card, overflow: 'hidden' }}>
+    <div id={anchorId} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: R.card, overflow: 'hidden', scrollMarginTop: 70 }}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen()}
         aria-expanded={open}
         aria-controls={panelId}
         style={{

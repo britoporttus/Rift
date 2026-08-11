@@ -14,10 +14,12 @@ const scanSchema = new mongoose.Schema({
   authorized: { type: Boolean, default: false },   // se o probe ativo (httpx/nuclei) rodou neste scan
 
   // Snapshot de contadores no momento do scan
-  assetCount:    { type: Number, default: 0 },
-  aliveCount:    { type: Number, default: 0 },
-  exposureCount: { type: Number, default: 0 },
-  cveCount:      { type: Number, default: 0 },
+  assetCount:     { type: Number, default: 0 },   // total cru (contém os demais)
+  subdomainCount: { type: Number, default: 0 },   // hosts descobertos
+  aliveCount:     { type: Number, default: 0 },   // hosts web-vivos (não portas)
+  portCount:      { type: Number, default: 0 },
+  exposureCount:  { type: Number, default: 0 },
+  cveCount:       { type: Number, default: 0 },
   riskScore:     { type: Number, default: 0 },
   riskLevel:     { type: String, default: 'info' },
 

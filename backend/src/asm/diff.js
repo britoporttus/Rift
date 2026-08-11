@@ -25,9 +25,21 @@ function computeAssetDiff({ previousAssets = [], currentAssets = [], scopedTypes
     ? previousAssets.filter((a) => scoped.has(a.type) && a.fingerprint && !currFp.has(a.fingerprint))
     : []
 
+  // Contagem por categoria (exata — os arrays abaixo são só exemplos, limitados
+  // a MAX_EXAMPLES). Sem isto, a UI tentava contar "novos hosts" a partir dos
+  // exemplos e subcontava acima de 20; e o headline "+N novos" misturava host
+  // com porta (Bug 4 da Fase 2). `host` = subdomínio; o resto vai em `other`.
+  const isHost = (a) => a.type === 'subdomain'
+  const newHostCount = newAssets.filter(isHost).length
+  const missingHostCount = missingAssets.filter(isHost).length
+
   return {
     newCount: newAssets.length,
     missingCount: missingAssets.length,
+    newHostCount,
+    missingHostCount,
+    newOtherCount: newAssets.length - newHostCount,     // portas/IPs
+    missingOtherCount: missingAssets.length - missingHostCount,
     newAssets: newAssets.slice(0, MAX_EXAMPLES).map((a) => ({ type: a.type, value: a.value, severity: a.severity || 'info' })),
     missingAssets: missingAssets.slice(0, MAX_EXAMPLES).map((a) => ({ type: a.type, value: a.value })),
   }

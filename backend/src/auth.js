@@ -104,13 +104,17 @@ router.post('/login', loginRateLimit, async (req, res) => {
   const token = signToken(user)
   res.cookie(COOKIE_NAME, token, cookieOptionsFor(req))
   return res.json({
-    user: { id: user._id, email: user.email, role: user.role, name: user.name },
+    // `depth` (Fase 6) vem do banco, não do token — é preferência de leitura, não
+    // controle de acesso; não deve invalidar sessão ao mudar.
+    user: { id: user._id, email: user.email, role: user.role, name: user.name, depth: user.depth || 'tecnico' },
   })
 })
 
 // GET /api/auth/me
-router.get('/me', requireAuth(), (req, res) => {
-  res.json({ user: req.user })
+router.get('/me', requireAuth(), async (req, res) => {
+  // Lê `depth` fresco do banco (autoritativo) — o token não o carrega.
+  const u = await User.findById(req.user.id).select('depth').lean().catch(() => null)
+  res.json({ user: { ...req.user, depth: u?.depth || 'tecnico' } })
 })
 
 // POST /api/auth/logout — limpa o cookie no servidor (o browser não pode, é HttpOnly).

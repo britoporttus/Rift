@@ -93,9 +93,32 @@ export const api = {
       const qs = new URLSearchParams(params as Record<string, string>).toString()
       return req<Finding[]>(`/findings${qs ? `?${qs}` : ''}`)
     },
-    setStatus: (id: string, remediationStatus: RemediationStatus) =>
-      req<Finding>(`/findings/${id}/status`, { method: 'PATCH', body: JSON.stringify({ remediationStatus }) }),
+    setStatus: (id: string, patch: { remediationStatus?: RemediationStatus; owner?: string | null; dueDate?: string | null; note?: string }) =>
+      req<Finding>(`/findings/${id}/status`, { method: 'PATCH', body: JSON.stringify(patch) }),
     trace: (id: string) => req<FindingTrace>(`/findings/${id}/trace`),
+    ticket: (id: string, connectionId: string) => req<Finding>(`/findings/${id}/ticket`, { method: 'POST', body: JSON.stringify({ connectionId }) }),
+  },
+  integrations: {
+    list: () => req<IntegrationsData>('/integrations'),
+    save: (data: { type: string; label?: string; config?: Record<string, string>; token?: string }) =>
+      req<Connection>('/integrations', { method: 'POST', body: JSON.stringify(data) }),
+    test: (id: string) => req<{ ok: boolean; detail: string }>(`/integrations/${id}/test`, { method: 'POST' }),
+    remove: (id: string) => req<void>(`/integrations/${id}`, { method: 'DELETE' }),
+  },
+  overview: {
+    gestor:  () => req<GestorOverview>(`/overview/gestor`),
+    diretor: () => req<DiretorOverview>(`/overview/diretor`),
+    board:   (scope: 'all' | 'mine' = 'all') => req<KanbanBoardData>(`/overview/board?scope=${scope}`),
+  },
+  monitor: {
+    events: (limit = 50, unseen = false) => req<{ events: MonitorEvent[]; unseen: number }>(`/monitor/events?limit=${limit}${unseen ? '&unseen=1' : ''}`),
+    markSeen: () => req<{ ok: boolean }>(`/monitor/events/seen`, { method: 'POST' }),
+  },
+  harness: {
+    session: (body: {
+      loginUrl: string; username: string; password: string
+      usernameField?: string; passwordField?: string; protectedUrl?: string; successContains?: string
+    }) => req<SessionCheckResult>(`/harness/session`, { method: 'POST', body: JSON.stringify(body) }),
   },
   reports: {
     list: (engagementId: string) => req<ReportFile[]>(`/reports/${engagementId}`),
@@ -119,9 +142,9 @@ export const api = {
   },
   users: {
     list: () => req<UserFull[]>('/users'),
-    create: (data: { email: string; name: string; password: string; role?: 'admin' | 'user' | 'client' }) =>
+    create: (data: { email: string; name: string; password: string; role?: 'admin' | 'user' | 'client'; depth?: Depth }) =>
       req<UserFull>('/users', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: { role?: 'admin' | 'user' | 'client'; name?: string }) =>
+    update: (id: string, data: { role?: 'admin' | 'user' | 'client'; name?: string; depth?: Depth }) =>
       req<UserFull>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) => req<void>(`/users/${id}`, { method: 'DELETE' }),
     resetPassword: (id: string, password: string) =>
@@ -151,6 +174,8 @@ export const api = {
       req<DomainDetail>(`/domains/${id}/authorization`, { method: 'PATCH', body: JSON.stringify({ authorized, note }) }),
     assets: (id: string, type?: string) =>
       req<DomainAsset[]>(`/domains/${id}/assets${type ? `?type=${type}` : ''}`),
+    // Correlação leve (#4): pessoas/e-mails do domínio cruzados com vazamentos.
+    people: (id: string) => req<DomainPeople>(`/domains/${id}/people`),
     // Histórico de monitoramento (linha do tempo de scans — sempre-ativo).
     history: (id: string, limit?: number) =>
       req<DomainScanRecord[]>(`/domains/${id}/history${limit ? `?limit=${limit}` : ''}`),
@@ -252,10 +277,14 @@ export interface DomainSummary {
   scanStep?: string | null
   scanError?: string | null
   lastScanAt?: string | null
-  assetCount: number
-  aliveCount: number
+  assetCount: number          // total cru — não exibir (contém os demais)
+  subdomainCount?: number     // hosts descobertos
+  webAliveCount?: number      // hosts que respondem HTTP
+  aliveCount: number          // == webAliveCount (compat)
+  portCount?: number
   leakCount: number
   exposureCount: number
+  lastDiff?: DomainDiff       // o que mudou no último scan (a API já devolve na lista)
   severityCounts?: Partial<Record<'critical' | 'high' | 'medium' | 'low', number>>
   riskScore: number
   riskLevel: 'critical' | 'high' | 'medium' | 'low' | 'info'
@@ -273,6 +302,10 @@ export interface DomainDiff {
   missingAssets: Array<{ type: string; value: string }>
   newCount: number
   missingCount: number
+  newHostCount?: number       // subdomínios novos (exato)
+  missingHostCount?: number
+  newOtherCount?: number      // portas/IPs novos
+  missingOtherCount?: number
   scoreDelta: number
 }
 
@@ -284,7 +317,9 @@ export interface DomainScanRecord {
   trigger: 'manual' | 'monitor'
   authorized: boolean
   assetCount: number
+  subdomainCount?: number
   aliveCount: number
+  portCount?: number
   exposureCount: number
   cveCount: number
   riskScore: number
@@ -318,8 +353,6 @@ export interface DomainDetail extends DomainSummary {
   authorizedBy?: string | null
   authorizedAt?: string | null
   authorizationNote?: string | null
-  lastDiff?: DomainDiff
-  portCount?: number
   asnInfo?: AsnInfo[]
 }
 
@@ -585,10 +618,13 @@ export interface AgentModelInfo {
   available: AgentModelOption[]
 }
 
+export type Depth = 'tecnico' | 'gestor' | 'diretor'
+
 export interface User {
   id: string
   email: string
   role: 'admin' | 'user' | 'client'
+  depth?: Depth
   name: string
 }
 
@@ -596,6 +632,76 @@ export interface UserFull extends User {
   provider: 'local' | 'microsoft'
   lastLogin: string | null
   createdAt: string
+}
+
+// Visões por papel (Fase 6) — agregações do backend (src/overview.js).
+export interface GestorOverview {
+  metrics: {
+    open: number; inProgress: number; overdue: number
+    avgFixDays: number | null; onTimePct: number | null
+    backlogBySev: Record<'critical' | 'high' | 'medium' | 'low' | 'info', number>
+  }
+  queue: Array<{
+    id: string; title: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+    engagementId?: string; engagementName?: string
+    target: string | null; location: string | null
+    remediationStatus: RemediationStatus
+    owner: string | null; dueDate: string | null; overdue: boolean
+  }>
+}
+export interface BoardCard {
+  id: string; title: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  engagementId?: string; engagementName?: string
+  target: string | null; location: string | null
+  remediationStatus: RemediationStatus
+  owner: string | null; dueDate: string | null; overdue: boolean
+}
+export type BoardColumn = 'open' | 'in_progress' | 'fixed' | 'accepted_risk'
+export interface KanbanBoardData {
+  columns: Record<BoardColumn, BoardCard[]>
+  counts: Record<BoardColumn, number>
+}
+
+// Integrações / abas de conexão (#5) — ticketing.
+export interface IntegrationAdapter { id: string; label: string; needsToken: boolean; available: boolean }
+export interface Connection { id: string; type: string; label: string | null; config: Record<string, string>; configured: boolean; createdBy: string | null; createdAt: string }
+export interface IntegrationsData { catalog: IntegrationAdapter[]; connections: Connection[] }
+
+// Correlação leve de credenciais (#4) — domínio → pessoas/e-mails → vazamento.
+export interface DomainPerson { masked: string; role: boolean; inLeak: boolean; source?: string }
+export interface DomainPeople {
+  domain: string
+  pattern: string | null
+  people: DomainPerson[]
+  counts: { people: number; roles: number; leaked: number }
+  providers: Array<{ id: string; label: string; needsKey?: boolean; configured: boolean }>
+  fetched: Array<{ path: string; status?: number; error?: string }>
+}
+
+// Harness de sessão (#3) — resultado do pré-voo de login (sem IA).
+export interface SessionCheckResult {
+  verdict: 'ok' | 'failed' | 'inconclusive' | 'error'
+  sessionEstablished?: boolean
+  sustained?: boolean | null
+  reasons?: string[]
+  evidence?: { cookies?: string[]; status?: number; redirect?: string; protectedStatus?: number; successMarker?: boolean; failureMarker?: boolean }
+  error?: string
+}
+
+export interface MonitorEvent {
+  id: string; domainId: string; domain: string
+  type: 'new_subdomain' | 'new_exposure' | 'new_cve' | 'takeover_candidate' | 'score_worsened'
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  title: string; detail: string | null; seen: boolean; at: string
+}
+
+export interface DiretorHotspot { id: string; domain: string; score: number; level: 'critical' | 'high' | 'medium' | 'low' | 'info' }
+export interface DiretorOverview {
+  posture: { score: number; level: 'critical' | 'high' | 'medium' | 'low' | 'info'; worstDomain: string | null; worstDomainId: string | null; verdict: string }
+  hotspots: DiretorHotspot[]
+  kpis: { criticalsOpen: number; inProgress: number; overdue: number }
+  trend: Array<{ date: string; score: number }>
+  domainCount: number
 }
 
 export interface EngagementSchedule {
@@ -679,7 +785,8 @@ export interface ReportNarrativeStatus {
   generatedAt?: string
 }
 
-export type RemediationStatus = 'open' | 'fixed' | 'regressed' | 'accepted_risk'
+export type RemediationStatus = 'open' | 'in_progress' | 'fixed' | 'regressed' | 'accepted_risk'
+export interface StatusEvent { status: RemediationStatus; at: string; by?: string; note?: string | null }
 
 export interface Finding {
   id: string
@@ -698,6 +805,12 @@ export interface Finding {
   state?: 'confirmed' | 'probable' | 'informational' | 'false_positive'
   confidence?: 'high' | 'medium' | 'low'
   remediationStatus?: RemediationStatus
+  owner?: string | null
+  dueDate?: string | null
+  statusHistory?: StatusEvent[]
+  ticketUrl?: string | null
+  ticketRef?: string | null
+  ticketType?: string | null
   fingerprint?: string
   firstSeen?: string | null
   lastSeen?: string | null

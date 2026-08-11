@@ -1,6 +1,7 @@
 'use client'
 import { Fragment, useEffect, useState } from 'react'
-import { api, UserFull } from '@/lib/api'
+import { api, UserFull, Depth } from '@/lib/api'
+import { DEPTH_LABEL } from '@/lib/depth'
 import { useEscapeClose } from '@/hooks/useEscapeClose'
 import { SI } from '@/components/ui/SI'
 
@@ -81,11 +82,12 @@ export default function UsersPage() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
   const [showAdd, setShowAdd]   = useState(false)
-  const [addForm, setAddForm]   = useState({ email: '', name: '', password: '', role: 'user' as 'admin' | 'user' | 'client' })
+  const [addForm, setAddForm]   = useState({ email: '', name: '', password: '', role: 'user' as 'admin' | 'user' | 'client', depth: 'tecnico' as Depth })
   const [addError, setAddError] = useState('')
   const [addLoading, setAddLoading] = useState(false)
   const [editId, setEditId]     = useState<string | null>(null)
   const [editRole, setEditRole] = useState<'admin' | 'user' | 'client'>('user')
+  const [editDepth, setEditDepth] = useState<Depth>('tecnico')
   const [editName, setEditName] = useState('')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [resetId, setResetId]   = useState<string | null>(null)
@@ -113,7 +115,7 @@ export default function UsersPage() {
     try {
       await api.users.create(addForm)
       setShowAdd(false)
-      setAddForm({ email: '', name: '', password: '', role: 'user' })
+      setAddForm({ email: '', name: '', password: '', role: 'user', depth: 'tecnico' })
       await load()
     } catch (e: unknown) {
       setAddError(e instanceof Error ? e.message : 'Erro')
@@ -123,7 +125,7 @@ export default function UsersPage() {
   }
 
   async function handleEditSave(id: string) {
-    await api.users.update(id, { role: editRole, name: editName })
+    await api.users.update(id, { role: editRole, name: editName, depth: editDepth })
     setEditId(null)
     await load()
   }
@@ -137,6 +139,7 @@ export default function UsersPage() {
   function startEdit(u: UserFull) {
     setEditId(u.id)
     setEditRole(u.role)
+    setEditDepth((u.depth as Depth) || 'tecnico')
     setEditName(u.name)
   }
 
@@ -234,21 +237,33 @@ export default function UsersPage() {
                 </div>
                 <div key={`${u.id}-role`} style={{ ...TD }}>
                   {editId === u.id ? (
-                    <select style={{ ...inputStyle, width: 'auto' }} value={editRole} onChange={(ev) => setEditRole(ev.target.value as 'admin' | 'user' | 'client')}>
-                      <option value="user">user — operador interno</option>
-                      <option value="admin">admin — operador com painel</option>
-                      <option value="client">client — usuário do cliente</option>
-                    </select>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <select style={{ ...inputStyle, width: 'auto' }} value={editRole} onChange={(ev) => setEditRole(ev.target.value as 'admin' | 'user' | 'client')}>
+                        <option value="user">user — operador interno</option>
+                        <option value="admin">admin — operador com painel</option>
+                        <option value="client">client — usuário do cliente</option>
+                      </select>
+                      {/* Profundidade: só faz diferença de fato para o cliente (barra o
+                          menu). Para interno é a casa/landing inicial. */}
+                      <select style={{ ...inputStyle, width: 'auto' }} value={editDepth} onChange={(ev) => setEditDepth(ev.target.value as Depth)}>
+                        <option value="tecnico">técnico — vê tudo</option>
+                        <option value="gestor">gestor — correções</option>
+                        <option value="diretor">diretoria — só o veredito</option>
+                      </select>
+                    </div>
                   ) : (
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10,
-                      padding: '2px 8px', borderRadius: 99,
-                      background: u.role === 'admin' ? 'var(--purple-dim)' : 'rgba(28,28,52,0.6)',
-                      border: `1px solid ${u.role === 'admin' ? 'var(--border-mid)' : 'rgba(50,50,80,0.4)'}`,
-                      color: u.role === 'admin' ? 'var(--purple-light)' : 'var(--muted)',
-                    }}>
-                      {u.role === 'admin' ? CircleIco(10, 'currentColor') : UserIco(10, 'currentColor')}
-                      {u.role}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10,
+                        padding: '2px 8px', borderRadius: 99,
+                        background: u.role === 'admin' ? 'var(--purple-dim)' : 'rgba(28,28,52,0.6)',
+                        border: `1px solid ${u.role === 'admin' ? 'var(--border-mid)' : 'rgba(50,50,80,0.4)'}`,
+                        color: u.role === 'admin' ? 'var(--purple-light)' : 'var(--muted)',
+                      }}>
+                        {u.role === 'admin' ? CircleIco(10, 'currentColor') : UserIco(10, 'currentColor')}
+                        {u.role}
+                      </span>
+                      <span style={{ fontSize: 9.5, color: 'var(--text-mute)', fontFamily: "'JetBrains Mono', monospace" }}>{DEPTH_LABEL[(u.depth as Depth) || 'tecnico']}</span>
                     </span>
                   )}
                 </div>
@@ -417,6 +432,16 @@ export default function UsersPage() {
                 </div>
               )
             })}
+            {/* Profundidade: barra o menu do CLIENTE (diretor só vê o veredito etc.);
+                para interno é só a casa inicial. */}
+            <div>
+              <label htmlFor="add-user-depth" style={{ fontSize: 10, color: 'var(--text-mute)', fontWeight: 600, display: 'block', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Profundidade</label>
+              <select id="add-user-depth" style={inputStyle} value={addForm.depth} onChange={(e) => setAddForm((f) => ({ ...f, depth: e.target.value as Depth }))}>
+                <option value="tecnico">técnico — vê tudo</option>
+                <option value="gestor">gestor — andamento das correções</option>
+                <option value="diretor">diretoria — só o veredito</option>
+              </select>
+            </div>
             {addError && <ErrorMsg>{addError}</ErrorMsg>}
             <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
               <button type="submit" disabled={addLoading} style={{

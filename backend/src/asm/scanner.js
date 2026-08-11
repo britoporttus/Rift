@@ -16,6 +16,7 @@ const dns = require('dns').promises
 const { runTool, hasBin } = require('./binaries')
 const { computeScore } = require('./score')
 const { computeAssetDiff } = require('./diff')
+const { deriveMonitorEvents } = require('./monitor-events')
 const { analyzePort } = require('./ports')
 const { detectTakeover } = require('./takeover')
 const { bruteforceSubdomains, isDnsInfraHost } = require('./dns-brute')
@@ -142,7 +143,7 @@ function isProbeSafe(ips) {
   return !ips.some((ip) => isBlockedIp(ip))
 }
 
-async function stageDns(domainId, hosts) {
+async function stageDns(db, domainId, hosts) {
   return mapPool(hosts, 24, async (host) => {
     let ips = [], cname = null, nxdomain = false
     // Distingue NXDOMAIN (nome não existe → sinal de CNAME pendente/takeover) de
@@ -173,7 +174,7 @@ async function stageDns(domainId, hosts) {
 
 const ADMIN_RE = /(login|admin|dashboard|phpmyadmin|jenkins|grafana|kibana|adminer|webmail|portal|vpn)/i
 
-async function stageHttp(domainId, hosts) {
+async function stageHttp(db, domainId, hosts) {
   if (!hasBin('httpx')) return { probed: 0, alive: 0 }
   const input = hosts.slice(0, MAX_PROBE_HOSTS).join('\n')
   const r = await runTool('httpx', [
@@ -195,8 +196,13 @@ async function stageHttp(domainId, hosts) {
     const tls = get(j, 'tls') || {}
     const isAdmin = ADMIN_RE.test(`${title || ''} ${get(j, 'url') || ''}`)
     alive++
+    // ENRIQUECE o subdomínio no lugar — NÃO cria um asset `web` separado.
+    // Antes o fingerprint `${id}:host:X` era reusado com type:'web', que
+    // sobrescrevia o subdomínio gravado pelo stageDns (mesma chave) e o fazia
+    // sumir da aba Subdomínios. Um host = 1 asset; `alive:true` aqui significa
+    // "responde HTTP". (Fase 2 do roadmap de legibilidade, Bug 1.)
     await upsertAsset(db, domainId, `${domainId}:host:${cleanHost}`, {
-      type: 'web', value: cleanHost, alive: true,
+      type: 'subdomain', value: cleanHost, alive: true,
       statusCode: typeof status === 'number' ? status : null,
       title: title || null,
       webServer: get(j, 'webserver', 'web_server') || null,
@@ -212,7 +218,7 @@ async function stageHttp(domainId, hosts) {
   return { probed: Math.min(hosts.length, MAX_PROBE_HOSTS), alive }
 }
 
-async function stageNuclei(domainId, aliveHosts) {
+async function stageNuclei(db, domainId, aliveHosts) {
   if (!NUCLEI_ENABLED || !hasBin('nuclei') || !aliveHosts.length) return 0
   const tmp = path.join(os.tmpdir(), `rift-asm-${domainId}.txt`)
   try { fs.writeFileSync(tmp, aliveHosts.join('\n'), 'utf8') } catch { return 0 }
@@ -249,7 +255,7 @@ async function stageNuclei(domainId, aliveHosts) {
 // isn't a GitHub Pages site here" etc.). Só em domínio autorizado (envia pacote).
 // Roda sobre TODOS os hosts que resolvem (não só os httpx-alive): um host
 // sequestrável pode responder algo que o httpx não marcou como "vivo".
-async function stageTakeover(domainId, hosts) {
+async function stageTakeover(db, domainId, hosts) {
   if (!TAKEOVER_ENABLED || !hasBin('nuclei') || !hosts.length) return 0
   const tmp = path.join(os.tmpdir(), `rift-asm-tko-${domainId}.txt`)
   try { fs.writeFileSync(tmp, hosts.join('\n'), 'utf8') } catch { return 0 }
@@ -309,7 +315,7 @@ async function stageScreenshots(db, domainId, aliveHosts) {
       if (!host) continue
       const rel = storeScreenshot(domainId, host, srcAbs)
       if (!rel) continue
-      await db.DomainAsset.updateOne({ domainId, type: 'web', value: host }, { $set: { screenshotPath: rel } }).catch(() => {})
+      await db.DomainAsset.updateOne({ domainId, type: 'subdomain', value: host }, { $set: { screenshotPath: rel } }).catch(() => {})
       n++
     }
     return n
@@ -339,7 +345,7 @@ function probeTcp(ip, port, timeoutMs) {
 // Port scan NATIVO. `ips` já devem estar net-guard-safe (o chamador filtra);
 // refiltramos aqui por defesa em profundidade. `fromNeighbor` marca portas de
 // vizinho de netblock (não host próprio). ATIVO → só rodar em domínio autorizado.
-async function stagePortScan(domainId, ips, { fromNeighbor = false, providerFor } = {}) {
+async function stagePortScan(db, domainId, ips, { fromNeighbor = false, providerFor } = {}) {
   if (!PORTSCAN_ENABLED || !ips.length || !SCAN_PORTS.length) return 0
   const targets = ips.filter((ip) => !isBlockedIp(ip))
   if (!targets.length) return 0
@@ -416,8 +422,9 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
   // re-verificar (espelha exatamente o gating de stageHttp/stageNuclei abaixo).
   const previousScore = dom.riskScore || 0
   const previousAssets = await db.DomainAsset.find({ domainId }).select('type value fingerprint severity').lean()
+  // 'web' deixou de ser um tipo — o probe HTTP agora enriquece o próprio
+  // subdomínio (sempre escopado). Ver stageHttp / Bug 1.
   const scopedTypes = ['subdomain']
-  if (authorized) scopedTypes.push('web')
   if (authorized && NUCLEI_ENABLED) scopedTypes.push('exposure')
   // 'port' fica FORA do diff de superfície de propósito: os IPs de mail (Microsoft
   // 365/MailChimp) rotacionam por round-robin, então portas entram/saem a cada
@@ -443,7 +450,7 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
 
     // 2) DNS (passivo)
     await setStep(db, domainId, 'dns')
-    const resolved = await stageDns(domainId, hosts)
+    const resolved = await stageDns(db, domainId, hosts)
     const liveHosts = resolved.filter((r) => r && r.resolves).map((r) => r.host)
 
     // 3) probe web (httpx) — só autorizado, e só hosts que resolveram para IP
@@ -453,14 +460,14 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
     let httpRes = { probed: 0, alive: 0 }
     if (authorized) {
       await setStep(db, domainId, 'http')
-      httpRes = await stageHttp(domainId, liveHosts)
+      httpRes = await stageHttp(db, domainId, liveHosts)
     }
 
     // 3b) nuclei (opcional, autorizado + env)
     if (authorized && NUCLEI_ENABLED) {
       await setStep(db, domainId, 'exposures')
-      const aliveAssets = await db.DomainAsset.find({ domainId, type: 'web', alive: true }).select('value').lean()
-      await stageNuclei(domainId, aliveAssets.map((a) => a.value))
+      const aliveAssets = await db.DomainAsset.find({ domainId, type: 'subdomain', alive: true }).select('value').lean()
+      await stageNuclei(db, domainId, aliveAssets.map((a) => a.value))
     }
 
     // 3b-2) subdomain takeover confirmado (nuclei -tags takeover) — autorizado.
@@ -468,13 +475,13 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
     // no stageDns, sem autorização). Ver Fase 3.
     if (authorized && TAKEOVER_ENABLED) {
       await setStep(db, domainId, 'takeover')
-      await stageTakeover(domainId, liveHosts)
+      await stageTakeover(db, domainId, liveHosts)
     }
 
     // 3b-3) recon visual (screenshots) dos hosts vivos — autorizado. Ver Fase 4.
     if (authorized && SCREENSHOT_ENABLED && CHROME_BIN) {
       await setStep(db, domainId, 'screenshots')
-      const aliveWeb = await db.DomainAsset.find({ domainId, type: 'web', alive: true }).select('value').lean()
+      const aliveWeb = await db.DomainAsset.find({ domainId, type: 'subdomain', alive: true }).select('value').lean()
       await stageScreenshots(db, domainId, aliveWeb.map((a) => a.value))
     }
 
@@ -514,7 +521,7 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
       }
 
       // Port scan dos IPs PRÓPRios (rotulando os de SaaS de terceiro).
-      await stagePortScan(domainId, ownIps, { fromNeighbor: false, providerFor })
+      await stagePortScan(db, domainId, ownIps, { fromNeighbor: false, providerFor })
 
       // Fase 2: expande o netblock SÓ quando o alvo demonstravelmente POSSUI a
       // faixa (holder do ASN casa com o domínio) E ela é de tamanho contido.
@@ -523,7 +530,7 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
           const ownSet = new Set(ownIps)
           const { ips: neighborIps } = expandCidrsV4(cidrs, { maxIps: ASN_MAX_IPS })
           const toScan = neighborIps.filter((ip) => !ownSet.has(ip))  // não re-escaneia os próprios
-          if (toScan.length) await stagePortScan(domainId, toScan, { fromNeighbor: true, providerFor })
+          if (toScan.length) await stagePortScan(db, domainId, toScan, { fromNeighbor: true, providerFor })
         } catch (e) { console.warn('[asm] expansão de netblock falhou:', e?.message) }
       }
     }
@@ -534,7 +541,7 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
     const { score, level } = await recomputeDomain(db, domainId)
 
     // 5) diff de superfície vs. o scan anterior (novo/sumido + Δscore).
-    const currentAssets = await db.DomainAsset.find({ domainId }).select('type value fingerprint severity cveId alive').lean()
+    const currentAssets = await db.DomainAsset.find({ domainId }).select('type value fingerprint severity cveId alive label source cname').lean()
     const diff = computeAssetDiff({ previousAssets, currentAssets, scopedTypes })
     const now = new Date()
     const scoreDelta = score - previousScore
@@ -546,15 +553,28 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
 
     // 6) histórico de monitoramento — 1 registro por execução, pra a linha do
     //    tempo mostrar que o monitoramento é contínuo (ver models/DomainScan).
+    const histSubs = currentAssets.filter((a) => a.type === 'subdomain')
     await db.DomainScan.create({
       domainId, ranAt: now, trigger, authorized,
       assetCount: currentAssets.length,
-      aliveCount: currentAssets.filter((a) => a.alive).length,
+      subdomainCount: histSubs.length,
+      aliveCount: histSubs.filter((a) => a.alive).length,  // web-vivos, não portas
+      portCount: currentAssets.filter((a) => a.type === 'port').length,
       exposureCount: currentAssets.filter((a) => a.type === 'exposure').length,
       cveCount: currentAssets.filter((a) => a.cveId).length,
       riskScore: score, riskLevel: level,
       newCount: diff.newCount, missingCount: diff.missingCount, scoreDelta,
     }).catch((e) => console.warn('[asm] falha ao gravar histórico de scan:', e?.message))
+
+    // 7) monitoramento risk-triggered (#2b): transforma "o que mudou" em eventos
+    //    acionáveis (novo subdomínio, exposição alta, CVE, takeover, piora de
+    //    score) e grava no feed. Não-fatal — um erro aqui não invalida o scan.
+    try {
+      const events = deriveMonitorEvents({ diff, currentAssets, previousAssets, previousScore, score, now })
+      if (events.length) {
+        await db.MonitorEvent.insertMany(events.map((e) => ({ ...e, domainId, domain: dom.domain })))
+      }
+    } catch (e) { console.warn('[asm] falha ao gravar eventos de monitoramento:', e?.message) }
   } catch (err) {
     await db.Domain.findByIdAndUpdate(domainId, { $set: {
       scanState: 'failed', scanStep: null, scanError: String(err?.message || err).slice(0, 300),
@@ -572,9 +592,17 @@ async function recomputeDomain(db, domainId) {
     db.LeakedCredential.find({ domain: dom ? dom.domain : '__none__' }).lean(),
   ])
   const { score, level, reasons } = computeScore({ assets, leaks: LEAKS_ENABLED ? leaks : [] })
+  // Contadores por categoria que NÃO se sobrepõem (Fase 2, Bugs 2/4). Um host é
+  // 1 subdomínio; porta é grão à parte (IP:porta). `webAliveCount` conta só
+  // subdomínio que responde HTTP — antes `aliveCount` somava portas (todas
+  // alive:true), inflando "vivos".
+  const subs = assets.filter((a) => a.type === 'subdomain')
+  const webAlive = subs.filter((a) => a.alive).length
   await db.Domain.findByIdAndUpdate(domainId, { $set: {
-    assetCount: assets.length,
-    aliveCount: assets.filter((a) => a.alive).length,
+    assetCount: assets.length,               // total cru — só histórico, UI não exibe
+    subdomainCount: subs.length,
+    webAliveCount: webAlive,
+    aliveCount: webAlive,                     // compat: aliveCount == webAliveCount
     exposureCount: assets.filter((a) => a.type === 'exposure').length,
     portCount: assets.filter((a) => a.type === 'port').length,
     leakCount: leaks.length,

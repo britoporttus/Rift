@@ -176,11 +176,12 @@ vira #1: é o que separa "produto" de "vazamento cross-organização".
 | # | Front | Por que agora | Depende de |
 |---|---|---|---|
 | **1** | **Frente 0 — isolamento por tenant** ⛔ | **Pré-requisito do primeiro login externo.** Sem isso, o cliente A vê engagement, finding, relatório e WebSocket do cliente B. Não é dívida técnica, é o produto não existir como SaaS. Detalhado em §6. | nada (é o trabalho) |
-| **2** | **ASM: monitoramento risk-triggered** 🟡 | Menor esforço / maior retorno, e é o que dá valor recorrente ao login do cliente (ele volta porque algo mudou). Falta gatilho por evento — novo subdomínio, deploy, CVE crítica. | nada |
-| **3** | **Agente 2 — pentest autenticado** 🟡 | O pack `web-auth` já coleta credencial e o relatório já sabe gerar variante autenticada. Falta o crawler e o gatilho de handoff. Dobra a profundidade do produto. | nada |
-| **4** | **BYOK nível 1 (Agent SDK)** 🔵 | Sobe de #6: em SaaS, custo de inferência por tenant deixa de ser detalhe e vira margem. Troca `spawn('claude')` pelo Claude Agent SDK — resolve chave própria **e** custo/rate-limit previsível. | #1 |
+| **2** | **ASM: legibilidade e visões por papel** 🟡 | **Dividido em 2026-08-10** após a crítica do operador à tela de Domínios. O monitoramento só tem valor recorrente se a tela for legível: hoje o "score de segurança" significa o contrário do que o nome diz, três contadores se contêm entre si, e nenhum número leva à lista que o sustenta. Seis fases (vocabulário → profundidade → hierarquia → ciclo de vida do achado → visões técnico/gestor/diretor) em [ROADMAP-LEGIBILIDADE-E-VISOES.md](ROADMAP-LEGIBILIDADE-E-VISOES.md). | nada |
+| **2b** | **ASM: monitoramento risk-triggered** 🟡 | Gatilho por evento — novo subdomínio, deploy, CVE crítica. Era o #2 inteiro; passa a depender de #2 porque "algo mudou" precisa de uma tela que saiba dizer **o quê** mudou. | #2 |
+| **3** | **Agente 2 — pentest autenticado + harness de sessão** 🟡 | O pack `web-auth` já coleta credencial e o relatório já sabe gerar variante autenticada. Falta o crawler, o gatilho de handoff e — **acrescentado em 2026-08-10** — um **harness de conexão**: dado um alvo e uma credencial, provar que a autenticação funciona e que a sessão se sustenta, *antes* de gastar token de agente. Sem isso o agente descobre que não logou depois de já ter rodado. Ver §5.2. | nada |
 | **5** | **Correlação leve de credenciais** 🟡 | Item mais barato da lista: domínio → empresa → funcionários (Hunter.io, fonte compliant) cruzado com os providers grátis já plugados. Painel dentro do assessment de Domínio. | nada |
 | **6** | **Integrações / abas de conexão** 🔵 | Ticketing + MCP client, com dogfooding no próprio GitHub do Rift como critério de pronto. Em SaaS, conexões são por-tenant. | #1 |
+| **6b** | **Cloud: Azure + Entra ID a sério** 🟡 | Existe Service Principal e cofre efêmero, mas a leitura de postura é rasa. Entra ID é onde mora a identidade do cliente — MFA ausente, aplicativo com consentimento amplo, conta privilegiada sem PIM. **Marcado pelo operador em 2026-08-10 como "precisa melhorar".** Antecede AD on-prem na sequência já decidida. | nada |
 | **7** | **Runner interno + transporte de inferência** ⛔ | Peça de infra única que destrava rede-interna always-on, AD e SAP. Caro. | — |
 | **8** | **AD → SAP** ⛔ | Sequência decidida: Azure → AD → SAP. SAP é lacuna real de mercado (nenhuma das 12 concorrentes pesquisadas cobre), mas acumula runner novo + maior raio de explosão. | #7 |
 
@@ -191,6 +192,32 @@ registrar para não virar surpresa: onboarding/provisionamento de tenant
 self-service, papel de "cliente" distinto de `user` interno (o RBAC hoje só tem
 admin/user), billing/limite de consumo por tenant, e trilha de auditoria por
 tenant. Decidir escopo disso depois que §6 estiver de pé.
+
+### 5.2. A superfície do produto, como o operador a descreve (2026-08-10)
+
+Registrada porque é o que passa a definir o **menu** e as páginas — a divisão
+antiga (*Superfície / Resultados / Sistema*) descrevia o processo interno, não o
+que o cliente contrata. Detalhe e desenho da navegação na Fase 1 de
+[ROADMAP-LEGIBILIDADE-E-VISOES.md](ROADMAP-LEGIBILIDADE-E-VISOES.md).
+
+| Alvo | Estado | O que falta |
+|---|---|---|
+| **Web / API** — com e sem login | ✅ / 🟡 | o autenticado depende do #3, incluindo o harness de sessão |
+| **Rede interna** — ESXi, Proxmox, VMware, Windows Server | ✅ MVP | hipervisor como classe de primeira ordem; always-on depende do #7 |
+| **Cloud** — Azure + Entra ID | 🟡 | postura de identidade (#6b) |
+| **AD on-premises** | 🔵 | #7 |
+| **SAP** | 🔵 | #7, depois de AD |
+
+### 5.3. Unidade de cobrança — decisão em aberto
+
+Por **ativo** ou por **domínio**; formato de contrato indefinido. Não é só
+comercial: a unidade escolhida precisa ser contada do mesmo jeito em todos os
+alvos de §5.2, e hoje `assetCount` soma subdomínio + host web + porta +
+exposição — cobrar sobre isso cobraria duas vezes pelo mesmo host e faria a
+fatura **subir quando a segurança do cliente piora**. Por domínio é mais fácil
+de vender, mas não existe domínio em rede interna, cloud ou AD. Análise
+completa em §3 do roadmap de legibilidade; a Fase 2 de lá é o pré-requisito
+técnico da decisão.
 
 ---
 
@@ -310,6 +337,8 @@ Estes continuam valendo como **referência técnica**, não como fila de trabalh
 
 | Documento | Serve para |
 |---|---|
+| `ROADMAP-CONSOLIDADO.md` | **fonte de ESTADO** — auditoria dos 14 roadmaps: feito / não feito / descartado, cruzado com o código (2026-08-10). Este PLANO-MESTRE é a ordem; aquele é o inventário. |
+| `ROADMAP-LEGIBILIDADE-E-VISOES.md` | **fila ativa do front #2** — as seis fases da tela de Domínios e das visões por papel. Exceção ao aviso acima: este é ordem de trabalho, não só referência |
 | `ROADMAP-AUDITORIA-2026-07-20.md` | detalhe de cada P0–P3 e do raciocínio de segurança (P0 já fechados) |
 | `ROADMAP-MULTI-DOMINIO.md` | como construir domain packs / sequência Azure→AD→SAP |
 | `ROADMAP-CONSOLIDACAO-AGENTE.md` | arquitetura do agente e por que não fragmentar em 6 |

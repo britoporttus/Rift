@@ -5,6 +5,7 @@ const crypto = require('crypto')
 const yaml = require('js-yaml')
 const { updateEngagement, countFindings } = require('./store')
 const { getFramework, resolveFindingsDirs } = require('./frameworks')
+const { reingestTransition } = require('./finding-lifecycle')
 
 // BUG-3: notifier GLOBAL para broadcast ao vivo (setado 1x pelo server). Antes o
 // broadcast vinha de um callback do PRIMEIRO a abrir o watcher — se o scheduler
@@ -100,50 +101,58 @@ async function persistFinding(db, engagementId, engagementName, finding, sourceF
     const str = (v) => v == null ? null
       : (typeof v === 'string' ? v
       : (typeof v === 'object' ? JSON.stringify(v) : String(v)))
-    // Upsert by sourceFile so re-running the watcher doesn't create duplicates
+    // Ciclo de vida (Fase 5): o OPERADOR é dono do `remediationStatus`, `owner`,
+    // `dueDate` e `statusHistory`. O watcher relata o que o SCANNER vê — nunca
+    // sobrescreve a decisão humana. Regra que não pode quebrar: um achado marcado
+    // "corrigido"/"aceito" NÃO pode ser ressuscitado por um re-scan. Antes o
+    // `$set: remediationStatus` resetava para 'open' toda re-varredura.
+    const existing = await db.Finding.findOne({ engagementId, sourceFile })
+      .select('remediationStatus').lean()
+    // Regra de re-ingestão (finding-lifecycle.js, testado): operador é dono do
+    // estado; fixed→regressed quando o scanner volta a ver; o resto mantém.
+    const { status: remediationStatus, historyEntry } =
+      reingestTransition(existing?.remediationStatus, new Date(), finding.remediation_status)
+
+    const setFields = {
+      engagementId,
+      engagementName: engagementName || engagementId,
+      severity:       (finding.severity || 'info').toLowerCase(),
+      title:          str(finding.title) || 'Finding sem título',
+      type:           str(finding.type),
+      location:       str(finding.location || finding.endpoint),
+      parameter:      str(finding.parameter),
+      payload:        str(finding.payload),
+      description:    str(finding.description),
+      evidence:       str(finding.evidence),
+      impact:         str(finding.impact),
+      recommendation: str(finding.recommendation || finding.remediation),
+      cvss:           finding.cvss ? parseFloat(finding.cvss) : null,
+      confirmed:      state === 'confirmed',
+      sourceFile,
+      state,
+      confidence:     (finding.confidence || 'medium').toLowerCase(),
+      reproducible:   finding.reproducible !== undefined ? Boolean(finding.reproducible) : null,
+      poc:            str(finding.poc),
+      needsToConfirm: str(finding.needs_to_confirm),
+      ruledOutReason: str(finding.ruled_out_reason),
+      cvssVector:     str(finding.cvss_vector),
+      owasp:          str(finding.owasp),
+      owaspApi:       str(finding.owasp_api),
+      cwe:            str(finding.cwe),
+      mitre:          str(finding.mitre),
+      discoveredBy:   str(finding.discovered_by),
+      fingerprint,
+      remediationStatus,           // computado acima — respeita o operador
+      lastSeen:          finding.last_seen || null,
+    }
+    const update = {
+      $set: setFields,
+      $setOnInsert: { firstSeen: finding.first_seen || finding.last_seen || null },
+    }
+    if (historyEntry) update.$push = { statusHistory: historyEntry }
+
     await db.Finding.findOneAndUpdate(
-      { engagementId, sourceFile },
-      {
-        $set: {
-          engagementId,
-          engagementName: engagementName || engagementId,
-          severity:       (finding.severity || 'info').toLowerCase(),
-          title:          str(finding.title) || 'Finding sem título',
-          type:           str(finding.type),
-          location:       str(finding.location || finding.endpoint),
-          parameter:      str(finding.parameter),
-          payload:        str(finding.payload),
-          description:    str(finding.description),
-          evidence:       str(finding.evidence),
-          impact:         str(finding.impact),
-          recommendation: str(finding.recommendation || finding.remediation),
-          cvss:           finding.cvss ? parseFloat(finding.cvss) : null,
-          // `confirmed` agora deriva do state — só é true para vulnerabilidade de fato
-          confirmed:      state === 'confirmed',
-          sourceFile,
-
-          // Taxonomia
-          state,
-          confidence:     (finding.confidence || 'medium').toLowerCase(),
-          reproducible:   finding.reproducible !== undefined ? Boolean(finding.reproducible) : null,
-          poc:            str(finding.poc),
-          needsToConfirm: str(finding.needs_to_confirm),
-          ruledOutReason: str(finding.ruled_out_reason),
-          cvssVector:     str(finding.cvss_vector),
-          owasp:          str(finding.owasp),
-          owaspApi:       str(finding.owasp_api),
-          cwe:            str(finding.cwe),
-          mitre:          str(finding.mitre),
-          discoveredBy:   str(finding.discovered_by),
-
-          // Regressão
-          fingerprint,
-          remediationStatus: finding.remediation_status || 'open',
-          lastSeen:          finding.last_seen || null,
-        },
-        // first_seen nunca é sobrescrito em re-scan
-        $setOnInsert: { firstSeen: finding.first_seen || finding.last_seen || null },
-      },
+      { engagementId, sourceFile }, update,
       { upsert: true, new: true, setDefaultsOnInsert: true }
     )
     console.log(`[watcher] finding persistido [${state}]: ${finding.title}`)
