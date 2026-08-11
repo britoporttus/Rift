@@ -3,6 +3,8 @@ const { requireAuth } = require('../auth')
 const { tenantScope } = require('../tenancy')
 const { cleanFindings } = require('../findings-count')
 const { REMEDIATION_STATES, canTransition, defaultDueDate } = require('../finding-lifecycle')
+const { getAdapter } = require('../integrations')
+const { decryptSecret } = require('../settings')
 
 const router = Router()
 router.use(requireAuth())
@@ -36,6 +38,9 @@ function toDto(f) {
     owner:             f.owner || null,
     dueDate:           f.dueDate || null,
     statusHistory:     f.statusHistory || [],
+    ticketUrl:         f.ticketUrl || null,
+    ticketRef:         f.ticketRef || null,
+    ticketType:        f.ticketType || null,
     fingerprint:       f.fingerprint,
     firstSeen:         f.firstSeen || (f.createdAt ? new Date(f.createdAt).toISOString() : null),
     lastSeen:          f.lastSeen,
@@ -127,6 +132,31 @@ router.patch('/:id/status', async (req, res) => {
 
   const finding = await req.db.Finding.findByIdAndUpdate(req.params.id, update, { new: true }).lean()
   res.json(toDto(finding))
+})
+
+// POST /api/findings/:id/ticket — abre o achado como ticket na conexão escolhida
+// (#5). Guarda a ref externa no finding. body: { connectionId }
+router.post('/:id/ticket', async (req, res) => {
+  const finding = await req.db.Finding.findById(req.params.id).lean()
+  if (!finding) return res.status(404).json({ error: 'finding não encontrado' })
+  if (finding.ticketUrl) return res.status(409).json({ error: 'este achado já tem ticket', ticketUrl: finding.ticketUrl })
+
+  const conn = await req.db.Connection.findById(req.body?.connectionId).lean()
+  if (!conn) return res.status(400).json({ error: 'conexão não encontrada' })
+  const adapter = getAdapter(conn.type)
+  if (!adapter) return res.status(400).json({ error: 'adapter indisponível' })
+  const token = conn.tokenEnc ? decryptSecret(conn.tokenEnc) : null
+
+  // Enriquecemos o finding com o alvo (via engagement) p/ o corpo do ticket.
+  const eng = await req.db.Engagement.findById(finding.engagementId).select('target name').lean().catch(() => null)
+  try {
+    const { url, ref } = await adapter.createTicket({ ...finding, id: finding._id, target: eng?.target || eng?.name }, conn.config || {}, token)
+    const updated = await req.db.Finding.findByIdAndUpdate(finding._id,
+      { $set: { ticketUrl: url, ticketRef: ref, ticketType: conn.type } }, { new: true }).lean()
+    res.json(toDto(updated))
+  } catch (e) {
+    res.status(422).json({ error: e instanceof Error ? e.message : 'falha ao abrir o ticket' })
+  }
 })
 
 // GET /api/findings/:id/trace — reconstrói "como o agente chegou aqui" a

@@ -21,6 +21,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/novo-pentest': 'Novo Pentest',
   '/novo-pentest/web': 'Web / API',
   '/harness': 'Teste de conexão',
+  '/conexoes': 'Conexões',
   '/rede-interna': 'Rede Interna',
   '/rede-interna/novo': 'Configurar',
   '/painel': 'Painel de correções',

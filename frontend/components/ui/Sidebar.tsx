@@ -45,6 +45,7 @@ const Ico = {
   sap:       (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 15V9l3 6 3-6v6M17 9v6" /></SI>,
   kanban:    (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v13M15 3v8" /></SI>,
   shield:    (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M12 3l8 3.5V12c0 4.4-3.4 7.4-8 8.5C7.4 19.4 4 16.4 4 12V6.5z" /></SI>,
+  plug:      (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M9 2v6M15 2v6M7 8h10v3a5 5 0 0 1-10 0zM12 16v6" /></SI>,
 }
 
 // Navegação por AMBIENTE TESTADO (Fase 1 do roadmap de legibilidade, 2026-08-10).
@@ -91,6 +92,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Conta',
     items: [
+      { href: '/conexoes',    icon: 'plug',     label: 'Conexões', depths: [] },   // [] = nenhum cliente; só operador interno
       { href: '/admin/users', icon: 'users',    label: 'Usuários',       adminOnly: true },
       { href: '/admin',       icon: 'settings', label: 'Configurações',  adminOnly: true },
     ],

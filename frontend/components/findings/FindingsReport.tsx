@@ -54,9 +54,24 @@ interface ExtFinding extends Finding {
   instances?: { method: string; uri: string; evidence?: string }[]
 }
 
-function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id: string, s: RemediationStatus) => void }) {
+function FindingCard({ f, onStatusChange, connId, onTicketed }: {
+  f: ExtFinding; onStatusChange: (id: string, s: RemediationStatus) => void
+  connId?: string | null; onTicketed?: (id: string, url: string, ref: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [ticketing, setTicketing] = useState(false)
+
+  async function openTicket(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!connId || ticketing) return
+    setTicketing(true)
+    try {
+      const updated = await api.findings.ticket(f.id, connId)
+      if (updated.ticketUrl) onTicketed?.(f.id, updated.ticketUrl, updated.ticketRef || '')
+    } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao abrir ticket') }
+    finally { setTicketing(false) }
+  }
   const sev = f.severity
   const type = findingType(f)          // Tipo real (state/severity), não o finding_type inexistente
   const conf = findingConfirmation(f)  // Confirmação (state)
@@ -191,6 +206,18 @@ function FindingCard({ f, onStatusChange }: { f: ExtFinding; onStatusChange: (id
                 </button>
               )
             })}
+            {/* Ticketing (#5): link se já tem ticket; senão botão (se há conexão). */}
+            {f.ticketUrl ? (
+              <a href={f.ticketUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                style={{ fontSize: 11, fontWeight: 600, color: 'var(--purple-light)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                🎫 Ticket {f.ticketRef || ''}
+              </a>
+            ) : connId ? (
+              <button onClick={openTicket} disabled={ticketing}
+                style={{ fontSize: 11, fontFamily: 'inherit', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 6, border: '1px solid var(--border-mid)', background: 'var(--purple-dim)', color: 'var(--purple-light)' }}>
+                {ticketing ? '…' : '🎫 Abrir ticket'}
+              </button>
+            ) : null}
             {(firstSeen || lastSeen) && (
               <span style={{ fontSize: 11, color: 'var(--text-mute)', marginLeft: 'auto' }}>
                 {firstSeen && `1ª detecção: ${firstSeen}`}
@@ -279,6 +306,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<FilterType>('all')
   const [statusFilter, setStatusFilter] = useState<RemediationStatus | 'all'>('all')
+  const [connId, setConnId] = useState<string | null>(null)   // 1ª conexão de ticketing (#5)
 
   useEffect(() => {
     api.findings.list({ engagementId })
@@ -287,8 +315,14 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
       .finally(() => setLoading(false))
   }, [engagementId])
 
+  // Conexões de ticketing: se houver, o card mostra "Abrir ticket".
+  useEffect(() => { api.integrations.list().then((d) => setConnId(d.connections[0]?.id || null)).catch(() => {}) }, [])
+
   function handleStatusChange(id: string, s: RemediationStatus) {
     setFindings(prev => prev.map(f => f.id === id ? { ...f, remediationStatus: s } : f))
+  }
+  function handleTicketed(id: string, ticketUrl: string, ticketRef: string) {
+    setFindings(prev => prev.map(f => f.id === id ? { ...f, ticketUrl, ticketRef } : f))
   }
 
   if (loading) return (
@@ -438,7 +472,7 @@ export function FindingsReport({ engagementId }: { engagementId: string }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {displayed.length === 0
           ? <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-mute)', fontSize: 13 }}>Nenhum finding com esse filtro.</div>
-          : displayed.map(f => <FindingCard key={f.id} f={f} onStatusChange={handleStatusChange} />)}
+          : displayed.map(f => <FindingCard key={f.id} f={f} onStatusChange={handleStatusChange} connId={connId} onTicketed={handleTicketed} />)}
       </div>
     </div>
   )

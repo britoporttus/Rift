@@ -96,6 +96,14 @@ export const api = {
     setStatus: (id: string, patch: { remediationStatus?: RemediationStatus; owner?: string | null; dueDate?: string | null; note?: string }) =>
       req<Finding>(`/findings/${id}/status`, { method: 'PATCH', body: JSON.stringify(patch) }),
     trace: (id: string) => req<FindingTrace>(`/findings/${id}/trace`),
+    ticket: (id: string, connectionId: string) => req<Finding>(`/findings/${id}/ticket`, { method: 'POST', body: JSON.stringify({ connectionId }) }),
+  },
+  integrations: {
+    list: () => req<IntegrationsData>('/integrations'),
+    save: (data: { type: string; label?: string; config?: Record<string, string>; token?: string }) =>
+      req<Connection>('/integrations', { method: 'POST', body: JSON.stringify(data) }),
+    test: (id: string) => req<{ ok: boolean; detail: string }>(`/integrations/${id}/test`, { method: 'POST' }),
+    remove: (id: string) => req<void>(`/integrations/${id}`, { method: 'DELETE' }),
   },
   overview: {
     gestor:  () => req<GestorOverview>(`/overview/gestor`),
@@ -654,6 +662,11 @@ export interface KanbanBoardData {
   counts: Record<BoardColumn, number>
 }
 
+// Integrações / abas de conexão (#5) — ticketing.
+export interface IntegrationAdapter { id: string; label: string; needsToken: boolean; available: boolean }
+export interface Connection { id: string; type: string; label: string | null; config: Record<string, string>; configured: boolean; createdBy: string | null; createdAt: string }
+export interface IntegrationsData { catalog: IntegrationAdapter[]; connections: Connection[] }
+
 // Correlação leve de credenciais (#4) — domínio → pessoas/e-mails → vazamento.
 export interface DomainPerson { masked: string; role: boolean; inLeak: boolean; source?: string }
 export interface DomainPeople {
@@ -795,6 +808,9 @@ export interface Finding {
   owner?: string | null
   dueDate?: string | null
   statusHistory?: StatusEvent[]
+  ticketUrl?: string | null
+  ticketRef?: string | null
+  ticketType?: string | null
   fingerprint?: string
   firstSeen?: string | null
   lastSeen?: string | null

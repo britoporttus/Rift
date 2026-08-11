@@ -158,8 +158,20 @@ function setLeakProviderCreds(id, { apiKey, apiUser } = {}) {
   return isLeakProviderConfigured(id)
 }
 
+// Cripto genérica para segredos de terceiros (ex.: token de integração), com a
+// MESMA chave/algoritmo dos leak-providers. Sem SETTINGS_ENCRYPTION_KEY, devolve
+// null — o chamador decide se recusa (integrações exigem chave configurada).
+function encryptSecret(plain) {
+  return encryptLeakProviders({ v: String(plain) })
+}
+function decryptSecret(enc) {
+  const o = decryptLeakProviders(enc)
+  return o && typeof o.v === 'string' ? o.v : null
+}
+
 module.exports = {
   getAgentModel, setAgentModel, isValidModel, AVAILABLE_MODELS, DEFAULT_MODEL,
   getLeakProviderCreds, isLeakProviderConfigured, setLeakProviderCreds,
   encryptLeakProviders, decryptLeakProviders, readLeakProvidersStore,
+  encryptSecret, decryptSecret,
 }

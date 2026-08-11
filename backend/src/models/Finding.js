@@ -44,6 +44,10 @@ const findingSchema = new mongoose.Schema({
   owner:              { type: String, default: null },   // quem está corrigindo
   dueDate:            { type: Date, default: null },     // prazo de correção
   statusHistory:      { type: [{ status: String, at: Date, by: String, note: String }], default: [] },
+  // Integração de ticketing (#5): ref externa quando o achado virou ticket.
+  ticketUrl:          { type: String, default: null },
+  ticketRef:          { type: String, default: null },   // ex.: "#42"
+  ticketType:         { type: String, default: null },   // 'github' | …
   firstSeen:          { type: String, default: null },
   lastSeen:           { type: String, default: null },
 }, { timestamps: true })
