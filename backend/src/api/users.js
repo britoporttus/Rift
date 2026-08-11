@@ -31,7 +31,7 @@ router.get('/', async (_req, res) => {
 
 // POST /api/users — cria usuário local
 router.post('/', async (req, res) => {
-  const { email, name, password, role } = req.body ?? {}
+  const { email, name, password, role, depth } = req.body ?? {}
   if (!email || !name || !password) {
     return res.status(400).json({ error: 'email, name e password obrigatórios' })
   }
@@ -43,7 +43,8 @@ router.post('/', async (req, res) => {
   const user = await User.create({
     email: email.toLowerCase(),
     name,
-    role: role === 'admin' ? 'admin' : 'user',
+    role: ['admin', 'user', 'client'].includes(role) ? role : 'user',
+    depth: ['tecnico', 'gestor', 'diretor'].includes(depth) ? depth : 'tecnico',
     passwordHash,
     provider: 'local',
   })
