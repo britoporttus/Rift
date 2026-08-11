@@ -49,6 +49,20 @@ app.prepare().then(() => {
     const parsedUrl = parse(req.url, true)
     const pathname = parsedUrl.pathname || '/'
 
+    // Rota de emergência para destravar um navegador que congelou o shell velho
+    // em cache (guardado antes do no-store, quando o header ainda permitia
+    // cachear por 1 ano). Clear-Site-Data: "cache" faz o próprio navegador
+    // purgar o cache do site — mantém o login (não limpamos "cookies") — e em
+    // seguida redireciona pra home. Basta o operador abrir /_flush uma vez.
+    if (pathname === '/_flush') {
+      res.statusCode = 303
+      res.setHeader('Clear-Site-Data', '"cache"')
+      res.setHeader('Cache-Control', 'no-store')
+      res.setHeader('Location', '/dominios')
+      res.end('limpando cache do navegador...')
+      return
+    }
+
     // O shell HTML (e os payloads RSC de navegação) NÃO podem ser cacheados pelo
     // navegador. O Next marca páginas estáticas com `s-maxage=31536000,
     // stale-while-revalidate`; browsers (Brave em especial) passam a servir um
