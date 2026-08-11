@@ -47,6 +47,31 @@ proxy.on('error', (err, _req, resOrSocket) => {
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url, true)
+    const pathname = parsedUrl.pathname || '/'
+
+    // O shell HTML (e os payloads RSC de navegação) NÃO podem ser cacheados pelo
+    // navegador. O Next marca páginas estáticas com `s-maxage=31536000,
+    // stale-while-revalidate`; browsers (Brave em especial) passam a servir um
+    // shell VELHO — que referencia chunks velhos — mesmo após um deploy novo, e
+    // o usuário fica "preso" na versão anterior (menu/telas antigas) por mais que
+    // dê refresh. Os assets em /_next/static são content-hashed (immutable) e
+    // continuam cacheáveis normalmente. Forçamos `no-store` só nos documentos,
+    // interceptando qualquer Cache-Control que o Next tente escrever.
+    const cacheable =
+      pathname.startsWith('/_next/static') ||
+      pathname.startsWith('/_next/image') ||
+      pathname === '/favicon.svg'
+    if (!cacheable) {
+      const origSetHeader = res.setHeader.bind(res)
+      res.setHeader = (name, value) => {
+        if (String(name).toLowerCase() === 'cache-control') {
+          return origSetHeader('Cache-Control', 'no-store, must-revalidate')
+        }
+        return origSetHeader(name, value)
+      }
+      try { res.setHeader('Cache-Control', 'no-store, must-revalidate') } catch {}
+    }
+
     handle(req, res, parsedUrl)
   })
 
