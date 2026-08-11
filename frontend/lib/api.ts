@@ -166,6 +166,8 @@ export const api = {
       req<DomainDetail>(`/domains/${id}/authorization`, { method: 'PATCH', body: JSON.stringify({ authorized, note }) }),
     assets: (id: string, type?: string) =>
       req<DomainAsset[]>(`/domains/${id}/assets${type ? `?type=${type}` : ''}`),
+    // Correlação leve (#4): pessoas/e-mails do domínio cruzados com vazamentos.
+    people: (id: string) => req<DomainPeople>(`/domains/${id}/people`),
     // Histórico de monitoramento (linha do tempo de scans — sempre-ativo).
     history: (id: string, limit?: number) =>
       req<DomainScanRecord[]>(`/domains/${id}/history${limit ? `?limit=${limit}` : ''}`),
@@ -650,6 +652,17 @@ export type BoardColumn = 'open' | 'in_progress' | 'fixed' | 'accepted_risk'
 export interface KanbanBoardData {
   columns: Record<BoardColumn, BoardCard[]>
   counts: Record<BoardColumn, number>
+}
+
+// Correlação leve de credenciais (#4) — domínio → pessoas/e-mails → vazamento.
+export interface DomainPerson { masked: string; role: boolean; inLeak: boolean; source?: string }
+export interface DomainPeople {
+  domain: string
+  pattern: string | null
+  people: DomainPerson[]
+  counts: { people: number; roles: number; leaked: number }
+  providers: Array<{ id: string; label: string; needsKey?: boolean; configured: boolean }>
+  fetched: Array<{ path: string; status?: number; error?: string }>
 }
 
 // Harness de sessão (#3) — resultado do pré-voo de login (sem IA).

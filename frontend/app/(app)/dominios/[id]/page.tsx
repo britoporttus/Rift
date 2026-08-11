@@ -14,6 +14,7 @@ import { Magnetic } from '@/components/ui/fx/Magnetic'
 import { GradientBorder } from '@/components/ui/fx/GradientBorder'
 import { engagementMatchesDomain } from '@/lib/domainMatch'
 import { VerificationCard } from '@/components/dominios/VerificationCard'
+import { PeoplePanel } from '@/components/dominios/PeoplePanel'
 import type { DomainScanRecord } from '@/lib/api'
 import {
   Page, PageHeader, Card, Collapsible, Btn, Chip, Badge, EmptyState, tint, R,
@@ -573,6 +574,10 @@ export default function DominioDetailPage() {
           {exposures.map((a) => <AssetRow key={a.id} a={a} />)}
         </Collapsible>
       )}
+
+      {/* Correlação leve (#4): pessoas/e-mails do domínio × vazamentos. Lazy —
+          só busca quando aberto. */}
+      <PeoplePanel domainId={id} />
 
       {(ports.length > 0 || (domain.asnInfo && domain.asnInfo.length > 0)) && (
         <Collapsible title="Portas & serviços" icon={<Network size={12} />}

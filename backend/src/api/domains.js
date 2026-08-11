@@ -7,6 +7,8 @@ const scanner = require('../asm/scanner')
 const { absFor } = require('../asm/screenshots')
 const { isIpLiteral } = require('../net-guard')
 const { cooldownRemainingMs, canForceCooldown } = require('../cooldown')
+const { assertSafeHost, fetchRaw } = require('../session-harness')
+const { extractEmails, derivePattern, correlate } = require('../people-discovery')
 
 const router = Router()
 router.use(requireAuth())
@@ -217,6 +219,61 @@ router.get('/:id/history', async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200)
   const list = await req.db.DomainScan.find({ domainId: req.params.id }).sort({ ranAt: -1 }).limit(limit).lean()
   res.json(list.map((s) => ({ ...s, id: s._id })))
+})
+
+// GET /:id/people — correlação leve (#4): e-mails/pessoas do domínio, cruzados
+// com os vazamentos já coletados. Fonte principal = superfície pública do PRÓPRIO
+// alvo (compliant). Anti-SSRF no fetch (mesmo padrão do ASM/harness).
+const PEOPLE_PATHS = ['/', '/contato', '/contact', '/sobre', '/about', '/equipe', '/team', '/quem-somos']
+router.get('/:id/people', async (req, res) => {
+  const dom = await req.db.Domain.findById(req.params.id).lean()
+  if (!dom) return res.status(404).json({ error: 'domínio não encontrado' })
+
+  // 1) Superfície pública: busca poucas páginas comuns, extrai e-mails do domínio.
+  const surface = new Set()
+  const fetched = []
+  for (const path of PEOPLE_PATHS.slice(0, 6)) {
+    const url = `https://${dom.domain}${path}`
+    try {
+      await assertSafeHost(dom.domain)
+      const r = await fetchRaw(url, { method: 'GET', headers: { 'user-agent': 'Rift-PeopleDiscovery/1.0' }, timeoutMs: 7000 })
+      fetched.push({ path, status: r.status })
+      if (r.status >= 200 && r.status < 400) for (const e of extractEmails(r.body, dom.domain)) surface.add(e)
+    } catch (e) {
+      fetched.push({ path, error: e instanceof Error ? e.message : 'falha' })
+      // anti-SSRF recusou o host inteiro → não adianta tentar os outros paths
+      if (/anti-SSRF|resolver/.test(String(e?.message))) break
+    }
+  }
+  const emails = [...surface]
+
+  // 2) Cruza com os vazamentos já coletados (LeakedCredential.account já mascarado).
+  const leaks = await req.db.LeakedCredential.find({ domain: dom.domain }).select('account').lean().catch(() => [])
+  const leakedSet = new Set(leaks.map((l) => l.account).filter(Boolean))
+
+  // 3) Correlaciona (mascara + marca vazado) e junta contas vazadas que não
+  //    apareceram na superfície (pessoas em breach, mas não publicadas).
+  const surfacePeople = correlate(emails, leakedSet)
+  const surfaceMasked = new Set(surfacePeople.map((p) => p.masked))
+  const leakedOnly = [...leakedSet].filter((a) => !surfaceMasked.has(a)).map((masked) => ({ masked, role: false, inLeak: true, source: 'leak' }))
+  const people = [...surfacePeople.map((p) => ({ ...p, source: 'surface' })), ...leakedOnly]
+    .sort((a, b) => Number(b.inLeak) - Number(a.inLeak) || Number(a.role) - Number(b.role))
+
+  res.json({
+    domain: dom.domain,
+    pattern: derivePattern(emails),
+    people,
+    counts: {
+      people: people.filter((p) => !p.role).length,
+      roles: people.filter((p) => p.role).length,
+      leaked: people.filter((p) => p.inLeak).length,
+    },
+    providers: [
+      { id: 'surface', label: 'Superfície pública do alvo', configured: true },
+      { id: 'hunter', label: 'Hunter.io', needsKey: true, configured: false },   // plugável quando houver chave
+    ],
+    fetched,
+  })
 })
 
 // ── Ativos e credenciais ────────────────────────────────────────────────────

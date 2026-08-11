@@ -139,4 +139,4 @@ async function runSessionCheck({ loginUrl, username, password, usernameField = '
   return analyzeLogin(loginResp, protectedResp, { successContains })
 }
 
-module.exports = { analyzeLogin, runSessionCheck, assertSafeHost, FAILURE_MARKERS }
+module.exports = { analyzeLogin, runSessionCheck, assertSafeHost, fetchRaw, FAILURE_MARKERS }
