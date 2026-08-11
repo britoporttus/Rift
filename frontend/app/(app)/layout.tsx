@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { DepthSwitcher } from '@/components/ui/DepthSwitcher'
+import { MonitorBadge } from '@/components/ui/MonitorBadge'
 import { Sidebar } from '@/components/ui/Sidebar'
 import { crumbsFor } from '@/lib/nav'
 import { MotionProvider } from '@/components/ui/motion'
@@ -76,6 +77,7 @@ function TopBar({ crumbs }: { crumbs: Array<{ href: string; label: string }> }) 
 
       {/* Right side */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
+        <MonitorBadge />
         <DepthSwitcher />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{

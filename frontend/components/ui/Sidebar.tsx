@@ -1,10 +1,11 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { User } from '@/lib/api'
+import { User, Depth } from '@/lib/api'
 import { SI } from '@/components/ui/SI'
 import { isActive } from '@/lib/nav'
 import { can } from '@/lib/viewer'
+import { effectiveDepth } from '@/lib/depth'
 
 const C = {
   bg: 'var(--bg)',
@@ -43,6 +44,7 @@ const Ico = {
   directory: (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M12 2l9 4.5v11L12 22l-9-4.5v-11L12 2z" /><circle cx="12" cy="10" r="2.4" /><path d="M8.5 16a3.5 3.5 0 017 0" /></SI>,
   sap:       (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 15V9l3 6 3-6v6M17 9v6" /></SI>,
   kanban:    (s?: number, c?: string) => <SI s={s || 14} c={c}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v13M15 3v8" /></SI>,
+  shield:    (s?: number, c?: string) => <SI s={s || 14} c={c}><path d="M12 3l8 3.5V12c0 4.4-3.4 7.4-8 8.5C7.4 19.4 4 16.4 4 12V6.5z" /></SI>,
 }
 
 // Navegação por AMBIENTE TESTADO (Fase 1 do roadmap de legibilidade, 2026-08-10).
@@ -53,27 +55,37 @@ const Ico = {
 // é uma LENTE sobre tudo, então foi para Resultado. Cloud/AD/SAP entram como
 // `soon` — o menu vira o roadmap visível, e isso vende. "Novo Pentest" segue
 // como ação primária no topo (não é um alvo, é uma ação sobre um alvo).
-type NavItem = { href: string; icon: keyof typeof Ico; label: string; adminOnly?: boolean; soon?: boolean }
+// `depths`: para CLIENTE, quais profundidades veem o item (barreira real). Item
+// sem `depths` = todas. Operador interno (admin/user) ignora `depths` — vê tudo,
+// porque alterna livremente (a profundidade é só a casa dele, não uma prisão).
+type NavItem = { href: string; icon: keyof typeof Ico; label: string; adminOnly?: boolean; soon?: boolean; depths?: Depth[] }
 type NavGroup = { title: string; items: NavItem[] }
 
 const NAV_GROUPS: NavGroup[] = [
   {
+    title: 'Painéis',
+    items: [
+      { href: '/painel',    icon: 'grid',   label: 'Painel do gestor', depths: ['tecnico', 'gestor'] },
+      { href: '/executivo', icon: 'shield', label: 'Panorama executivo', depths: ['tecnico', 'gestor', 'diretor'] },
+    ],
+  },
+  {
     title: 'Alvos',
     items: [
-      { href: '/dominios',     icon: 'globe',     label: 'Web / API' },
-      { href: '/rede-interna', icon: 'network',   label: 'Rede Interna' },
-      { href: '/cloud',        icon: 'cloud',     label: 'Cloud', soon: true },
-      { href: '/ad',           icon: 'directory', label: 'Active Directory', soon: true },
-      { href: '/sap',          icon: 'sap',       label: 'SAP', soon: true },
+      { href: '/dominios',     icon: 'globe',     label: 'Web / API', depths: ['tecnico'] },
+      { href: '/rede-interna', icon: 'network',   label: 'Rede Interna', depths: ['tecnico'] },
+      { href: '/cloud',        icon: 'cloud',     label: 'Cloud', soon: true, depths: ['tecnico'] },
+      { href: '/ad',           icon: 'directory', label: 'Active Directory', soon: true, depths: ['tecnico'] },
+      { href: '/sap',          icon: 'sap',       label: 'SAP', soon: true, depths: ['tecnico'] },
     ],
   },
   {
     title: 'Resultado',
     items: [
-      { href: '/findings',  icon: 'alert',   label: 'Achados' },
-      { href: '/correcoes', icon: 'kanban',  label: 'Correções' },
-      { href: '/reports',   icon: 'file',    label: 'Relatórios' },
-      { href: '/mapa',      icon: 'share2',  label: 'Mapa' },
+      { href: '/findings',  icon: 'alert',   label: 'Achados', depths: ['tecnico', 'gestor'] },
+      { href: '/correcoes', icon: 'kanban',  label: 'Correções', depths: ['tecnico', 'gestor'] },
+      { href: '/reports',   icon: 'file',    label: 'Relatórios' },   // todas as profundidades
+      { href: '/mapa',      icon: 'share2',  label: 'Mapa', depths: ['tecnico', 'gestor'] },
     ],
   },
   {
@@ -104,8 +116,15 @@ interface SidebarProps {
 
 export function Sidebar({ user, collapsed, onToggle, onLogout }: SidebarProps) {
   const path = usePathname()
+  // Restrição por profundidade (Fase 6): só o CLIENTE é barrado — operador interno
+  // alterna livremente, então vê tudo. Cliente diretor vê só executivo+relatórios,
+  // gestor vê o mundo de resultado, técnico vê tudo (do tenant dele).
+  const isClient = user.role === 'client'
+  const clientDepth = effectiveDepth(user)
   const groups = NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((n) => !n.adminOnly || user.role === 'admin') }))
+    .map((g) => ({ ...g, items: g.items.filter((n) =>
+      (!n.adminOnly || user.role === 'admin') &&
+      (!isClient || !n.depths || n.depths.includes(clientDepth))) }))
     .filter((g) => g.items.length > 0)
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href))
   const novoActive = path.startsWith('/novo-pentest')
