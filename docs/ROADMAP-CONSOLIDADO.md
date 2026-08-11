@@ -71,6 +71,7 @@ todas no ar:
 | ~~**Kanban de correção**~~ | ✅ **feito 2026-08-10** | `/correcoes`: quadro com drag-and-drop nativo (Aberto/Em correção/Corrigido/Risco aceito), "Assumir" (dono) + prazo por card, toggle Todos/Meus. `kanbanBoard` puro e testado. | operador |
 | **Agente 2 — pentest autenticado** | 🟡 stub | pack `web-auth` coleta credencial; falta crawler autenticado, gatilho de handoff e **harness de sessão** (provar login antes de gastar token). | CONSOLIDACAO F6 / PRODUTO É5 |
 | ~~**ASM monitoramento risk-triggered** (#2b)~~ | ✅ **feito 2026-08-10** | deriva eventos do scan (novo subdomínio, exposição alta, CVE, takeover, piora de score) → feed `MonitorEvent` + re-scan mais curto p/ domínio "quente". Falta só badge/notificação in-app (A4). | PRODUTO É2 |
+| ~~**Integrações / ticketing** (#5)~~ | ✅ **feito 2026-08-10** | adapter GitHub Issues (real), `Connection` por tenant com token cifrado, POST /findings/:id/ticket, /conexoes + "Abrir ticket" no achado. Jira/Azure e MCP-client ficam como próximos adapters. | PRODUTO É3 |
 | ~~**Correlação leve de credenciais** (#4)~~ | ✅ **feito 2026-08-10** | `GET /domains/:id/people`: e-mails da superfície pública do alvo (anti-SSRF) × LeakedCredential; padrão de e-mail inferido; máscara LGPD; painel lazy no domínio. Hunter.io plugável quando houver chave. | PRODUTO É5 |
 | **Vazamentos** | 🟡 represado | "buy, not build" para coleta; dados e lógica atrás de `RIFT_LEAKS_ENABLED`; correlação leve = item #5. | PRODUTO É8 |
 | **Notificações in-app** (A4) | ⏳ | toast/badge nos checkpoints e ao concluir mapeamento. | A/B |
@@ -85,7 +86,6 @@ A ordem é decisão fechada; não re-discutir sem motivo novo.
 |---|---|---|
 | **2b** | ASM monitoramento risk-triggered | §1.1 |
 | **3** | Agente 2 autenticado + harness de sessão | — |
-| **5** | Integrações / abas de conexão (ticketing + MCP) | Frente 0 |
 | **5b** | Cloud: Azure + Entra ID a sério (postura de identidade) | — |
 
 ---
