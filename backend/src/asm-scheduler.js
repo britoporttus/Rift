@@ -11,6 +11,11 @@ const { rescanIntervalMs } = require('./plans')
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000 // varre a cada 5 min (igual scheduler.js)
 const RESCAN_INTERVAL_MS = (Number(process.env.ASM_RESCAN_INTERVAL_DAYS) || 7) * 24 * 60 * 60 * 1000
+// Risk-triggered (#2b): um domínio que gerou evento alto/crítico há pouco fica
+// "quente" e é re-escaneado numa cadência mais curta, por uma janela. É o que
+// transforma monitoramento periódico em monitoramento reativo ao risco.
+const RISK_RESCAN_INTERVAL_MS = (Number(process.env.ASM_RISK_RESCAN_HOURS) || 24) * 60 * 60 * 1000
+const RISK_HOT_WINDOW_MS = (Number(process.env.ASM_RISK_HOT_DAYS) || 3) * 24 * 60 * 60 * 1000
 // Cap por tick: evita disparar N scans de uma vez num boot com tudo vencido
 // (ex.: lastScanAt null em todos). O tick roda a cada 5 min e drena aos poucos.
 const MAX_PER_TICK = Number(process.env.ASM_RESCAN_MAX_PER_TICK) || 3
@@ -38,14 +43,23 @@ async function tickFor(db, label = '', tenant = null) {
   // determinísticos e não gasta token de IA — o custo marginal é CPU, então
   // reduzir a cadência do free economizaria quase nada e mataria justamente o
   // que traz o cliente de volta). O tenant interno segue a env histórica.
-  const intervalMs = tenant ? rescanIntervalMs(tenant) : RESCAN_INTERVAL_MS
+  const baseInterval = tenant ? rescanIntervalMs(tenant) : RESCAN_INTERVAL_MS
   const all = await db.Domain.find({}).select('_id domain lastScanAt scanState verification').lean()
-  const due = all.filter((d) =>
-    d.scanState !== 'scanning'
-    // Domínio não verificado nunca entra na fila automática: o scanner o
-    // recusaria e cada tick só produziria um scan 'failed' a mais no histórico.
-    && !scanner.scanBlockReason(d)
-    && isDomainDue(d, now, intervalMs))
+
+  // Domínios "quentes": tiveram evento alto/crítico dentro da janela → cadência
+  // curta. Um só query por tick (barato) monta o conjunto de domainIds quentes.
+  const hotSince = new Date(now.getTime() - RISK_HOT_WINDOW_MS)
+  const hotEvents = db.MonitorEvent
+    ? await db.MonitorEvent.find({ severity: { $in: ['high', 'critical'] }, at: { $gte: hotSince } })
+        .select('domainId').lean().catch(() => [])
+    : []
+  const hotIds = new Set(hotEvents.map((e) => e.domainId))
+
+  const due = all.filter((d) => {
+    if (d.scanState === 'scanning' || scanner.scanBlockReason(d)) return false
+    const interval = hotIds.has(String(d._id)) ? Math.min(baseInterval, RISK_RESCAN_INTERVAL_MS) : baseInterval
+    return isDomainDue(d, now, interval)
+  })
   for (const dom of due.slice(0, MAX_PER_TICK)) {
     scanner.runScan(db, dom._id, { userName: 'Monitoramento ASM', trigger: 'monitor' })
       .catch((e) => console.error(`[asm-scheduler]${label} scan de ${dom.domain} falhou:`, e?.message))

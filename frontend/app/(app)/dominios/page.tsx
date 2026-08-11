@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { api, DomainSummary, Finding } from '@/lib/api'
+import { api, DomainSummary, Finding, MonitorEvent } from '@/lib/api'
 import { SEV_COLOR } from '@/lib/severity'
 import { clickableDivProps } from '@/lib/a11y'
 import { AreaTrend } from '@/components/ui/charts/AreaTrend'
@@ -51,6 +51,7 @@ export default function DominiosPage() {
   const [hovered, setHovered] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [findings, setFindings] = useState<Finding[]>([])
+  const [events, setEvents] = useState<MonitorEvent[]>([])
 
   const load = useCallback((spin = false) => {
     if (spin) setLoading(true)
@@ -68,6 +69,9 @@ export default function DominiosPage() {
   // Findings alimentam a curva "descobertos · 14 dias". Busca única (a tendência
   // não precisa do polling de 8s dos domínios).
   useEffect(() => { api.findings.list().then(setFindings).catch(() => {}) }, [])
+
+  // Feed de monitoramento risk-triggered (#2b): o que mudou que importa.
+  useEffect(() => { api.monitor.events(12).then((r) => setEvents(r.events)).catch(() => {}) }, [])
 
   async function handleCreate() {
     const d = newDomain.trim()
@@ -104,14 +108,6 @@ export default function DominiosPage() {
   const atRisk = domains.filter((d) => d.riskLevel === 'critical' || d.riskLevel === 'high').length
   const unauthorizedCount = domains.filter((d) => !d.authorized).length
   const findingsTrend = findingsPerDay(findings, 14)
-  // "O que mudou" no lugar do ranking "mais expostos": ranking só informa com
-  // volume (com 2 e 1 exposições era decoração), e a pergunta que o
-  // monitoramento contínuo deve responder é o que entrou/saiu (Fase 2, item 2.5).
-  const recentChanges = domains
-    .filter((d) => d.lastDiff?.computedAt &&
-      ((d.lastDiff.newHostCount ?? 0) > 0 || (d.lastDiff.missingHostCount ?? 0) > 0 || (d.lastDiff.scoreDelta ?? 0) !== 0))
-    .sort((a, b) => new Date(b.lastDiff!.computedAt!).getTime() - new Date(a.lastDiff!.computedAt!).getTime())
-    .slice(0, 6)
 
   return (
     <Page>
@@ -150,9 +146,9 @@ export default function DominiosPage() {
         </Reveal>
       )}
 
-      {/* Panorama visual: tendência de descobertas + o que mudou nos últimos
-          scans, lado a lado. */}
-      {!loading && (findings.length > 0 || recentChanges.length > 0) && (
+      {/* Panorama visual: tendência de descobertas + o feed de monitoramento
+          risk-triggered (#2b) — "o que mudou que importa", com severidade. */}
+      {!loading && (findings.length > 0 || events.length > 0) && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18, alignItems: 'start' }}>
           {findings.length > 0 && (
             <Reveal delay={60}>
@@ -164,28 +160,29 @@ export default function DominiosPage() {
               </Card>
             </Reveal>
           )}
-          {recentChanges.length > 0 && (
+          {events.length > 0 && (
             <Reveal delay={120}>
               <Card pad="1.25rem 1.4rem">
-                <SectionTitle icon={<History size={13} />}>O que mudou nos últimos scans</SectionTitle>
-                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column' }}>
-                  {recentChanges.map((d, i) => {
-                    const nh = d.lastDiff?.newHostCount ?? 0
-                    const mh = d.lastDiff?.missingHostCount ?? 0
-                    const ds = d.lastDiff?.scoreDelta ?? 0
+                <SectionTitle icon={<History size={13} />} right={
+                  <span style={{ fontSize: 10.5, color: 'var(--text-mute)', fontFamily: 'var(--mono)' }}>monitoramento contínuo</span>
+                }>O que mudou que importa</SectionTitle>
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column' }}>
+                  {events.map((e, i) => {
+                    const ec = SEV_COLOR[e.severity] || SEV_COLOR.info
                     return (
-                      <div key={d.id} role="button" tabIndex={0}
-                        onClick={() => router.push(`/dominios/${d.id}`)}
-                        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && router.push(`/dominios/${d.id}`)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', cursor: 'pointer',
+                      <div key={e.id} role="button" tabIndex={0}
+                        onClick={() => router.push(`/dominios/${e.domainId}`)}
+                        onKeyDown={(k) => (k.key === 'Enter' || k.key === ' ') && router.push(`/dominios/${e.domainId}`)}
+                        style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 0', cursor: 'pointer',
                           borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-                        <span style={{ fontSize: 12.5, color: 'var(--text)', fontFamily: 'var(--mono)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.domain}</span>
-                        <span style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, fontFamily: 'var(--mono)' }}>
-                          {nh > 0 && <span style={{ color: 'var(--low)' }}>+{nh} host</span>}
-                          {mh > 0 && <span style={{ color: 'var(--high)' }}>−{mh} host</span>}
-                          {ds !== 0 && <span style={{ color: ds > 0 ? 'var(--high)' : 'var(--low)' }}>{ds > 0 ? '▲' : '▼'} {Math.abs(ds)}</span>}
-                          <span style={{ color: 'var(--text-mute)' }}>{relTime(d.lastDiff!.computedAt!)}</span>
-                        </span>
+                        <span title={e.severity} style={{ width: 6, height: 6, borderRadius: '50%', background: ec, marginTop: 5, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.35 }}>{e.title}</div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text-mute)', marginTop: 2, display: 'flex', gap: 7, fontFamily: 'var(--mono)' }}>
+                            <span style={{ color: 'var(--purple-light)' }}>{e.domain}</span>
+                            <span>{relTime(e.at)}</span>
+                          </div>
+                        </div>
                       </div>
                     )
                   })}

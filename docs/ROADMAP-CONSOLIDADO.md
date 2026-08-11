@@ -68,9 +68,9 @@ todas no ar:
 
 | Item | Estado | O que falta | Origem |
 |---|---|---|---|
-| **Kanban de correção** (estilo Azure DevOps) | 🔵 pedido 2026-08-10 | o técnico arrasta o achado entre colunas (Aberto → Em correção → Corrigido), com dono e prazo; o gestor ganha visão de fluxo. Fundação pronta: ciclo de vida (Fase 5) + painel do gestor (Fase 6). Falta a UI de quadro com drag-and-drop e o "meus achados" do técnico. | operador |
+| ~~**Kanban de correção**~~ | ✅ **feito 2026-08-10** | `/correcoes`: quadro com drag-and-drop nativo (Aberto/Em correção/Corrigido/Risco aceito), "Assumir" (dono) + prazo por card, toggle Todos/Meus. `kanbanBoard` puro e testado. | operador |
 | **Agente 2 — pentest autenticado** | 🟡 stub | pack `web-auth` coleta credencial; falta crawler autenticado, gatilho de handoff e **harness de sessão** (provar login antes de gastar token). | CONSOLIDACAO F6 / PRODUTO É5 |
-| **ASM monitoramento risk-triggered** (#2b) | 🟡 | gatilho por evento (novo subdomínio, deploy, CVE). Depende da tela saber dizer *o que* mudou (§1.1). | PRODUTO É2 |
+| ~~**ASM monitoramento risk-triggered** (#2b)~~ | ✅ **feito 2026-08-10** | deriva eventos do scan (novo subdomínio, exposição alta, CVE, takeover, piora de score) → feed `MonitorEvent` + re-scan mais curto p/ domínio "quente". Falta só badge/notificação in-app (A4). | PRODUTO É2 |
 | **Vazamentos** | 🟡 represado | "buy, not build" para coleta; dados e lógica atrás de `RIFT_LEAKS_ENABLED`; correlação leve = item #5. | PRODUTO É8 |
 | **Notificações in-app** (A4) | ⏳ | toast/badge nos checkpoints e ao concluir mapeamento. | A/B |
 

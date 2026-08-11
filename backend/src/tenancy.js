@@ -35,6 +35,7 @@ const TENANT_MODEL_FILES = {
   Domain:            './models/Domain',
   DomainAsset:       './models/DomainAsset',
   DomainScan:        './models/DomainScan',
+  MonitorEvent:      './models/MonitorEvent',
   InternalNetwork:   './models/InternalNetwork',
   InternalHost:      './models/InternalHost',
   InternalScan:      './models/InternalScan',

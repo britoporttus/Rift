@@ -16,6 +16,7 @@ const dns = require('dns').promises
 const { runTool, hasBin } = require('./binaries')
 const { computeScore } = require('./score')
 const { computeAssetDiff } = require('./diff')
+const { deriveMonitorEvents } = require('./monitor-events')
 const { analyzePort } = require('./ports')
 const { detectTakeover } = require('./takeover')
 const { bruteforceSubdomains, isDnsInfraHost } = require('./dns-brute')
@@ -540,7 +541,7 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
     const { score, level } = await recomputeDomain(db, domainId)
 
     // 5) diff de superfície vs. o scan anterior (novo/sumido + Δscore).
-    const currentAssets = await db.DomainAsset.find({ domainId }).select('type value fingerprint severity cveId alive').lean()
+    const currentAssets = await db.DomainAsset.find({ domainId }).select('type value fingerprint severity cveId alive label source cname').lean()
     const diff = computeAssetDiff({ previousAssets, currentAssets, scopedTypes })
     const now = new Date()
     const scoreDelta = score - previousScore
@@ -564,6 +565,16 @@ async function runScan(db, domainId, { userName, trigger = 'manual' } = {}) {
       riskScore: score, riskLevel: level,
       newCount: diff.newCount, missingCount: diff.missingCount, scoreDelta,
     }).catch((e) => console.warn('[asm] falha ao gravar histórico de scan:', e?.message))
+
+    // 7) monitoramento risk-triggered (#2b): transforma "o que mudou" em eventos
+    //    acionáveis (novo subdomínio, exposição alta, CVE, takeover, piora de
+    //    score) e grava no feed. Não-fatal — um erro aqui não invalida o scan.
+    try {
+      const events = deriveMonitorEvents({ diff, currentAssets, previousAssets, previousScore, score, now })
+      if (events.length) {
+        await db.MonitorEvent.insertMany(events.map((e) => ({ ...e, domainId, domain: dom.domain })))
+      }
+    } catch (e) { console.warn('[asm] falha ao gravar eventos de monitoramento:', e?.message) }
   } catch (err) {
     await db.Domain.findByIdAndUpdate(domainId, { $set: {
       scanState: 'failed', scanStep: null, scanError: String(err?.message || err).slice(0, 300),

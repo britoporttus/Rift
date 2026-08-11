@@ -26,6 +26,7 @@ const leaksRouter = require('./api/leaks')
 const graphRouter = require('./api/graph')
 const internalNetworksRouter = require('./api/internal-networks')
 const overviewRouter = require('./api/overview')
+const monitorRouter = require('./api/monitor')
 const asmScanner = require('./asm/scanner')
 const agentRunner = require('./agent-runner')
 const { resolveTenant, dbFor, forEachTenant, dbForSlug } = require('./tenancy')
@@ -163,6 +164,7 @@ app.use('/api/leaks', leaksRouter)
 app.use('/api/graph', graphRouter)
 app.use('/api/internal-networks', internalNetworksRouter)
 app.use('/api/overview', overviewRouter)
+app.use('/api/monitor', monitorRouter)
 
 // REL-1: 404 de API + middleware de erro global (DEPOIS das rotas). Sem o error
 // handler, a rejeição async capturada por express-async-errors não teria destino.

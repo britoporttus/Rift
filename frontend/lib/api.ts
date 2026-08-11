@@ -102,6 +102,10 @@ export const api = {
     diretor: () => req<DiretorOverview>(`/overview/diretor`),
     board:   (scope: 'all' | 'mine' = 'all') => req<KanbanBoardData>(`/overview/board?scope=${scope}`),
   },
+  monitor: {
+    events: (limit = 50, unseen = false) => req<{ events: MonitorEvent[]; unseen: number }>(`/monitor/events?limit=${limit}${unseen ? '&unseen=1' : ''}`),
+    markSeen: () => req<{ ok: boolean }>(`/monitor/events/seen`, { method: 'POST' }),
+  },
   reports: {
     list: (engagementId: string) => req<ReportFile[]>(`/reports/${engagementId}`),
     // URL do relatório GERADO pelo Rift (a partir dos findings). Usada direto no
@@ -640,6 +644,13 @@ export type BoardColumn = 'open' | 'in_progress' | 'fixed' | 'accepted_risk'
 export interface KanbanBoardData {
   columns: Record<BoardColumn, BoardCard[]>
   counts: Record<BoardColumn, number>
+}
+
+export interface MonitorEvent {
+  id: string; domainId: string; domain: string
+  type: 'new_subdomain' | 'new_exposure' | 'new_cve' | 'takeover_candidate' | 'score_worsened'
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  title: string; detail: string | null; seen: boolean; at: string
 }
 
 export interface DiretorHotspot { id: string; domain: string; score: number; level: 'critical' | 'high' | 'medium' | 'low' | 'info' }
