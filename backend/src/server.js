@@ -576,6 +576,12 @@ async function handleMessage(msg, engId, sessionId, user) {
       // credencial vira env SÓ deste processo (opts.credentialEnv) e é limpa no onClose.
       let credentialEnv = {}
       const isAuthPack = domainPacks.needsCredentials(domainPack)
+      // Autenticado ≠ nuvem. web-auth (authStyle 'web') é pentest WEB COM login:
+      // navega a app e cobre o pós-login. Cloud/AD/SAP (isCloudAuth) autenticam num
+      // AMBIENTE via API/CLI e NÃO fazem recon web. Antes os dois caíam no guidance
+      // de Azure — web-auth recebia "az login" e "não faça recon web" (errado).
+      const isWebAuth = isAuthPack && domainPack.authStyle === 'web'
+      const isCloudAuth = isAuthPack && !isWebAuth
       // Chave por-ENGAGEMENT (mesma do POST /credentials) — a credencial é a "do próximo
       // run autenticado deste engagement", independente da sessão de chat.
       const packVaultKey = `cred:${ws._tenant?.slug || 'no-tenant'}:${engId}`
@@ -601,9 +607,13 @@ async function handleMessage(msg, engId, sessionId, user) {
       // do AMBIENTE e segue a metodologia do pack; NÃO faz recon web black-box. Black-box
       // (web): comportamento atual do framework (Agente 1).
       const credEnvNames = Object.keys(credentialEnv)
-      const fwGuidance = isAuthPack
+      const fwGuidance = isCloudAuth
         ? `- PAPEL: você é o AGENTE AUTENTICADO do domínio ${domainPack.label}. A credencial JÁ ESTÁ no AMBIENTE deste run (variáveis: ${credEnvNames.join(', ') || 'no ambiente do processo'}) — autentique com ela ANTES de tudo (ex.: \`az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"\`, depois \`az account set --subscription "$AZURE_SUBSCRIPTION_ID"\` se houver). NÃO peça credenciais, NÃO leia credentials.yaml e NÃO faça recon web black-box: o alvo é o AMBIENTE ${domainPack.label} do tenant/conta "${eng.target}", acessado via API/CLI. Siga ESTRITAMENTE a metodologia do DOMAIN PACK abaixo (read-only primeiro).
 ${aggressiveRule}`
+        : isWebAuth
+        ? `- PAPEL: você é o AGENTE 2 (autenticado, escopo WEB). As credenciais do operador estão no AMBIENTE deste run (${credEnvNames.join(', ') || 'WEB_AUTH_*'}) — autentique na APLICAÇÃO WEB com elas ANTES de tudo. Se WEB_AUTH_LOGIN_URL / WEB_AUTH_USER_FIELD / WEB_AUTH_PASS_FIELD / WEB_AUTH_SUCCESS estiverem presentes, são a receita de login já validada pelo operador (harness de sessão) — use-a e NÃO redescubra o formulário. NÃO peça credenciais nem leia credentials.yaml. O alvo é ${eng.target} e *.${eng.target}: é um pentest WEB COM login — navegue a aplicação e cubra a superfície PÓS-LOGIN (crawler autenticado, IDOR/BOLA/BFLA, escalonamento de privilégio). Siga core/agent-2-authenticated.md.
+${aggressiveRule}
+- QUANDO O OPERADOR PEDE RELATÓRIO: gere o relatório autenticado imediatamente, sem mais testes`
         : (framework.slashCommands
           ? `- PAPEL: você é o AGENTE 1 (black-box). NÃO tem credenciais e NÃO deve pedi-las nem ler credentials.yaml. Siga core/agent-1-blackbox.md. Ao esgotar a superfície externa, gere o relatório e RECOMENDE ao operador fornecer credenciais para o Agente 2 (não inicie fase autenticada).
 ${aggressiveRule}
@@ -616,7 +626,7 @@ ${aggressiveRule}
         ? `[CONTEXTO DO SISTEMA — NÃO IGNORAR]
 Engagement ativo: "${eng.name}"
 ID do engagement: ${engId2}
-Alvo autorizado: ${isAuthPack ? `ambiente ${domainPack.label} do tenant/conta "${eng.target}" (acesso via credencial no ambiente do run)` : `${eng.target} e *.${eng.target}`}
+Alvo autorizado: ${isCloudAuth ? `ambiente ${domainPack.label} do tenant/conta "${eng.target}" (acesso via credencial no ambiente do run)` : `${eng.target} e *.${eng.target}`}
 Status: ${eng.status}
 Versão do agente: ${framework.label}
 Diretório de contexto: context/${engId2}/
@@ -627,7 +637,7 @@ Reports dir:  clients/${slug}/${date}/reports/
 REGRAS OBRIGATÓRIAS:
 ${fwGuidance}
 - Responda SEMPRE em português brasileiro
-- ${isAuthPack ? `Opere SOMENTE no tenant/subscription autorizado ("${eng.target}") usando a credencial do ambiente — NÃO faça recon web/DNS de ${eng.target}; a superfície aqui é a do ambiente ${domainPack.label} (recursos, RBAC, identidades), não um site` : `Opere APENAS sobre o alvo ${eng.target} — qualquer outro alvo está fora de escopo`}
+- ${isCloudAuth ? `Opere SOMENTE no tenant/subscription autorizado ("${eng.target}") usando a credencial do ambiente — NÃO faça recon web/DNS de ${eng.target}; a superfície aqui é a do ambiente ${domainPack.label} (recursos, RBAC, identidades), não um site` : `Opere APENAS sobre o alvo ${eng.target} — qualquer outro alvo está fora de escopo`}
 - Use o diretório context/${engId2}/ para salvar estado deste engagement
 - NÃO liste outros engagements como opções; este é o engagement ativo
 - Para SALVAR ARQUIVOS: use SEMPRE a ferramenta Write ou Edit, NUNCA "cat >" ou "tee" via Bash (esses comandos são bloqueados pelo safety hook)
