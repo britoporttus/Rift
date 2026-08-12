@@ -57,13 +57,15 @@ function derivePattern(emails) {
   return top ? top[0] : null
 }
 
-// Monta o resultado final: separa pessoas de papéis, mascara (LGPD) e marca quem
-// aparece nos vazamentos. `leakedAccounts` = Set de contas mascaradas do módulo
-// de vazamentos (LeakedCredential.account já vem mascarado).
+// Monta o resultado final: separa pessoas de papéis e marca quem aparece nos
+// vazamentos. Devolve `email` (real) E `masked` — quem decide o que EXPOR por
+// papel (interno vê completo, cliente vê mascarado) é o endpoint. `leakedAccounts`
+// = Set de contas mascaradas do módulo de vazamentos (já vêm mascaradas).
 function correlate(emails, leakedAccounts = new Set()) {
   return emails.map((email) => {
     const masked = maskAccount(email)
     return {
+      email,
       masked,
       role: isRole(email),
       inLeak: leakedAccounts.has(masked),

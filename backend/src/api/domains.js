@@ -253,11 +253,16 @@ router.get('/:id/people', async (req, res) => {
 
   // 3) Correlaciona (mascara + marca vazado) e junta contas vazadas que não
   //    apareceram na superfície (pessoas em breach, mas não publicadas).
+  // Operador INTERNO (admin/user) vê o e-mail completo — é dado público do próprio
+  // alvo e ele precisa validar a pessoa. CLIENTE segue mascarado (LGPD). Contas de
+  // vazamento só existem mascaradas na base, então ficam mascaradas para todos.
+  const internal = !!req.user && req.user.role !== 'client'
   const surfacePeople = correlate(emails, leakedSet)
   const surfaceMasked = new Set(surfacePeople.map((p) => p.masked))
-  const leakedOnly = [...leakedSet].filter((a) => !surfaceMasked.has(a)).map((masked) => ({ masked, role: false, inLeak: true, source: 'leak' }))
+  const leakedOnly = [...leakedSet].filter((a) => !surfaceMasked.has(a)).map((masked) => ({ email: masked, masked, role: false, inLeak: true, source: 'leak' }))
   const people = [...surfacePeople.map((p) => ({ ...p, source: 'surface' })), ...leakedOnly]
     .sort((a, b) => Number(b.inLeak) - Number(a.inLeak) || Number(a.role) - Number(b.role))
+    .map((p) => ({ account: internal ? p.email : p.masked, role: p.role, inLeak: p.inLeak, source: p.source }))
 
   res.json({
     domain: dom.domain,

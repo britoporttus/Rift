@@ -668,7 +668,9 @@ export interface Connection { id: string; type: string; label: string | null; co
 export interface IntegrationsData { catalog: IntegrationAdapter[]; connections: Connection[] }
 
 // Correlação leve de credenciais (#4) — domínio → pessoas/e-mails → vazamento.
-export interface DomainPerson { masked: string; role: boolean; inLeak: boolean; source?: string }
+// `account` já vem resolvido pelo backend por papel: operador interno recebe o
+// e-mail completo; cliente recebe mascarado (LGPD). Vazamento sempre mascarado.
+export interface DomainPerson { account: string; role: boolean; inLeak: boolean; source?: string }
 export interface DomainPeople {
   domain: string
   pattern: string | null

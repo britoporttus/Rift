@@ -74,7 +74,7 @@ todas no ar:
 | ~~**Integrações / ticketing** (#5)~~ | ✅ **feito 2026-08-10** | adapter GitHub Issues (real), `Connection` por tenant com token cifrado, POST /findings/:id/ticket, /conexoes + "Abrir ticket" no achado. Jira/Azure e MCP-client ficam como próximos adapters. | PRODUTO É3 |
 | ~~**Correlação leve de credenciais** (#4)~~ | ✅ **feito 2026-08-10** | `GET /domains/:id/people`: e-mails da superfície pública do alvo (anti-SSRF) × LeakedCredential; padrão de e-mail inferido; máscara LGPD; painel lazy no domínio. Hunter.io plugável quando houver chave. | PRODUTO É5 |
 | **Vazamentos** | 🟡 represado | "buy, not build" para coleta; dados e lógica atrás de `RIFT_LEAKS_ENABLED`; correlação leve = item #5. | PRODUTO É8 |
-| **Notificações in-app** (A4) | ⏳ | toast/badge nos checkpoints e ao concluir mapeamento. | A/B |
+| ~~**Notificações in-app** (A4)~~ | ✅ **feito 2026-08-12** | sino no topbar virou dropdown com o feed de eventos (marca visto ao abrir) + `ToastProvider` que dispara toast quando surge evento novo no poll, em qualquer tela. Fecha o laço do #2b. | A/B |
 
 ---
 
