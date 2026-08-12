@@ -12,7 +12,8 @@
 > Legenda: `✅` no ar · `🟡` parcial · `🔵` planejado (ordenado) · `⛔` bloqueado
 > por infra · `❌` descartado · `💤` adiado explicitamente
 >
-> Verificado contra o código em 2026-08-10 (backend 535 testes, frontend 49).
+> Verificado contra o código em 2026-08-10; **revisado 2026-08-12** (Agente 2
+> autenticado Fase 3.1, A4 notificações, ajustes de Pessoas — todos no ar).
 
 ---
 
@@ -69,10 +70,10 @@ todas no ar:
 | Item | Estado | O que falta | Origem |
 |---|---|---|---|
 | ~~**Kanban de correção**~~ | ✅ **feito 2026-08-10** | `/correcoes`: quadro com drag-and-drop nativo (Aberto/Em correção/Corrigido/Risco aceito), "Assumir" (dono) + prazo por card, toggle Todos/Meus. `kanbanBoard` puro e testado. | operador |
-| **Agente 2 — pentest autenticado** | 🟡 stub | pack `web-auth` coleta credencial; falta crawler autenticado, gatilho de handoff e **harness de sessão** (provar login antes de gastar token). | CONSOLIDACAO F6 / PRODUTO É5 |
+| **Agente 2 — pentest autenticado** | 🟡 **parcial — Fase 3.1 feita 2026-08-12** | ✅ FEITO: harness de sessão (`session-harness.js` + `/harness`), espinha de credencial (cofre efêmero em RAM → env `WEB_AUTH_*`), guidance web-auth próprio no `server.js` (fim do bug de receber guidance de Azure), receita de login opcional (`WEB_AUTH_LOGIN_URL/USER_FIELD/PASS_FIELD/SUCCESS`) e o **cérebro do Agente 2** (`core/agent-2-authenticated.md`: autentica via JWT/form-curl/Playwright → `post-auth-mapper` → IDOR/BOLA/BFLA/priv-esc → relatório autenticado). Roda pelo fluxo **web-auth (engagement separado)**. ⏳ FALTA: **Fase 3.2** handoff de um clique (o botão "Passar credenciais (Agente 2)" promover um engagement black-box→autenticado em runtime, semeando o `shadow_graph`; contrato pronto em `core/handoff-engine.md`) e **Fase 3.3** wiring de fase do Playwright/crawl autenticado no `agent-runner.js` (`TOOL_PHASE`). | CONSOLIDACAO F6 / PRODUTO É5 |
 | ~~**ASM monitoramento risk-triggered** (#2b)~~ | ✅ **feito 2026-08-10** | deriva eventos do scan (novo subdomínio, exposição alta, CVE, takeover, piora de score) → feed `MonitorEvent` + re-scan mais curto p/ domínio "quente". Falta só badge/notificação in-app (A4). | PRODUTO É2 |
 | ~~**Integrações / ticketing** (#5)~~ | ✅ **feito 2026-08-10** | adapter GitHub Issues (real), `Connection` por tenant com token cifrado, POST /findings/:id/ticket, /conexoes + "Abrir ticket" no achado. Jira/Azure e MCP-client ficam como próximos adapters. | PRODUTO É3 |
-| ~~**Correlação leve de credenciais** (#4)~~ | ✅ **feito 2026-08-10** | `GET /domains/:id/people`: e-mails da superfície pública do alvo (anti-SSRF) × LeakedCredential; padrão de e-mail inferido; máscara LGPD; painel lazy no domínio. Hunter.io plugável quando houver chave. | PRODUTO É5 |
+| ~~**Correlação leve de credenciais** (#4)~~ | ✅ **feito 2026-08-10** | `GET /domains/:id/people`: e-mails da superfície pública do alvo (anti-SSRF) × LeakedCredential; padrão de e-mail inferido; Hunter.io plugável quando houver chave. **Ajuste 2026-08-12:** e-mail **sem máscara para operador interno** (admin/user), cliente segue mascarado (LGPD); vazamento sempre mascarado. Painel **carrega ao abrir o domínio** (fetch no mount), não mais lazy. | PRODUTO É5 |
 | **Vazamentos** | 🟡 represado | "buy, not build" para coleta; dados e lógica atrás de `RIFT_LEAKS_ENABLED`; correlação leve = item #5. | PRODUTO É8 |
 | ~~**Notificações in-app** (A4)~~ | ✅ **feito 2026-08-12** | sino no topbar virou dropdown com o feed de eventos (marca visto ao abrir) + `ToastProvider` que dispara toast quando surge evento novo no poll, em qualquer tela. Fecha o laço do #2b. | A/B |
 
@@ -82,11 +83,11 @@ todas no ar:
 
 A ordem é decisão fechada; não re-discutir sem motivo novo.
 
-| # | Front | Depende de |
+| # | Front | Estado |
 |---|---|---|
-| **2b** | ASM monitoramento risk-triggered | §1.1 |
-| **3** | Agente 2 autenticado + harness de sessão | — |
-| **5b** | Cloud: Azure + Entra ID a sério (postura de identidade) | — |
+| ~~**2b**~~ | ASM monitoramento risk-triggered (+ A4 notificações in-app) | ✅ no ar |
+| **3** | Agente 2 autenticado + harness de sessão | 🟡 Fase 3.1 ✅ · falta **3.2 handoff de um clique** + **3.3 progresso do Playwright** |
+| **5b** | Cloud: Azure + Entra ID a sério (postura de identidade) | 🔵 próximo grande |
 
 ---
 
@@ -156,11 +157,30 @@ sem checklist"). Não é urgente, mas é a maior incerteza do inventário.
 
 ---
 
-## 8. O que vem a seguir
+## 8. O que vem a seguir — a fila de construção (atualizada 2026-08-12)
 
-1. **Fase 6 — visões por papel** (técnico/gestor/diretor). Destravada pelo ciclo
-   de vida do achado (§1.1). É o próximo passo do roadmap de legibilidade.
-2. Depois dela, a fila do §3 na ordem do PLANO-MESTRE — começando pelo **#2b
-   (monitoramento risk-triggered)**, agora que a tela sabe dizer o que mudou.
-3. Em algum momento, a **passada de fechamento de P1** (§6) — a única incerteza
-   grande do inventário.
+Já no ar: Fases 1–6 de legibilidade, Kanban, #2b, #4, #5, **A4 (notificações
+in-app)** e a **Fase 3.1 do Agente 2 autenticado** (pentest web logado funcional
+pelo fluxo web-auth). A partir daqui, em ordem:
+
+1. **Agente 2 — Fase 3.2 (handoff de um clique).** Hoje o pentest autenticado só
+   roda como um engagement `web-auth` separado. Falta: o botão *"Passar credenciais
+   (Agente 2)"* (já emitido por `core/agent-1-blackbox.md`) promover um engagement
+   black-box **em runtime** para autenticado, semeando o `shadow_graph` do Agente 1
+   para o Agente 2 não refazer recon. Toca `backend/src/server.js` (onde o
+   `agentRole` é decidido — hoje 100% via `needsCredentials`) e `backend/src/scope.js`
+   (escrever o handoff no `engagement-state.yaml`). Contrato pronto em
+   `core/handoff-engine.md`. Opcional: persistir a "receita de login" do harness
+   (`api/harness.js` descarta hoje) para auto-preencher `WEB_AUTH_*`.
+2. **Agente 2 — Fase 3.3 (progresso na timeline).** `backend/src/agent-runner.js`
+   (`TOOL_PHASE`/`inferPhaseFromEvent`) enxergar o **Playwright** e o crawl
+   autenticado (hoje ficam cegos na barra de fase, como o `curl` já ficava).
+3. **#5b — Cloud: Azure + Entra ID a sério** (postura de identidade; §3).
+4. **Fechamento formal de P1** (§6) — hoje "vários feitos, sem checklist"; é a
+   maior incerteza do inventário.
+5. **Bloqueado por infra (§4):** Runner interno → rede-interna always-on → **AD → SAP**
+   (sequência Azure→AD→SAP; SAP é a lacuna real de mercado). Depende de uma peça de
+   infra única (runner na rede do alvo + transporte de inferência).
+
+**Descartado (não re-propor):** BYOK/traga-sua-chave (§5), coleta própria de stealer
+logs (§5), staging (§5). Ver §5 para o porquê de cada um.
