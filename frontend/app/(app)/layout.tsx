@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { DepthSwitcher } from '@/components/ui/DepthSwitcher'
 import { MonitorBadge } from '@/components/ui/MonitorBadge'
+import { ToastProvider } from '@/components/ui/Toast'
 import { Sidebar } from '@/components/ui/Sidebar'
 import { crumbsFor } from '@/lib/nav'
 import { MotionProvider } from '@/components/ui/motion'
@@ -121,6 +122,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <MotionProvider>
+      <ToastProvider>
       <div style={{ display: 'flex', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
         <Sidebar
           user={user}
@@ -135,6 +137,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </main>
         </div>
       </div>
+      </ToastProvider>
     </MotionProvider>
   )
 }
